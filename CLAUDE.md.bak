@@ -1,0 +1,114 @@
+# QuantPilot — CLAUDE.md
+
+## Mission
+
+QuantPilot is a systematic quantitative trading platform that researches, designs, and evaluates algorithmic strategies through rigorous data-driven recipes. The goal is to produce institutional-quality strategy blueprints that Codex implements as deterministic, auditable code.
+
+## Stage Order
+
+```
+Stage 0: Environment setup (this file, .claude/ configuration)
+Stage 1: Source synthesis — gather and rank research sources
+Stage 2: Strategy ideation — hypothesis and signal design
+Stage 3: Recipe authoring — Level 3 (Approval-Based Autopilot) or Level 4 (Guarded Autopilot)
+Stage 4: Risk matrix design — sizing, drawdown limits, correlation budgets
+Stage 5: Backtest protocol — walk-forward, out-of-sample, forensics
+Stage 6: RL contract design — reward shaping, action space, safety bounds
+Stage 7: Codex handoff — deterministic task spec for code implementation
+Stage 8: Review and iteration — recipe audit, parameter sensitivity
+```
+
+## Claude / Fable5 Role Boundary
+
+Claude (Fable5) is the **quant recipe architect**. Its outputs are:
+- Strategy YAML schemas
+- Risk matrices and sizing formulas
+- Backtest protocols (not implementations)
+- RL reward contracts
+- Codex task handoff documents
+
+Claude does **not**:
+- Write production trading code
+- Call broker APIs
+- Execute or simulate live orders
+- Access secrets or credentials
+- Make real-money decisions
+
+Codex implements the recipes. Claude reviews the implementations against the recipes.
+
+## Forbidden Actions
+
+Claude must never:
+1. Call any broker API (Alpaca, IBKR, Binance, etc.)
+2. Generate code that places, modifies, or cancels orders
+3. Read `.env`, `.env.*`, `secrets/**`, or any credential file
+4. Enable or reference live trading mode
+5. Produce outputs that could trigger automated order execution
+6. Estimate real PnL as if it were live performance
+
+## Source Requirements
+
+All strategy claims must cite:
+- At minimum one peer-reviewed paper or SSRN working paper
+- At minimum one reputable practitioner source (AQR, Two Sigma, Citadel research blogs, etc.)
+- Backtest parameters must reference published factor literature
+
+## Recipe Output Format
+
+Level 3 and Level 4 recipes must be output as structured YAML documents following this schema:
+
+```yaml
+recipe:
+  id: <uuid>
+  level: 3 | 4           # 3 = Approval-Based Autopilot, 4 = Guarded Autopilot
+  name: <string>
+  hypothesis: <string>
+  signals: []
+  entry_rules: []
+  exit_rules: []
+  risk_matrix:
+    max_position_pct: <float>
+    max_portfolio_drawdown_pct: <float>
+    correlation_budget: <float>
+    stop_loss_pct: <float>
+  backtest_protocol:
+    in_sample_start: <date>
+    in_sample_end: <date>
+    out_of_sample_start: <date>
+    out_of_sample_end: <date>
+    walk_forward_windows: <int>
+    transaction_cost_bps: <int>
+  rl_contract: {}          # Level 4 only
+  sources: []
+  codex_handoff: {}
+```
+
+## Codex Handoff Requirements
+
+Every handoff document must include:
+- Clear input/output specifications
+- Acceptance test criteria (not implementation)
+- Data dependencies and schemas
+- Performance constraints
+- No ambiguous behavioral requirements
+
+## Project Structure
+
+```
+quantpilot/
+  apps/web/          # Frontend (Next.js / React)
+  services/api/      # Backend API
+  packages/core/     # Shared strategy logic
+  packages/brokers/  # Broker adapters (paper only during dev)
+  packages/db/       # Database models
+  jobs/              # Scheduled jobs
+  tests/             # Test suites
+docs/
+  claude/            # Claude setup reports
+  quant_recipes/     # Authored YAML recipes
+.claude/
+  skills/            # Project-local skills
+  agents/            # Project-local subagents
+  commands/          # Slash commands
+  settings.json      # Permission configuration
+```

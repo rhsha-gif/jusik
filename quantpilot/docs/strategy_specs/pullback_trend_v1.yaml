@@ -1,0 +1,17 @@
+strategy_id: pullback_trend_v1
+version: "1.0"
+entry_rules:
+  - price above moving average
+  - oversold pullback recovers with volume
+exit_rules:
+  - close below risk moving average
+  - position is overheated
+position_sizing:
+  method: capped_target_weight
+  max_target_weight: 0.15
+risk_rules:
+  - limit orders only
+  - respect policy max position weight
+  - respect minimum cash weight
+rebalance: weekly
+status: draft

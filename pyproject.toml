@@ -1,0 +1,22 @@
+[project]
+name = "quantpilot-pre-harness"
+version = "0.1.0"
+description = "Safe fixture-only QuantPilot Operator pre-harness."
+requires-python = ">=3.11"
+dependencies = [
+  "fastapi",
+  "pydantic",
+  "pyyaml",
+  "uvicorn",
+]
+
+[project.optional-dependencies]
+test = [
+  "httpx",
+  "pytest",
+]
+
+[tool.pytest.ini_options]
+pythonpath = ["."]
+testpaths = ["quantpilot/tests"]
+addopts = "-q"

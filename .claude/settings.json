@@ -1,0 +1,53 @@
+{
+  "permissions": {
+    "allow": [
+      "Read(**)",
+      "Write(quantpilot/**)",
+      "Write(docs/**)",
+      "Write(.claude/**)",
+      "Write(CLAUDE.md)",
+      "Bash(git status)",
+      "Bash(git diff *)",
+      "Bash(git log *)",
+      "Bash(git add *)",
+      "Bash(git commit *)",
+      "Bash(python -m pytest *)",
+      "Bash(python -m ruff *)",
+      "Bash(python -m mypy *)",
+      "Bash(python -m json.tool *)",
+      "Bash(find . *)",
+      "Bash(ls *)",
+      "Bash(cat CLAUDE.md)",
+      "Bash(make lint)",
+      "Bash(make test)",
+      "Bash(make format)"
+    ],
+    "deny": [
+      "Read(.env)",
+      "Read(.env.*)",
+      "Read(secrets/**)",
+      "Read(**/*.key)",
+      "Read(**/*.pem)",
+      "Read(**/*.p12)",
+      "Read(**/*token*)",
+      "Read(**/*secret*)",
+      "Read(**/*credential*)",
+      "Read(**/*api_key*)",
+      "Read(**/*password*)",
+      "Bash(curl *)",
+      "Bash(wget *)",
+      "Bash(pip install *)",
+      "Bash(npm install *)",
+      "Bash(docker run *)",
+      "Bash(docker exec *)",
+      "Bash(python * --live *)",
+      "Bash(python * --broker *)"
+    ]
+  },
+  "env": {
+    "QUANTPILOT_LIVE_TRADING": "false",
+    "QUANTPILOT_PAPER_ONLY": "true",
+    "QUANTPILOT_BROKER_MODE": "mock",
+    "QUANTPILOT_EXECUTION_MODE": "approval_required"
+  }
+}

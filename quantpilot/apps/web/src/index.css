@@ -1,0 +1,112 @@
+@import "tailwindcss";
+@import "@fontsource-variable/inter";
+@import "@fontsource-variable/jetbrains-mono";
+
+@custom-variant dark (&:where(.dark, .dark *));
+
+:root {
+  --qp-bg: #f5f5f7;
+  --qp-surface: rgba(255, 255, 255, 0.78);
+  --qp-surface-solid: #ffffff;
+  --qp-ink: #1d1d1f;
+  --qp-muted: #6e6e73;
+  --qp-hairline: rgba(0, 0, 0, 0.1);
+  --qp-accent: #0a84ff;
+  --qp-accent-soft: rgba(10, 132, 255, 0.12);
+  --qp-safe: #168a45;
+  --qp-safe-soft: rgba(22, 138, 69, 0.12);
+  --qp-warn: #b76e00;
+  --qp-warn-soft: rgba(183, 110, 0, 0.12);
+  --qp-danger: #c62828;
+  --qp-danger-soft: rgba(198, 40, 40, 0.1);
+  --qp-shadow: 0 18px 60px rgba(0, 0, 0, 0.08);
+}
+
+.dark {
+  --qp-bg: #0b0c0f;
+  --qp-surface: rgba(28, 28, 30, 0.72);
+  --qp-surface-solid: #1c1c1e;
+  --qp-ink: #f5f5f7;
+  --qp-muted: #a1a1a6;
+  --qp-hairline: rgba(255, 255, 255, 0.12);
+  --qp-accent: #409cff;
+  --qp-accent-soft: rgba(64, 156, 255, 0.16);
+  --qp-safe: #35c759;
+  --qp-safe-soft: rgba(53, 199, 89, 0.16);
+  --qp-warn: #ffd60a;
+  --qp-warn-soft: rgba(255, 214, 10, 0.14);
+  --qp-danger: #ff453a;
+  --qp-danger-soft: rgba(255, 69, 58, 0.14);
+  --qp-shadow: 0 18px 70px rgba(0, 0, 0, 0.42);
+}
+
+@theme inline {
+  --color-bg: var(--qp-bg);
+  --color-surface: var(--qp-surface);
+  --color-surface-solid: var(--qp-surface-solid);
+  --color-ink: var(--qp-ink);
+  --color-muted: var(--qp-muted);
+  --color-hairline: var(--qp-hairline);
+  --color-accent: var(--qp-accent);
+  --color-accent-soft: var(--qp-accent-soft);
+  --color-safe: var(--qp-safe);
+  --color-safe-soft: var(--qp-safe-soft);
+  --color-warn: var(--qp-warn);
+  --color-warn-soft: var(--qp-warn-soft);
+  --color-danger: var(--qp-danger);
+  --color-danger-soft: var(--qp-danger-soft);
+
+  --font-sans: "Inter Variable", "Pretendard", "Apple SD Gothic Neo",
+    "Malgun Gothic", system-ui, sans-serif;
+  --font-mono: "JetBrains Mono Variable", ui-monospace, "Cascadia Code",
+    monospace;
+
+  --radius-card: 24px;
+  --shadow-card: var(--qp-shadow);
+}
+
+html,
+body,
+#root {
+  height: 100%;
+}
+
+body {
+  background-color: var(--qp-bg);
+  color: var(--qp-ink);
+  font-family: var(--font-sans);
+  font-variant-numeric: tabular-nums;
+  text-rendering: geometricPrecision;
+  -webkit-font-smoothing: antialiased;
+}
+
+/* Subtle background treatment per design.md §5.3 */
+body {
+  background-image: radial-gradient(
+      60rem 40rem at 80% -10%,
+      var(--qp-accent-soft),
+      transparent 60%
+    ),
+    radial-gradient(50rem 35rem at -10% 110%, var(--qp-accent-soft), transparent 55%);
+  background-attachment: fixed;
+}
+
+::selection {
+  background: var(--qp-accent-soft);
+}
+
+*:focus-visible {
+  outline: 2px solid var(--qp-accent);
+  outline-offset: 2px;
+  border-radius: 4px;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  *,
+  *::before,
+  *::after {
+    animation-duration: 0.01ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.01ms !important;
+  }
+}

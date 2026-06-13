@@ -18,6 +18,17 @@ These skills are installed in `.claude/skills/` and are available immediately.
 | `rl-contract-designer` | "rl contract", "reward function" | RL reward contract for Level 4 recipes |
 | `codex-handoff-writer` | "write codex handoff", "implementation spec" | Codex task specification from finalized recipe |
 
+## Project-Local Commands (Installed)
+
+These commands are in `.claude/commands/` and are invoked as `/command-name`.
+
+| Command | Purpose | Agents invoked |
+|---|---|---|
+| `/fable5-level34` | Design a Level 3 or 4 strategy recipe end-to-end | `quant-recipe-architect` (orchestrates all recipe skills) |
+| `/review-quant-recipe` | Audit an existing recipe for bias, risk, and source quality | `backtest-forensics-agent` → `risk-gatekeeper-agent` → `source-curator-agent` |
+| `/write-codex-handoff` | Convert an approved recipe into a Codex implementation task spec | `codex-handoff-writer` skill |
+| `/review-level-impl` | Review a completed implementation level for safety, tests, and docs | `risk-gate-auditor` → `test-auditor` → `operator-runbook-reviewer` |
+
 ---
 
 ## Recommended MCP Servers

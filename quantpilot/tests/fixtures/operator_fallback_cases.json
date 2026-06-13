@@ -1,0 +1,135 @@
+[
+  {
+    "case_id": "level5_flag_disabled",
+    "from_level": 5,
+    "to_level": 0,
+    "reason_code": "level5_flag_disabled",
+    "order_submission_enabled": false
+  },
+  {
+    "case_id": "policy_version_mismatch",
+    "from_level": 5,
+    "to_level": 0,
+    "reason_code": "policy_review_required",
+    "order_submission_enabled": false
+  },
+  {
+    "case_id": "no_l5_strategy",
+    "from_level": 5,
+    "to_level": 4,
+    "reason_code": "no_level5_strategy_eligible",
+    "order_submission_enabled": false
+  },
+  {
+    "case_id": "kill_switch",
+    "from_level": 5,
+    "to_level": 0,
+    "reason_code": "kill_switch_engaged",
+    "order_submission_enabled": false
+  },
+  {
+    "case_id": "operator_env_kill_switch",
+    "from_level": 5,
+    "to_level": 0,
+    "reason_code": "operator_kill_switch_engaged",
+    "order_submission_enabled": false
+  },
+  {
+    "case_id": "live_trading_flag_engaged",
+    "from_level": 5,
+    "to_level": 0,
+    "reason_code": "live_trading_flag_engaged",
+    "order_submission_enabled": false
+  },
+  {
+    "case_id": "policy_not_found",
+    "from_level": 5,
+    "to_level": 0,
+    "reason_code": "policy_not_found",
+    "order_submission_enabled": false
+  },
+  {
+    "case_id": "policy_not_promoted",
+    "from_level": 5,
+    "to_level": 4,
+    "reason_code": "policy_not_promoted",
+    "order_submission_enabled": false
+  },
+  {
+    "case_id": "no_strategy_at_any_level",
+    "from_level": 5,
+    "to_level": 2,
+    "reason_code": "no_approved_strategy_available",
+    "order_submission_enabled": false
+  },
+  {
+    "case_id": "monthly_loss_stop",
+    "from_level": 5,
+    "to_level": 0,
+    "reason_code": "monthly_loss_stop_engaged",
+    "order_submission_enabled": false
+  },
+  {
+    "case_id": "monthly_loss_pause",
+    "from_level": 5,
+    "to_level": 3,
+    "reason_code": "monthly_loss_pause_engaged",
+    "order_submission_enabled": false
+  },
+  {
+    "case_id": "stale_market_data",
+    "from_level": 5,
+    "to_level": 3,
+    "reason_code": "stale_market_data",
+    "order_submission_enabled": false
+  },
+  {
+    "case_id": "broker_unhealthy",
+    "from_level": 5,
+    "to_level": 3,
+    "reason_code": "broker_unhealthy",
+    "order_submission_enabled": false
+  },
+  {
+    "case_id": "broker_failure",
+    "from_level": 5,
+    "to_level": 3,
+    "reason_code": "broker_failure",
+    "order_submission_enabled": false
+  },
+  {
+    "case_id": "market_orders_disabled",
+    "from_level": 5,
+    "to_level": 3,
+    "reason_code": "market_orders_disabled",
+    "order_submission_enabled": false
+  },
+  {
+    "case_id": "broker_mode_unsafe",
+    "from_level": 5,
+    "to_level": 0,
+    "reason_code": "broker_mode_unsafe",
+    "order_submission_enabled": false
+  },
+  {
+    "case_id": "run_mode_broker_mismatch",
+    "from_level": 5,
+    "to_level": 0,
+    "reason_code": "run_mode_broker_mismatch",
+    "order_submission_enabled": false
+  },
+  {
+    "case_id": "risk_check_failed",
+    "from_level": 5,
+    "to_level": 2,
+    "reason_code": "risk_check_failed",
+    "order_submission_enabled": false
+  },
+  {
+    "case_id": "llm_unavailable",
+    "from_level": 5,
+    "to_level": 2,
+    "reason_code": "llm_unavailable",
+    "order_submission_enabled": false
+  }
+]

@@ -160,7 +160,13 @@ def _legacy_fixture_bars(bars: list[dict[str, Any]]) -> bool:
     return bool(bars) and "ma20" in bars[0] and "rsi" in bars[0]
 
 
-def generate_signals(recipe: StrategyRecipe, bars: list[dict[str, Any]], *, policy: UserPolicy | None = None) -> list[Signal]:
+def generate_signals(
+    recipe: StrategyRecipe,
+    bars: list[dict[str, Any]],
+    *,
+    policy: UserPolicy | None = None,
+    securities: list[dict[str, Any]] | None = None,
+) -> list[Signal]:
     signals: list[Signal] = []
     signal_date = load_signal_date()
     if _legacy_fixture_bars(bars):
@@ -170,7 +176,7 @@ def generate_signals(recipe: StrategyRecipe, bars: list[dict[str, Any]], *, poli
 
     if policy is None:
         policy = UserPolicy()
-    candidates = {candidate.ticker: candidate for candidate in build_candidate_universe(policy)}
+    candidates = {candidate.ticker: candidate for candidate in build_candidate_universe(policy, securities)}
     for ticker, candidate in candidates.items():
         indicator = calculate_technical_indicators(bars, ticker=ticker, signal_date=signal_date)
         current_weight = 0.0

@@ -1,0 +1,16 @@
+{
+  "policy_id": "pol_level5_fixture",
+  "user_id": "fixture-user",
+  "version": 5,
+  "market": "KR_STOCK",
+  "risk_profile": "moderate",
+  "authority_level": 4,
+  "execution_mode": "guarded_autopilot",
+  "broker": "mock",
+  "guarded_autopilot_enabled": false,
+  "kill_switch_engaged": false,
+  "allowed_order_types": ["limit"],
+  "max_daily_orders": 3,
+  "max_daily_turnover": 3000000,
+  "stale_quote_max_age_seconds": 30
+}

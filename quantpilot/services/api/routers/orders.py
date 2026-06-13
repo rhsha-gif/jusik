@@ -16,6 +16,15 @@ class OrderPlanRequest(BaseModel):
     portfolio_plan_id: str | None = None
 
 
+class RejectOrderRequest(BaseModel):
+    reason: str = "user_rejected"
+
+
+class ModifyOrderRequest(BaseModel):
+    quantity: float
+    limit_price: float | None = None
+
+
 @router.post("/orders/plan")
 def create_order_plans(
     request: OrderPlanRequest,
@@ -27,6 +36,19 @@ def create_order_plans(
         next_step="POST /api/portfolio/plan",
     ).plan_id
     return service.create_order_plans(portfolio_plan_id=portfolio_plan_id)
+
+
+@router.post("/orders/generate-proposals")
+def generate_order_proposals(
+    request: OrderPlanRequest,
+    service: HarnessService = Depends(get_harness_service),
+) -> list[OrderPlan]:
+    portfolio_plan_id = request.portfolio_plan_id or require_latest(
+        service.repositories.portfolio_plans.list(),
+        resource="portfolio plan",
+        next_step="POST /api/portfolio/plan",
+    ).plan_id
+    return service.generate_order_proposals(portfolio_plan_id=portfolio_plan_id)
 
 
 @router.get("/orders/proposed")
@@ -42,6 +64,30 @@ def approve_order(
     try:
         return service.approve_order_plan(order_plan_id)
     except InvalidOrderTransition as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+
+
+@router.post("/orders/{order_plan_id}/reject")
+def reject_order(
+    order_plan_id: str,
+    request: RejectOrderRequest,
+    service: HarnessService = Depends(get_harness_service),
+) -> OrderPlan:
+    try:
+        return service.reject_order_plan(order_plan_id, reason=request.reason)
+    except InvalidOrderTransition as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+
+
+@router.post("/orders/{order_plan_id}/modify")
+def modify_order(
+    order_plan_id: str,
+    request: ModifyOrderRequest,
+    service: HarnessService = Depends(get_harness_service),
+) -> OrderPlan:
+    try:
+        return service.modify_order_plan(order_plan_id, quantity=request.quantity, limit_price=request.limit_price)
+    except (InvalidOrderTransition, RiskCheckRequired, RuntimeError) as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc
 
 

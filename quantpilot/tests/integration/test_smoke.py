@@ -1,7 +1,11 @@
 from __future__ import annotations
 
+import json
+from pathlib import Path
+
 from fastapi.testclient import TestClient
 
+from quantpilot.jobs import run_smoke
 from quantpilot.packages.core.harness_service import HarnessService
 from quantpilot.services.api.dependencies import get_harness_service
 from quantpilot.services.api.main import app
@@ -35,6 +39,19 @@ def test_api_smoke_route_passes() -> None:
     assert body["live_trading_enabled"] is False
     assert body["broker"] == "mock"
     assert all(order["status"] == "filled" for order in body["orders"])
+
+
+def test_smoke_job_uses_local_historical_env(monkeypatch, capsys) -> None:
+    data_dir = Path(__file__).resolve().parents[1] / "fixtures" / "local_data"
+    monkeypatch.setenv("DATA_MODE", "local_historical")
+    monkeypatch.setenv("LOCAL_DATA_DIR", str(data_dir))
+
+    exit_code = run_smoke.main()
+
+    output = json.loads(capsys.readouterr().out)
+    assert exit_code == 0
+    assert output["signals"] == 2
+    assert output["live_trading_enabled"] is False
 
 
 def test_portfolio_plan_api_guides_user_when_policy_is_missing() -> None:

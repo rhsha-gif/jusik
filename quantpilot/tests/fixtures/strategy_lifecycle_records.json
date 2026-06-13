@@ -1,0 +1,60 @@
+[
+  {
+    "strategy_id": "pullback_trend_v2",
+    "version": "2.0",
+    "spec_hash": "sha256:fixture-pullback-trend-v2-draft-snapshot",
+    "status": "draft",
+    "evidence": [],
+    "history": []
+  },
+  {
+    "strategy_id": "pullback_trend_v1",
+    "version": "1.0.0",
+    "spec_hash": "sha256:fixture-pullback-trend-v1-validated-snapshot",
+    "status": "paper_validated",
+    "evidence": [
+      {
+        "evidence_id": "evid_fixture_pullback_v1_backtest",
+        "kind": "backtest_result",
+        "reference": "docs/stage_03_backtest_validation_report.md",
+        "summary": "Deterministic fixture backtest cleared the validation protocol.",
+        "metrics": {"excess_return": 0.04, "max_drawdown": -0.08, "sharpe": 1.1},
+        "recorded_by": "human-reviewer"
+      },
+      {
+        "evidence_id": "evid_fixture_pullback_v1_paper",
+        "kind": "paper_track_record",
+        "reference": "docs/stage_03_backtest_validation_report.md",
+        "summary": "Paper/approval-mode track record reviewed with no risk-gate violations.",
+        "metrics": {"paper_sessions": 20.0, "risk_gate_violations": 0.0},
+        "recorded_by": "human-reviewer"
+      }
+    ],
+    "history": []
+  },
+  {
+    "strategy_id": "level5_candidate_fixture",
+    "version": "0.1.0",
+    "spec_hash": "sha256:fixture-level5-candidate-validated-snapshot",
+    "status": "paper_validated",
+    "evidence": [
+      {
+        "evidence_id": "evid_fixture_level5_candidate_backtest",
+        "kind": "backtest_result",
+        "reference": "docs/stage_03_backtest_validation_report.md",
+        "summary": "Fixture Level 5 candidate has deterministic backtest evidence for registry-selection tests.",
+        "metrics": {"excess_return": 0.03, "max_drawdown": -0.07, "sharpe": 1.0},
+        "recorded_by": "human-reviewer"
+      },
+      {
+        "evidence_id": "evid_fixture_level5_candidate_paper",
+        "kind": "paper_track_record",
+        "reference": "docs/level_5_operator_completion_report.md",
+        "summary": "Fixture paper validation evidence used only for fail-closed selection tests.",
+        "metrics": {"paper_sessions": 10.0, "risk_gate_violations": 0.0},
+        "recorded_by": "human-reviewer"
+      }
+    ],
+    "history": []
+  }
+]

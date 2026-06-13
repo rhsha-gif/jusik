@@ -38,6 +38,7 @@ class OrderStatus(str, Enum):
     draft = "draft"
     risk_checked = "risk_checked"
     proposed = "proposed"
+    modified = "modified"
     user_approved = "user_approved"
     submitted = "submitted"
     accepted = "accepted"
@@ -46,12 +47,22 @@ class OrderStatus(str, Enum):
     cancelled = "cancelled"
     rejected = "rejected"
     expired = "expired"
+    failed = "failed"
 
 
 class BrokerMode(str, Enum):
     mock = "mock"
     paper = "paper"
     live_disabled = "live_disabled"
+
+
+class DataMode(str, Enum):
+    fixture = "fixture"
+    local_historical = "local_historical"
+    external_historical = "external_historical"
+    realtime_market_data = "realtime_market_data"
+    paper_trading = "paper_trading"
+    live_trading = "live_trading"
 
 
 class OrderType(str, Enum):
@@ -81,6 +92,17 @@ class UserPolicy(HarnessModel):
     min_cash_weight: float = Field(default=0.20, ge=0, lt=1)
     daily_loss_limit: float = -0.03
     monthly_loss_limit: float = -0.05
+    max_daily_orders: int = Field(default=3, gt=0)
+    max_daily_turnover: float = Field(default=3_000_000, gt=0)
+    monthly_loss_pause_new_buys: float = -0.05
+    monthly_loss_stop_all_autotrading: float = -0.10
+    stale_quote_max_age_seconds: int = Field(default=30, gt=0)
+    human_review_quote_max_age_seconds: int = Field(default=120, gt=0)
+    order_expiry_minutes: int = Field(default=30, gt=0)
+    authority_level: int = Field(default=2, ge=1, le=5)
+    kill_switch_engaged: bool = False
+    guarded_autopilot_enabled: bool = False
+    fully_automated_operator_enabled: bool = False
     single_order_cash_limit: float = Field(default=1_000_000, gt=0)
     rebalance_frequency: str = "weekly"
     execution_mode: ExecutionMode = ExecutionMode.approval_required
@@ -92,7 +114,7 @@ class UserPolicy(HarnessModel):
     min_avg_daily_value: float = Field(default=5_000_000, ge=0)
     created_at: datetime = Field(default_factory=utc_now)
 
-    @field_validator("daily_loss_limit", "monthly_loss_limit")
+    @field_validator("daily_loss_limit", "monthly_loss_limit", "monthly_loss_pause_new_buys", "monthly_loss_stop_all_autotrading")
     @classmethod
     def loss_limits_must_be_negative(cls, value: float) -> float:
         if not -1 < value < 0:
@@ -117,6 +139,12 @@ class UserPolicy(HarnessModel):
             raise ValueError("max_sector_weight cannot be below max_position_weight")
         if self.monthly_loss_limit > self.daily_loss_limit:
             raise ValueError("monthly_loss_limit must be at least as conservative as daily_loss_limit")
+        if self.monthly_loss_pause_new_buys > self.daily_loss_limit:
+            raise ValueError("monthly_loss_pause_new_buys must be at least as conservative as daily_loss_limit")
+        if self.monthly_loss_stop_all_autotrading > self.monthly_loss_pause_new_buys:
+            raise ValueError("monthly_loss_stop_all_autotrading must be at least as conservative as monthly_loss_pause_new_buys")
+        if self.human_review_quote_max_age_seconds < self.stale_quote_max_age_seconds:
+            raise ValueError("human_review_quote_max_age_seconds cannot be below stale_quote_max_age_seconds")
         if not self.allowed_order_types:
             raise ValueError("at least one order type must be allowed")
         return self
@@ -125,12 +153,57 @@ class UserPolicy(HarnessModel):
 class StrategyRecipe(HarnessModel):
     strategy_id: str
     version: str
+    description: str | None = None
+    market: str = "KR_STOCK"
+    timeframe: str = "daily"
+    universe_filter: dict[str, Any] = Field(default_factory=dict)
+    features: list[dict[str, Any]] = Field(default_factory=list)
     entry_rules: list[str]
     exit_rules: list[str]
+    no_chasing_rules: dict[str, Any] = Field(default_factory=dict)
     position_sizing: dict[str, Any]
     risk_rules: list[str]
     rebalance: str
+    execution_permissions: dict[str, Any] = Field(default_factory=dict)
+    validation: dict[str, Any] = Field(default_factory=dict)
+    promotion_status: Literal["draft", "approved", "validated_l3", "validated_l4", "revoked"] = "draft"
+    allowed_execution_levels: list[str] = Field(default_factory=list)
+    audit_metadata: dict[str, Any] = Field(default_factory=dict)
     status: StrategyStatus = StrategyStatus.draft
+
+    @field_validator("allowed_execution_levels", mode="before")
+    @classmethod
+    def normalize_execution_levels(cls, value: Any) -> list[str]:
+        if value is None:
+            return []
+        normalized: list[str] = []
+        for item in value:
+            raw = str(item).strip().lower()
+            if raw in {"3", "level3", "level_3", "approval_required"}:
+                normalized.append("level_3")
+            elif raw in {"4", "level4", "level_4", "guarded_autopilot"}:
+                normalized.append("guarded_autopilot" if raw == "guarded_autopilot" else "level_4")
+            else:
+                normalized.append(raw)
+        return normalized
+
+    @model_validator(mode="after")
+    def validate_strategy_permissions(self) -> "StrategyRecipe":
+        method = str(self.position_sizing.get("method", "")).strip()
+        if method not in {"capped_target_weight", "capped_score_weight", "inverse_volatility"}:
+            raise ValueError("position_sizing.method is not implemented")
+
+        earned_levels = {
+            "draft": set(),
+            "revoked": set(),
+            "validated_l3": {"level_3"},
+            "approved": {"level_3", "level_4", "guarded_autopilot"},
+            "validated_l4": {"level_3", "level_4", "guarded_autopilot"},
+        }[self.promotion_status]
+        requested_levels = set(self.allowed_execution_levels)
+        if not requested_levels.issubset(earned_levels):
+            raise ValueError("allowed_execution_levels exceeds promotion_status")
+        return self
 
 
 class Signal(HarnessModel):
@@ -297,6 +370,64 @@ class RiskCheck(HarnessModel):
     expires_at: datetime = Field(default_factory=lambda: utc_now() + timedelta(minutes=10))
 
 
+class ProposalExplanation(HarnessModel):
+    symbol: str
+    action: Literal["buy", "sell"]
+    quantity: float
+    target_weight_delta: float
+    reference_price: float
+    estimated_cash_impact: float
+    strategy_id: str
+    strategy_version: str
+    signal_reason: str
+    reason_codes: list[str] = Field(default_factory=list)
+    current_weight: float
+    target_weight: float
+    weight_delta: float
+    quote_price: float
+    quote_age_seconds: float
+    limit_price: float | None = None
+    estimated_notional: float
+    estimated_cost_bps: float = 0.0
+    stop_price_hint: float | None = None
+    take_profit_hint: float | None = None
+    risk_checks_passed: list[str] = Field(default_factory=list)
+    risk_checks_failed: list[str] = Field(default_factory=list)
+    risk_check_id: str | None = None
+    risk_check_expires_at: datetime | None = None
+    idempotency_key: str
+    policy_version: int
+    warnings: list[str] = Field(default_factory=list)
+
+
+class AuthorityCheckStep(HarnessModel):
+    check_name: str
+    passed: bool
+    detail: str
+
+
+class AuthorityCheckResult(HarnessModel):
+    authorized: bool
+    policy_version: int
+    steps: list[AuthorityCheckStep]
+    first_failed_check: str | None = None
+
+
+class GuardrailState(HarnessModel):
+    daily_order_count: int = 0
+    daily_turnover_used: float = 0.0
+    monthly_loss_pause_active: bool = False
+    monthly_loss_stop_active: bool = False
+    kill_switch_engaged: bool = False
+    broker_healthy: bool = True
+    last_broker_heartbeat: datetime | None = Field(default_factory=utc_now)
+    last_broker_error_at: datetime | None = None
+    autopilot_paused: bool = False
+    last_blocked_reason: str | None = None
+    unfilled_order_keys: list[str] = Field(default_factory=list)
+    submitted_idempotency_keys: list[str] = Field(default_factory=list)
+
+
 class OrderPlan(HarnessModel):
     order_plan_id: str = Field(default_factory=lambda: new_id("oplan"))
     policy_id: str
@@ -305,6 +436,13 @@ class OrderPlan(HarnessModel):
     status: OrderStatus = OrderStatus.draft
     idempotency_key: str
     risk_check_id: str | None = None
+    risk_check_expires_at: datetime | None = None
+    explanation: ProposalExplanation | None = None
+    auto_order_reference_price: float | None = None
+    replaces_order_plan_id: str | None = None
+    blocked_reason: str | None = None
+    approved_by: str | None = None
+    expires_at: datetime | None = None
     created_at: datetime = Field(default_factory=utc_now)
     updated_at: datetime = Field(default_factory=utc_now)
 

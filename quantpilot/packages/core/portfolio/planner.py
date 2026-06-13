@@ -1,5 +1,8 @@
 from __future__ import annotations
 
+from datetime import date
+from hashlib import sha256
+
 from quantpilot.packages.core.schemas import (
     OrderIntent,
     OrderType,
@@ -30,6 +33,26 @@ def fixture_portfolio_snapshot(*, monthly_loss_ratio: float = 0.0) -> PortfolioS
 def _current_weight(snapshot: PortfolioSnapshot, symbol: str) -> float:
     position_value = sum(position.market_value for position in snapshot.positions if position.symbol == symbol)
     return position_value / snapshot.equity
+
+
+def current_weight(snapshot: PortfolioSnapshot, symbol: str) -> float:
+    return _current_weight(snapshot, symbol)
+
+
+def proposal_idempotency_key(
+    *,
+    policy: UserPolicy,
+    strategy_id: str,
+    strategy_version: str,
+    symbol: str,
+    side: str,
+    trading_date: str | date,
+) -> str:
+    raw = (
+        f"{policy.policy_id}:{policy.version}:{strategy_id}:{strategy_version}:"
+        f"{symbol}:{side}:{trading_date}"
+    )
+    return sha256(raw.encode("utf-8")).hexdigest()[:32]
 
 
 def _quote_for_symbol(snapshot: PortfolioSnapshot, symbol: str, quotes: dict[str, float] | None) -> float:

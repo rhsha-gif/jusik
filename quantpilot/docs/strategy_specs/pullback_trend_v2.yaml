@@ -1,0 +1,55 @@
+strategy_id: pullback_trend_v2
+version: "2.0"
+description: Buy liquid KRX uptrends on oversold pullbacks confirmed by volume; exit on trend break or overheat.
+market: KR_STOCK
+timeframe: daily
+universe_filter:
+  min_avg_daily_value: 5000000
+  exclude_blocklist: true
+  max_universe_size: 50
+features:
+  - name: trend_filter
+    formula: close > sma(close, 120)
+    lookback_days: 120
+    source_citation: "Moskowitz, Ooi & Pedersen (2012) JFE 104(2) [PENDING VERIFICATION]"
+  - name: pullback_rsi
+    formula: rsi(close, 14)
+    lookback_days: 14
+    source_citation: "general pullback design pattern - needs source validation"
+  - name: volume_confirm
+    formula: volume / sma(volume, 20)
+    lookback_days: 20
+    source_citation: "general volume confirmation pattern - needs source validation"
+entry_rules:
+  - trend_filter is true
+  - pullback_rsi recovers from oversold zone
+  - volume_confirm is above 1.05
+exit_rules:
+  - close below risk moving average
+  - position is overheated
+no_chasing_rules:
+  max_premium_over_reference: 0.005
+  max_reproposals_per_day: 1
+position_sizing:
+  method: capped_score_weight
+  max_target_weight: 0.15
+  min_rebalance_band: 0.01
+risk_rules:
+  - limit orders only
+  - respect policy max position weight
+  - respect minimum cash weight
+  - requires source and data validation before promotion
+rebalance: weekly
+execution_permissions:
+  allowed_order_types:
+    - limit
+  market_orders: disabled
+validation: {}
+promotion_status: draft
+allowed_execution_levels: []
+audit_metadata:
+  authored_by: fable5_recipe
+  authored_at: "2026-06-12"
+  reviewed_by: codex_level_3_4
+  sources: []
+status: draft

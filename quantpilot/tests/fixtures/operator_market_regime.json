@@ -1,0 +1,9 @@
+{
+  "regime_id": "regime_level5_fixture",
+  "market": "KR_STOCK",
+  "as_of": "2026-06-12T00:00:00Z",
+  "risk_state": "normal",
+  "volatility_bucket": "medium",
+  "liquidity_state": "normal",
+  "trading_session_state": "continuous"
+}

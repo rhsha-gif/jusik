@@ -1,0 +1,17 @@
+{
+  "snapshot_id": "snap_level5_fixture",
+  "user_id": "fixture-user",
+  "cash": 4000000,
+  "equity": 10000000,
+  "positions": [
+    {
+      "symbol": "AAA",
+      "quantity": 10,
+      "market_price": 100000,
+      "sector": "technology"
+    }
+  ],
+  "daily_loss_ratio": 0.0,
+  "monthly_loss_ratio": 0.0,
+  "source": "level5_fixture"
+}

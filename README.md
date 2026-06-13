@@ -6,9 +6,12 @@ Fixture-only operating harness for QuantPilot Operator. Live broker trading is n
 
 ```text
 LIVE_TRADING_ENABLED=false
+GUARDED_AUTOPILOT_ENABLED=false
+FULLY_AUTOMATED_OPERATOR_ENABLED=false
 BROKER_MODE=mock
 DEFAULT_ORDER_TYPE=limit
 MARKET_ORDERS_ENABLED=false
+DATA_MODE=fixture
 ```
 
 ## Commands
@@ -19,6 +22,13 @@ MARKET_ORDERS_ENABLED=false
 python -m pytest quantpilot/tests
 python -m quantpilot.jobs.run_smoke
 python -m uvicorn quantpilot.services.api.main:app --reload
+```
+
+When pytest temporary-directory permissions fail on Windows, use the same
+workspace-local temp directory used by the hardening checks:
+
+```powershell
+python -m pytest quantpilot/tests -p no:cacheprovider --basetemp=.pytest_tmp
 ```
 
 Compatible systems can also use:

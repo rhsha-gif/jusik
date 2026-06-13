@@ -1,0 +1,3 @@
+symbol,name,market,sector,themes,avg_daily_value,data_ready
+AAA,Alpha AI Semiconductors,US_STOCK,technology,ai|semiconductor,10500000,true
+BBB,Beta Cloud Platforms,US_STOCK,technology,ai|software,9180000,true

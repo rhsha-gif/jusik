@@ -1,0 +1,2743 @@
+{
+  "openapi": "3.1.0",
+  "info": {
+    "title": "QuantPilot Operator Pre-Harness",
+    "version": "0.1.0"
+  },
+  "paths": {
+    "/api/health": {
+      "get": {
+        "summary": "Health",
+        "operationId": "health_api_health_get",
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HealthResponse"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/harness/run-smoke": {
+      "post": {
+        "summary": "Run Smoke",
+        "operationId": "run_smoke_api_harness_run_smoke_post",
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "additionalProperties": true,
+                  "type": "object",
+                  "title": "Response Run Smoke Api Harness Run Smoke Post"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/policies/preview": {
+      "post": {
+        "summary": "Preview Policy",
+        "operationId": "preview_policy_api_policies_preview_post",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ParsePolicyRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "additionalProperties": true,
+                  "type": "object",
+                  "title": "Response Preview Policy Api Policies Preview Post"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/policies/parse": {
+      "post": {
+        "summary": "Parse Policy",
+        "operationId": "parse_policy_api_policies_parse_post",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ParsePolicyRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/UserPolicy"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/policies/confirm": {
+      "post": {
+        "summary": "Confirm Policy",
+        "operationId": "confirm_policy_api_policies_confirm_post",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ConfirmPolicyRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/UserPolicy"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/level-1-2/run": {
+      "post": {
+        "summary": "Run Level 1 2",
+        "operationId": "run_level_1_2_api_level_1_2_run_post",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/Level12Request"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "additionalProperties": true,
+                  "type": "object",
+                  "title": "Response Run Level 1 2 Api Level 1 2 Run Post"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/research/universe": {
+      "post": {
+        "summary": "Research Universe",
+        "operationId": "research_universe_api_research_universe_post",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/Level12Request"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "additionalProperties": true,
+                  "type": "object",
+                  "title": "Response Research Universe Api Research Universe Post"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/research/analyst": {
+      "post": {
+        "summary": "Analyst Reports",
+        "operationId": "analyst_reports_api_research_analyst_post",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/Level12Request"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "additionalProperties": true,
+                  "type": "object",
+                  "title": "Response Analyst Reports Api Research Analyst Post"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/signals/board": {
+      "post": {
+        "summary": "Signal Board",
+        "operationId": "signal_board_api_signals_board_post",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/Level12Request"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "additionalProperties": true,
+                  "type": "object",
+                  "title": "Response Signal Board Api Signals Board Post"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/portfolio/rebalance-suggestions": {
+      "post": {
+        "summary": "Rebalance Suggestions",
+        "operationId": "rebalance_suggestions_api_portfolio_rebalance_suggestions_post",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/Level12Request"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "additionalProperties": true,
+                  "type": "object",
+                  "title": "Response Rebalance Suggestions Api Portfolio Rebalance Suggestions Post"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/reports/research-signal-daily": {
+      "post": {
+        "summary": "Research Signal Daily Report",
+        "operationId": "research_signal_daily_report_api_reports_research_signal_daily_post",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/Level12Request"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "additionalProperties": true,
+                  "type": "object",
+                  "title": "Response Research Signal Daily Report Api Reports Research Signal Daily Post"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/signals/run": {
+      "post": {
+        "summary": "Run Signals",
+        "operationId": "run_signals_api_signals_run_post",
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "items": {
+                    "$ref": "#/components/schemas/Signal"
+                  },
+                  "type": "array",
+                  "title": "Response Run Signals Api Signals Run Post"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/portfolio/plan": {
+      "post": {
+        "summary": "Create Portfolio Plan",
+        "operationId": "create_portfolio_plan_api_portfolio_plan_post",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/PortfolioPlanRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/PortfolioPlan"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/orders/plan": {
+      "post": {
+        "summary": "Create Order Plans",
+        "operationId": "create_order_plans_api_orders_plan_post",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/OrderPlanRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "items": {
+                    "$ref": "#/components/schemas/OrderPlan"
+                  },
+                  "type": "array",
+                  "title": "Response Create Order Plans Api Orders Plan Post"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/orders/generate-proposals": {
+      "post": {
+        "summary": "Generate Order Proposals",
+        "operationId": "generate_order_proposals_api_orders_generate_proposals_post",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/OrderPlanRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "items": {
+                    "$ref": "#/components/schemas/OrderPlan"
+                  },
+                  "type": "array",
+                  "title": "Response Generate Order Proposals Api Orders Generate Proposals Post"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/orders/proposed": {
+      "get": {
+        "summary": "Proposed Orders",
+        "operationId": "proposed_orders_api_orders_proposed_get",
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "items": {
+                    "$ref": "#/components/schemas/OrderPlan"
+                  },
+                  "type": "array",
+                  "title": "Response Proposed Orders Api Orders Proposed Get"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/orders/{order_plan_id}/approve": {
+      "post": {
+        "summary": "Approve Order",
+        "operationId": "approve_order_api_orders__order_plan_id__approve_post",
+        "parameters": [
+          {
+            "name": "order_plan_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Order Plan Id"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/OrderPlan"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/orders/{order_plan_id}/reject": {
+      "post": {
+        "summary": "Reject Order",
+        "operationId": "reject_order_api_orders__order_plan_id__reject_post",
+        "parameters": [
+          {
+            "name": "order_plan_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Order Plan Id"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/RejectOrderRequest"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/OrderPlan"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/orders/{order_plan_id}/modify": {
+      "post": {
+        "summary": "Modify Order",
+        "operationId": "modify_order_api_orders__order_plan_id__modify_post",
+        "parameters": [
+          {
+            "name": "order_plan_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Order Plan Id"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ModifyOrderRequest"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/OrderPlan"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/orders/{order_plan_id}/submit": {
+      "post": {
+        "summary": "Submit Order",
+        "operationId": "submit_order_api_orders__order_plan_id__submit_post",
+        "parameters": [
+          {
+            "name": "order_plan_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Order Plan Id"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "additionalProperties": true,
+                  "title": "Response Submit Order Api Orders  Order Plan Id  Submit Post"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/orders/{order_plan_id}/status": {
+      "get": {
+        "summary": "Order Status",
+        "operationId": "order_status_api_orders__order_plan_id__status_get",
+        "parameters": [
+          {
+            "name": "order_plan_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Order Plan Id"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "additionalProperties": {
+                    "type": "string"
+                  },
+                  "title": "Response Order Status Api Orders  Order Plan Id  Status Get"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/autopilot/guarded/run-once": {
+      "post": {
+        "summary": "Guarded Run Once",
+        "operationId": "guarded_run_once_api_autopilot_guarded_run_once_post",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/AutopilotPolicyRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "additionalProperties": true,
+                  "type": "object",
+                  "title": "Response Guarded Run Once Api Autopilot Guarded Run Once Post"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/autopilot/guarded/pause": {
+      "post": {
+        "summary": "Pause Guarded",
+        "operationId": "pause_guarded_api_autopilot_guarded_pause_post",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/AutopilotPolicyRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "additionalProperties": true,
+                  "type": "object",
+                  "title": "Response Pause Guarded Api Autopilot Guarded Pause Post"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/autopilot/guarded/resume": {
+      "post": {
+        "summary": "Resume Guarded",
+        "operationId": "resume_guarded_api_autopilot_guarded_resume_post",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/AutopilotPolicyRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "additionalProperties": true,
+                  "type": "object",
+                  "title": "Response Resume Guarded Api Autopilot Guarded Resume Post"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/autopilot/kill-switch": {
+      "post": {
+        "summary": "Kill Switch",
+        "operationId": "kill_switch_api_autopilot_kill_switch_post",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/KillSwitchRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "additionalProperties": true,
+                  "type": "object",
+                  "title": "Response Kill Switch Api Autopilot Kill Switch Post"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/autopilot/kill-switch/release": {
+      "post": {
+        "summary": "Release Kill Switch",
+        "operationId": "release_kill_switch_api_autopilot_kill_switch_release_post",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ReleaseKillSwitchRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "additionalProperties": true,
+                  "type": "object",
+                  "title": "Response Release Kill Switch Api Autopilot Kill Switch Release Post"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/autopilot/status": {
+      "get": {
+        "summary": "Autopilot Status",
+        "operationId": "autopilot_status_api_autopilot_status_get",
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "additionalProperties": true,
+                  "type": "object",
+                  "title": "Response Autopilot Status Api Autopilot Status Get"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/operator/run-once": {
+      "post": {
+        "summary": "Operator Run Once",
+        "operationId": "operator_run_once_api_operator_run_once_post",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/OperatorRunRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/OperatorRunResult"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/operator/status": {
+      "get": {
+        "summary": "Operator Status",
+        "operationId": "operator_status_api_operator_status_get",
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "additionalProperties": true,
+                  "type": "object",
+                  "title": "Response Operator Status Api Operator Status Get"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/operator/reports/latest": {
+      "get": {
+        "summary": "Latest Operator Report",
+        "operationId": "latest_operator_report_api_operator_reports_latest_get",
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "additionalProperties": true,
+                  "type": "object",
+                  "title": "Response Latest Operator Report Api Operator Reports Latest Get"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/reports/daily": {
+      "post": {
+        "summary": "Daily Report",
+        "operationId": "daily_report_api_reports_daily_post",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/DailyReportRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/OperationReport"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    }
+  },
+  "components": {
+    "schemas": {
+      "AutopilotPolicyRequest": {
+        "properties": {
+          "policy_id": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Policy Id"
+          }
+        },
+        "type": "object",
+        "title": "AutopilotPolicyRequest"
+      },
+      "BrokerMode": {
+        "type": "string",
+        "enum": [
+          "mock",
+          "paper",
+          "live_disabled"
+        ],
+        "title": "BrokerMode"
+      },
+      "ConfirmPolicyRequest": {
+        "properties": {
+          "policy_id": {
+            "type": "string",
+            "title": "Policy Id"
+          }
+        },
+        "type": "object",
+        "required": [
+          "policy_id"
+        ],
+        "title": "ConfirmPolicyRequest"
+      },
+      "DailyReportRequest": {
+        "properties": {
+          "policy_id": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Policy Id"
+          }
+        },
+        "type": "object",
+        "title": "DailyReportRequest"
+      },
+      "ExecutionMode": {
+        "type": "string",
+        "enum": [
+          "backtest_only",
+          "paper_trading",
+          "approval_required",
+          "guarded_autopilot",
+          "fully_automated"
+        ],
+        "title": "ExecutionMode"
+      },
+      "FallbackDecision": {
+        "properties": {
+          "from_level": {
+            "type": "integer",
+            "const": 5,
+            "title": "From Level"
+          },
+          "to_level": {
+            "type": "integer",
+            "enum": [
+              4,
+              3,
+              2,
+              0
+            ],
+            "title": "To Level"
+          },
+          "reason_code": {
+            "type": "string",
+            "title": "Reason Code"
+          },
+          "detail": {
+            "type": "string",
+            "title": "Detail"
+          },
+          "order_submission_enabled": {
+            "type": "boolean",
+            "title": "Order Submission Enabled",
+            "default": false
+          }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "required": [
+          "from_level",
+          "to_level",
+          "reason_code",
+          "detail"
+        ],
+        "title": "FallbackDecision"
+      },
+      "HTTPValidationError": {
+        "properties": {
+          "detail": {
+            "items": {
+              "$ref": "#/components/schemas/ValidationError"
+            },
+            "type": "array",
+            "title": "Detail"
+          }
+        },
+        "type": "object",
+        "title": "HTTPValidationError"
+      },
+      "HealthResponse": {
+        "properties": {
+          "status": {
+            "type": "string",
+            "title": "Status"
+          },
+          "live_trading_enabled": {
+            "type": "boolean",
+            "title": "Live Trading Enabled"
+          },
+          "default_broker": {
+            "type": "string",
+            "title": "Default Broker"
+          },
+          "data_mode": {
+            "type": "string",
+            "title": "Data Mode"
+          },
+          "data_mode_safe": {
+            "type": "boolean",
+            "title": "Data Mode Safe"
+          },
+          "data_mode_error": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Data Mode Error"
+          }
+        },
+        "type": "object",
+        "required": [
+          "status",
+          "live_trading_enabled",
+          "default_broker",
+          "data_mode",
+          "data_mode_safe"
+        ],
+        "title": "HealthResponse"
+      },
+      "KillSwitchRequest": {
+        "properties": {
+          "policy_id": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Policy Id"
+          },
+          "reason": {
+            "type": "string",
+            "title": "Reason",
+            "default": "user_requested"
+          }
+        },
+        "type": "object",
+        "title": "KillSwitchRequest"
+      },
+      "Level12Request": {
+        "properties": {
+          "policy_id": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Policy Id"
+          },
+          "text": {
+            "type": "string",
+            "title": "Text",
+            "default": "KR stock moderate risk weekly rebalance, approval required, mock broker, limit orders only."
+          },
+          "user_id": {
+            "type": "string",
+            "title": "User Id",
+            "default": "fixture-user"
+          }
+        },
+        "type": "object",
+        "title": "Level12Request"
+      },
+      "ModifyOrderRequest": {
+        "properties": {
+          "quantity": {
+            "type": "number",
+            "title": "Quantity"
+          },
+          "limit_price": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Limit Price"
+          }
+        },
+        "type": "object",
+        "required": [
+          "quantity"
+        ],
+        "title": "ModifyOrderRequest"
+      },
+      "OperationReport": {
+        "properties": {
+          "report_id": {
+            "type": "string",
+            "title": "Report Id"
+          },
+          "user_id": {
+            "type": "string",
+            "title": "User Id"
+          },
+          "policy_id": {
+            "type": "string",
+            "title": "Policy Id"
+          },
+          "summary": {
+            "additionalProperties": true,
+            "type": "object",
+            "title": "Summary"
+          },
+          "order_plan_ids": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array",
+            "title": "Order Plan Ids"
+          },
+          "fill_ids": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array",
+            "title": "Fill Ids"
+          },
+          "audit_event_count": {
+            "type": "integer",
+            "title": "Audit Event Count"
+          },
+          "live_trading_enabled": {
+            "type": "boolean",
+            "title": "Live Trading Enabled",
+            "default": false
+          },
+          "created_at": {
+            "type": "string",
+            "format": "date-time",
+            "title": "Created At"
+          }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "required": [
+          "user_id",
+          "policy_id",
+          "summary",
+          "audit_event_count"
+        ],
+        "title": "OperationReport"
+      },
+      "OperatorDecision": {
+        "properties": {
+          "decision_id": {
+            "type": "string",
+            "title": "Decision Id"
+          },
+          "run_id": {
+            "type": "string",
+            "title": "Run Id"
+          },
+          "policy_id": {
+            "type": "string",
+            "title": "Policy Id"
+          },
+          "policy_version": {
+            "type": "integer",
+            "title": "Policy Version"
+          },
+          "strategy_id": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Strategy Id"
+          },
+          "order_plan_id": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Order Plan Id"
+          },
+          "action": {
+            "type": "string",
+            "enum": [
+              "submit",
+              "block",
+              "fallback",
+              "noop"
+            ],
+            "title": "Action"
+          },
+          "reason": {
+            "type": "string",
+            "title": "Reason"
+          },
+          "risk_check_id": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Risk Check Id"
+          },
+          "created_at": {
+            "type": "string",
+            "format": "date-time",
+            "title": "Created At"
+          }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "required": [
+          "run_id",
+          "policy_id",
+          "policy_version",
+          "action",
+          "reason"
+        ],
+        "title": "OperatorDecision"
+      },
+      "OperatorReport": {
+        "properties": {
+          "report_id": {
+            "type": "string",
+            "title": "Report Id"
+          },
+          "run_id": {
+            "type": "string",
+            "title": "Run Id"
+          },
+          "user_id": {
+            "type": "string",
+            "title": "User Id"
+          },
+          "policy_id": {
+            "type": "string",
+            "title": "Policy Id"
+          },
+          "policy_version": {
+            "type": "integer",
+            "title": "Policy Version"
+          },
+          "started_at": {
+            "type": "string",
+            "format": "date-time",
+            "title": "Started At"
+          },
+          "completed_at": {
+            "type": "string",
+            "format": "date-time",
+            "title": "Completed At"
+          },
+          "status": {
+            "type": "string",
+            "enum": [
+              "completed",
+              "blocked",
+              "fallback",
+              "failed"
+            ],
+            "title": "Status"
+          },
+          "strategy_selection": {
+            "$ref": "#/components/schemas/StrategySelectionDecision"
+          },
+          "decisions": {
+            "items": {
+              "$ref": "#/components/schemas/OperatorDecision"
+            },
+            "type": "array",
+            "title": "Decisions"
+          },
+          "fallback": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/FallbackDecision"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "order_plan_ids": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array",
+            "title": "Order Plan Ids"
+          },
+          "broker_order_ids": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array",
+            "title": "Broker Order Ids"
+          },
+          "risk_check_ids": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array",
+            "title": "Risk Check Ids"
+          },
+          "safety_flags": {
+            "additionalProperties": {
+              "anyOf": [
+                {
+                  "type": "boolean"
+                },
+                {
+                  "type": "string"
+                }
+              ]
+            },
+            "type": "object",
+            "title": "Safety Flags"
+          },
+          "live_trading_enabled": {
+            "type": "boolean",
+            "title": "Live Trading Enabled",
+            "default": false
+          },
+          "audit_event_count": {
+            "type": "integer",
+            "title": "Audit Event Count",
+            "default": 0
+          }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "required": [
+          "run_id",
+          "user_id",
+          "policy_id",
+          "policy_version",
+          "started_at",
+          "completed_at",
+          "status",
+          "strategy_selection",
+          "decisions"
+        ],
+        "title": "OperatorReport"
+      },
+      "OperatorRunRequest": {
+        "properties": {
+          "user_id": {
+            "type": "string",
+            "title": "User Id",
+            "default": "fixture-user"
+          },
+          "policy_id": {
+            "type": "string",
+            "title": "Policy Id"
+          },
+          "requested_policy_version": {
+            "type": "integer",
+            "title": "Requested Policy Version"
+          },
+          "run_mode": {
+            "type": "string",
+            "enum": [
+              "dry_run",
+              "mock_submit",
+              "paper_submit"
+            ],
+            "title": "Run Mode",
+            "default": "dry_run"
+          },
+          "requested_at": {
+            "type": "string",
+            "format": "date-time",
+            "title": "Requested At"
+          },
+          "idempotency_key": {
+            "type": "string",
+            "title": "Idempotency Key"
+          }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "required": [
+          "policy_id",
+          "requested_policy_version",
+          "idempotency_key"
+        ],
+        "title": "OperatorRunRequest"
+      },
+      "OperatorRunResult": {
+        "properties": {
+          "run_id": {
+            "type": "string",
+            "title": "Run Id"
+          },
+          "status": {
+            "type": "string",
+            "enum": [
+              "completed",
+              "blocked",
+              "fallback",
+              "failed"
+            ],
+            "title": "Status"
+          },
+          "submitted_order_plan_ids": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array",
+            "title": "Submitted Order Plan Ids"
+          },
+          "blocked_order_plan_ids": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array",
+            "title": "Blocked Order Plan Ids"
+          },
+          "fallback": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/FallbackDecision"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "report": {
+            "$ref": "#/components/schemas/OperatorReport"
+          }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "required": [
+          "run_id",
+          "status",
+          "report"
+        ],
+        "title": "OperatorRunResult"
+      },
+      "OrderIntent": {
+        "properties": {
+          "intent_id": {
+            "type": "string",
+            "title": "Intent Id"
+          },
+          "symbol": {
+            "type": "string",
+            "title": "Symbol"
+          },
+          "side": {
+            "type": "string",
+            "enum": [
+              "buy",
+              "sell"
+            ],
+            "title": "Side"
+          },
+          "order_type": {
+            "$ref": "#/components/schemas/OrderType",
+            "default": "limit"
+          },
+          "quantity": {
+            "type": "number",
+            "exclusiveMinimum": 0.0,
+            "title": "Quantity"
+          },
+          "limit_price": {
+            "anyOf": [
+              {
+                "type": "number",
+                "exclusiveMinimum": 0.0
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Limit Price"
+          },
+          "notional": {
+            "type": "number",
+            "exclusiveMinimum": 0.0,
+            "title": "Notional"
+          },
+          "target_weight": {
+            "type": "number",
+            "maximum": 1.0,
+            "minimum": 0.0,
+            "title": "Target Weight"
+          },
+          "reason": {
+            "type": "string",
+            "title": "Reason"
+          },
+          "quote_time": {
+            "type": "string",
+            "format": "date-time",
+            "title": "Quote Time"
+          }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "required": [
+          "symbol",
+          "side",
+          "quantity",
+          "notional",
+          "target_weight",
+          "reason"
+        ],
+        "title": "OrderIntent"
+      },
+      "OrderPlan": {
+        "properties": {
+          "order_plan_id": {
+            "type": "string",
+            "title": "Order Plan Id"
+          },
+          "policy_id": {
+            "type": "string",
+            "title": "Policy Id"
+          },
+          "policy_version": {
+            "type": "integer",
+            "title": "Policy Version"
+          },
+          "intent": {
+            "$ref": "#/components/schemas/OrderIntent"
+          },
+          "status": {
+            "$ref": "#/components/schemas/OrderStatus",
+            "default": "draft"
+          },
+          "idempotency_key": {
+            "type": "string",
+            "title": "Idempotency Key"
+          },
+          "risk_check_id": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Risk Check Id"
+          },
+          "risk_check_expires_at": {
+            "anyOf": [
+              {
+                "type": "string",
+                "format": "date-time"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Risk Check Expires At"
+          },
+          "explanation": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/ProposalExplanation"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "auto_order_reference_price": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Auto Order Reference Price"
+          },
+          "replaces_order_plan_id": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Replaces Order Plan Id"
+          },
+          "blocked_reason": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Blocked Reason"
+          },
+          "approved_by": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Approved By"
+          },
+          "expires_at": {
+            "anyOf": [
+              {
+                "type": "string",
+                "format": "date-time"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Expires At"
+          },
+          "created_at": {
+            "type": "string",
+            "format": "date-time",
+            "title": "Created At"
+          },
+          "updated_at": {
+            "type": "string",
+            "format": "date-time",
+            "title": "Updated At"
+          }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "required": [
+          "policy_id",
+          "policy_version",
+          "intent",
+          "idempotency_key"
+        ],
+        "title": "OrderPlan"
+      },
+      "OrderPlanRequest": {
+        "properties": {
+          "portfolio_plan_id": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Portfolio Plan Id"
+          }
+        },
+        "type": "object",
+        "title": "OrderPlanRequest"
+      },
+      "OrderStatus": {
+        "type": "string",
+        "enum": [
+          "draft",
+          "risk_checked",
+          "proposed",
+          "modified",
+          "user_approved",
+          "submitted",
+          "accepted",
+          "partially_filled",
+          "filled",
+          "cancelled",
+          "rejected",
+          "expired",
+          "failed"
+        ],
+        "title": "OrderStatus"
+      },
+      "OrderType": {
+        "type": "string",
+        "enum": [
+          "limit",
+          "market"
+        ],
+        "title": "OrderType"
+      },
+      "ParsePolicyRequest": {
+        "properties": {
+          "text": {
+            "type": "string",
+            "title": "Text",
+            "default": "KR stock moderate risk weekly rebalance, approval required, mock broker, limit orders only."
+          },
+          "user_id": {
+            "type": "string",
+            "title": "User Id",
+            "default": "fixture-user"
+          }
+        },
+        "type": "object",
+        "title": "ParsePolicyRequest"
+      },
+      "PortfolioPlan": {
+        "properties": {
+          "plan_id": {
+            "type": "string",
+            "title": "Plan Id"
+          },
+          "policy_id": {
+            "type": "string",
+            "title": "Policy Id"
+          },
+          "policy_version": {
+            "type": "integer",
+            "title": "Policy Version"
+          },
+          "target_weights": {
+            "additionalProperties": {
+              "type": "number"
+            },
+            "type": "object",
+            "title": "Target Weights"
+          },
+          "cash_target_weight": {
+            "type": "number",
+            "maximum": 1.0,
+            "minimum": 0.0,
+            "title": "Cash Target Weight"
+          },
+          "order_intents": {
+            "items": {
+              "$ref": "#/components/schemas/OrderIntent"
+            },
+            "type": "array",
+            "title": "Order Intents"
+          },
+          "created_at": {
+            "type": "string",
+            "format": "date-time",
+            "title": "Created At"
+          }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "required": [
+          "policy_id",
+          "policy_version",
+          "target_weights",
+          "cash_target_weight",
+          "order_intents"
+        ],
+        "title": "PortfolioPlan"
+      },
+      "PortfolioPlanRequest": {
+        "properties": {
+          "policy_id": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Policy Id"
+          }
+        },
+        "type": "object",
+        "title": "PortfolioPlanRequest"
+      },
+      "ProposalExplanation": {
+        "properties": {
+          "symbol": {
+            "type": "string",
+            "title": "Symbol"
+          },
+          "action": {
+            "type": "string",
+            "enum": [
+              "buy",
+              "sell"
+            ],
+            "title": "Action"
+          },
+          "quantity": {
+            "type": "number",
+            "title": "Quantity"
+          },
+          "target_weight_delta": {
+            "type": "number",
+            "title": "Target Weight Delta"
+          },
+          "reference_price": {
+            "type": "number",
+            "title": "Reference Price"
+          },
+          "estimated_cash_impact": {
+            "type": "number",
+            "title": "Estimated Cash Impact"
+          },
+          "strategy_id": {
+            "type": "string",
+            "title": "Strategy Id"
+          },
+          "strategy_version": {
+            "type": "string",
+            "title": "Strategy Version"
+          },
+          "signal_reason": {
+            "type": "string",
+            "title": "Signal Reason"
+          },
+          "reason_codes": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array",
+            "title": "Reason Codes"
+          },
+          "current_weight": {
+            "type": "number",
+            "title": "Current Weight"
+          },
+          "target_weight": {
+            "type": "number",
+            "title": "Target Weight"
+          },
+          "weight_delta": {
+            "type": "number",
+            "title": "Weight Delta"
+          },
+          "quote_price": {
+            "type": "number",
+            "title": "Quote Price"
+          },
+          "quote_age_seconds": {
+            "type": "number",
+            "title": "Quote Age Seconds"
+          },
+          "limit_price": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Limit Price"
+          },
+          "estimated_notional": {
+            "type": "number",
+            "title": "Estimated Notional"
+          },
+          "estimated_cost_bps": {
+            "type": "number",
+            "title": "Estimated Cost Bps",
+            "default": 0.0
+          },
+          "stop_price_hint": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Stop Price Hint"
+          },
+          "take_profit_hint": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Take Profit Hint"
+          },
+          "risk_checks_passed": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array",
+            "title": "Risk Checks Passed"
+          },
+          "risk_checks_failed": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array",
+            "title": "Risk Checks Failed"
+          },
+          "risk_check_id": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Risk Check Id"
+          },
+          "risk_check_expires_at": {
+            "anyOf": [
+              {
+                "type": "string",
+                "format": "date-time"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Risk Check Expires At"
+          },
+          "idempotency_key": {
+            "type": "string",
+            "title": "Idempotency Key"
+          },
+          "policy_version": {
+            "type": "integer",
+            "title": "Policy Version"
+          },
+          "warnings": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array",
+            "title": "Warnings"
+          }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "required": [
+          "symbol",
+          "action",
+          "quantity",
+          "target_weight_delta",
+          "reference_price",
+          "estimated_cash_impact",
+          "strategy_id",
+          "strategy_version",
+          "signal_reason",
+          "current_weight",
+          "target_weight",
+          "weight_delta",
+          "quote_price",
+          "quote_age_seconds",
+          "estimated_notional",
+          "idempotency_key",
+          "policy_version"
+        ],
+        "title": "ProposalExplanation"
+      },
+      "RejectOrderRequest": {
+        "properties": {
+          "reason": {
+            "type": "string",
+            "title": "Reason",
+            "default": "user_rejected"
+          }
+        },
+        "type": "object",
+        "title": "RejectOrderRequest"
+      },
+      "ReleaseKillSwitchRequest": {
+        "properties": {
+          "policy_id": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Policy Id"
+          },
+          "confirmation": {
+            "type": "string",
+            "title": "Confirmation"
+          }
+        },
+        "type": "object",
+        "required": [
+          "confirmation"
+        ],
+        "title": "ReleaseKillSwitchRequest"
+      },
+      "Signal": {
+        "properties": {
+          "signal_id": {
+            "type": "string",
+            "title": "Signal Id"
+          },
+          "strategy_id": {
+            "type": "string",
+            "title": "Strategy Id"
+          },
+          "recipe_version": {
+            "type": "string",
+            "title": "Recipe Version"
+          },
+          "symbol": {
+            "type": "string",
+            "title": "Symbol"
+          },
+          "ticker": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Ticker"
+          },
+          "signal_date": {
+            "type": "string",
+            "format": "date",
+            "title": "Signal Date"
+          },
+          "action": {
+            "$ref": "#/components/schemas/SignalAction"
+          },
+          "strength": {
+            "type": "number",
+            "maximum": 1.0,
+            "minimum": 0.0,
+            "title": "Strength",
+            "default": 0.0
+          },
+          "technical_score": {
+            "anyOf": [
+              {
+                "type": "number",
+                "maximum": 100.0,
+                "minimum": 0.0
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Technical Score"
+          },
+          "quant_score": {
+            "anyOf": [
+              {
+                "type": "number",
+                "maximum": 100.0,
+                "minimum": 0.0
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Quant Score"
+          },
+          "target_weight_hint": {
+            "anyOf": [
+              {
+                "type": "number",
+                "maximum": 1.0,
+                "minimum": 0.0
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Target Weight Hint"
+          },
+          "stop_price_hint": {
+            "anyOf": [
+              {
+                "type": "number",
+                "exclusiveMinimum": 0.0
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Stop Price Hint"
+          },
+          "take_profit_hint": {
+            "anyOf": [
+              {
+                "type": "number",
+                "exclusiveMinimum": 0.0
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Take Profit Hint"
+          },
+          "valid_until": {
+            "anyOf": [
+              {
+                "type": "string",
+                "format": "date"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Valid Until"
+          },
+          "policy_version": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Policy Version"
+          },
+          "reason_codes": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array",
+            "title": "Reason Codes"
+          },
+          "reason": {
+            "type": "string",
+            "title": "Reason"
+          },
+          "generated_at": {
+            "type": "string",
+            "format": "date-time",
+            "title": "Generated At"
+          },
+          "source": {
+            "type": "string",
+            "title": "Source",
+            "default": "fixture_signal_stub"
+          }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "required": [
+          "strategy_id",
+          "recipe_version",
+          "symbol",
+          "action",
+          "reason"
+        ],
+        "title": "Signal"
+      },
+      "SignalAction": {
+        "type": "string",
+        "enum": [
+          "buy_ready",
+          "buy_wait",
+          "hold",
+          "trim",
+          "exit",
+          "watch",
+          "blocked"
+        ],
+        "title": "SignalAction"
+      },
+      "StrategySelectionDecision": {
+        "properties": {
+          "selected_strategy_id": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Selected Strategy Id"
+          },
+          "selected_version": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Selected Version"
+          },
+          "eligible_strategy_ids": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array",
+            "title": "Eligible Strategy Ids"
+          },
+          "rejected": {
+            "additionalProperties": {
+              "type": "string"
+            },
+            "type": "object",
+            "title": "Rejected"
+          },
+          "reason": {
+            "type": "string",
+            "title": "Reason"
+          }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "required": [
+          "selected_strategy_id",
+          "selected_version",
+          "eligible_strategy_ids",
+          "rejected",
+          "reason"
+        ],
+        "title": "StrategySelectionDecision"
+      },
+      "UserPolicy": {
+        "properties": {
+          "policy_id": {
+            "type": "string",
+            "title": "Policy Id"
+          },
+          "user_id": {
+            "type": "string",
+            "title": "User Id",
+            "default": "fixture-user"
+          },
+          "version": {
+            "type": "integer",
+            "title": "Version",
+            "default": 1
+          },
+          "market": {
+            "type": "string",
+            "title": "Market",
+            "default": "KR_STOCK"
+          },
+          "risk_profile": {
+            "type": "string",
+            "title": "Risk Profile",
+            "default": "moderate"
+          },
+          "max_positions": {
+            "type": "integer",
+            "exclusiveMinimum": 0.0,
+            "title": "Max Positions",
+            "default": 8
+          },
+          "max_position_weight": {
+            "type": "number",
+            "maximum": 1.0,
+            "exclusiveMinimum": 0.0,
+            "title": "Max Position Weight",
+            "default": 0.15
+          },
+          "max_sector_weight": {
+            "type": "number",
+            "maximum": 1.0,
+            "exclusiveMinimum": 0.0,
+            "title": "Max Sector Weight",
+            "default": 0.4
+          },
+          "min_cash_weight": {
+            "type": "number",
+            "exclusiveMaximum": 1.0,
+            "minimum": 0.0,
+            "title": "Min Cash Weight",
+            "default": 0.2
+          },
+          "daily_loss_limit": {
+            "type": "number",
+            "title": "Daily Loss Limit",
+            "default": -0.03
+          },
+          "monthly_loss_limit": {
+            "type": "number",
+            "title": "Monthly Loss Limit",
+            "default": -0.05
+          },
+          "max_daily_orders": {
+            "type": "integer",
+            "exclusiveMinimum": 0.0,
+            "title": "Max Daily Orders",
+            "default": 3
+          },
+          "max_daily_turnover": {
+            "type": "number",
+            "exclusiveMinimum": 0.0,
+            "title": "Max Daily Turnover",
+            "default": 3000000
+          },
+          "monthly_loss_pause_new_buys": {
+            "type": "number",
+            "title": "Monthly Loss Pause New Buys",
+            "default": -0.05
+          },
+          "monthly_loss_stop_all_autotrading": {
+            "type": "number",
+            "title": "Monthly Loss Stop All Autotrading",
+            "default": -0.1
+          },
+          "stale_quote_max_age_seconds": {
+            "type": "integer",
+            "exclusiveMinimum": 0.0,
+            "title": "Stale Quote Max Age Seconds",
+            "default": 30
+          },
+          "human_review_quote_max_age_seconds": {
+            "type": "integer",
+            "exclusiveMinimum": 0.0,
+            "title": "Human Review Quote Max Age Seconds",
+            "default": 120
+          },
+          "order_expiry_minutes": {
+            "type": "integer",
+            "exclusiveMinimum": 0.0,
+            "title": "Order Expiry Minutes",
+            "default": 30
+          },
+          "authority_level": {
+            "type": "integer",
+            "maximum": 5.0,
+            "minimum": 1.0,
+            "title": "Authority Level",
+            "default": 2
+          },
+          "kill_switch_engaged": {
+            "type": "boolean",
+            "title": "Kill Switch Engaged",
+            "default": false
+          },
+          "guarded_autopilot_enabled": {
+            "type": "boolean",
+            "title": "Guarded Autopilot Enabled",
+            "default": false
+          },
+          "fully_automated_operator_enabled": {
+            "type": "boolean",
+            "title": "Fully Automated Operator Enabled",
+            "default": false
+          },
+          "single_order_cash_limit": {
+            "type": "number",
+            "exclusiveMinimum": 0.0,
+            "title": "Single Order Cash Limit",
+            "default": 1000000
+          },
+          "rebalance_frequency": {
+            "type": "string",
+            "title": "Rebalance Frequency",
+            "default": "weekly"
+          },
+          "execution_mode": {
+            "$ref": "#/components/schemas/ExecutionMode",
+            "default": "approval_required"
+          },
+          "allowed_order_types": {
+            "items": {
+              "$ref": "#/components/schemas/OrderType"
+            },
+            "type": "array",
+            "title": "Allowed Order Types"
+          },
+          "broker": {
+            "$ref": "#/components/schemas/BrokerMode",
+            "default": "mock"
+          },
+          "preferred_themes": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array",
+            "title": "Preferred Themes"
+          },
+          "preferred_sectors": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array",
+            "title": "Preferred Sectors"
+          },
+          "blocklist": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array",
+            "title": "Blocklist"
+          },
+          "min_avg_daily_value": {
+            "type": "number",
+            "minimum": 0.0,
+            "title": "Min Avg Daily Value",
+            "default": 5000000
+          },
+          "created_at": {
+            "type": "string",
+            "format": "date-time",
+            "title": "Created At"
+          }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "title": "UserPolicy"
+      },
+      "ValidationError": {
+        "properties": {
+          "loc": {
+            "items": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "integer"
+                }
+              ]
+            },
+            "type": "array",
+            "title": "Location"
+          },
+          "msg": {
+            "type": "string",
+            "title": "Message"
+          },
+          "type": {
+            "type": "string",
+            "title": "Error Type"
+          },
+          "input": {
+            "title": "Input"
+          },
+          "ctx": {
+            "type": "object",
+            "title": "Context"
+          }
+        },
+        "type": "object",
+        "required": [
+          "loc",
+          "msg",
+          "type"
+        ],
+        "title": "ValidationError"
+      }
+    }
+  }
+}

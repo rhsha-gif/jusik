@@ -1,0 +1,18 @@
+{
+  "version": "0.0.1",
+  "configurations": [
+    {
+      "name": "quantpilot-web",
+      "cwd": "quantpilot/apps/web",
+      "runtimeExecutable": "npm",
+      "runtimeArgs": ["run", "dev"],
+      "port": 5173
+    },
+    {
+      "name": "quantpilot-api",
+      "runtimeExecutable": "python",
+      "runtimeArgs": ["-m", "uvicorn", "quantpilot.services.api.main:app", "--port", "8010"],
+      "port": 8010
+    }
+  ]
+}

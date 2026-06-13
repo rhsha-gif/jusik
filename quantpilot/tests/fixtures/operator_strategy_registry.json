@@ -1,0 +1,25 @@
+[
+  {
+    "strategy_id": "pullback_trend_v1",
+    "version": "1.0.0",
+    "spec_hash": "sha256:fixture-pullback-trend-v1-validated-snapshot",
+    "status": "validated_l4",
+    "allowed_execution_levels": ["level_3", "level_4", "guarded_autopilot"],
+    "priority": 20
+  },
+  {
+    "strategy_id": "level5_candidate_fixture",
+    "version": "0.1.0",
+    "spec_hash": "sha256:fixture-level5-candidate-validated-snapshot",
+    "status": "validated_l5",
+    "allowed_execution_levels": ["level_5", "fully_automated"],
+    "priority": 10
+  },
+  {
+    "strategy_id": "draft_not_eligible",
+    "version": "0.1.0",
+    "status": "draft",
+    "allowed_execution_levels": [],
+    "priority": 1
+  }
+]

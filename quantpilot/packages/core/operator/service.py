@@ -35,7 +35,6 @@ from quantpilot.packages.core.schemas import (
     OrderPlan,
     OrderStatus,
     PortfolioSnapshot,
-    Signal,
     StrategyRecipe,
     UserPolicy,
     new_id,
@@ -80,6 +79,35 @@ def _empty_selection(reason: str) -> StrategySelectionDecision:
 
 
 OperatorDecisionAction = Literal["submit", "block", "fallback", "noop"]
+
+
+@dataclass(frozen=True)
+class _SelectedStrategy:
+    selection: StrategySelectionDecision
+    registry_entry: StrategyRegistryEntry
+
+
+@dataclass(frozen=True)
+class _PreparedOperatorRun:
+    recipe: StrategyRecipe
+    snapshot: PortfolioSnapshot
+    proposals: list[OrderPlan]
+
+
+@dataclass
+class _OperatorSubmissionState:
+    submitted: list[str] = field(default_factory=list)
+    blocked: list[str] = field(default_factory=list)
+    broker_order_ids: list[str] = field(default_factory=list)
+    risk_check_ids: list[str] = field(default_factory=list)
+    fallback: FallbackDecision | None = None
+
+    def status(self) -> OperatorRunStatus:
+        if self.submitted:
+            return "completed"
+        if self.fallback is not None:
+            return "fallback" if self.fallback.to_level > 0 else "blocked"
+        return "blocked"
 
 
 @dataclass
@@ -242,64 +270,88 @@ class OperatorService:
         }
 
     def run_once(self, request: OperatorRunRequest, *, now: datetime | None = None) -> OperatorRunResult:
-        cached = self._runs_by_key.get(request.idempotency_key)
+        cached = self._cached_run_if_replay_allowed(request)
         if cached is not None:
-            cached_policy = self.repositories.policies.get(request.policy_id)
-            kill_switch_now = operator_kill_switch_engaged() or (
-                cached_policy is not None and cached_policy.kill_switch_engaged
-            )
-            if not kill_switch_now:
-                self.audit.emit(
-                    user_id=request.user_id,
-                    entity_type="operator_run",
-                    entity_id=cached.run_id,
-                    action="operator_duplicate_run_ignored",
-                    after_state={"idempotency_key": request.idempotency_key},
-                    source="operator_service",
-                )
-                return cached
-            # A kill switch engaged after the cached run must not be masked by a
-            # replayed result; fall through so the gate chain blocks and re-records.
+            return cached
 
-        run_id = new_id("oprun")
-        started_at = now or utc_now()
-        policy = self.repositories.policies.get(request.policy_id)
-        context = _OperatorRunContext(
-            service=self,
-            request=request,
-            run_id=run_id,
-            started_at=started_at,
+        context = self._start_context(request=request, now=now)
+        blocked = self._preflight(context)
+        if blocked is not None:
+            return blocked
+        policy = context.policy
+        assert policy is not None
+
+        selected = self._select_strategy(context=context, policy=policy)
+        if isinstance(selected, OperatorRunResult):
+            return selected
+        prepared = self._prepare_run(context=context, policy=policy, selected=selected)
+        if isinstance(prepared, OperatorRunResult):
+            return prepared
+
+        if request.run_mode == "dry_run":
+            return self._finish_dry_run(context=context, selected=selected, proposals=prepared.proposals)
+        return self._submit_proposals(
             policy=policy,
+            registry_entry=selected.registry_entry,
+            recipe=prepared.recipe,
+            snapshot=prepared.snapshot,
+            proposals=prepared.proposals,
+            selection=selected.selection,
+            now=now,
+            context=context,
         )
 
+    def _cached_run_if_replay_allowed(self, request: OperatorRunRequest) -> OperatorRunResult | None:
+        cached = self._runs_by_key.get(request.idempotency_key)
+        if cached is None:
+            return None
+        cached_policy = self.repositories.policies.get(request.policy_id)
+        kill_switch_now = operator_kill_switch_engaged() or (
+            cached_policy is not None and cached_policy.kill_switch_engaged
+        )
+        if kill_switch_now:
+            return None
         self.audit.emit(
             user_id=request.user_id,
             entity_type="operator_run",
-            entity_id=run_id,
+            entity_id=cached.run_id,
+            action="operator_duplicate_run_ignored",
+            after_state={"idempotency_key": request.idempotency_key},
+            source="operator_service",
+        )
+        return cached
+
+    def _start_context(self, *, request: OperatorRunRequest, now: datetime | None) -> _OperatorRunContext:
+        context = _OperatorRunContext(
+            service=self,
+            request=request,
+            run_id=new_id("oprun"),
+            started_at=now or utc_now(),
+            policy=self.repositories.policies.get(request.policy_id),
+        )
+        self.audit.emit(
+            user_id=request.user_id,
+            entity_type="operator_run",
+            entity_id=context.run_id,
             action="operator_run_started",
             after_state={"request": request.model_dump(mode="json")},
             source="operator_service",
         )
+        return context
 
-        # Gate 1: Level 5 feature flag (env or explicit policy field).
+    def _preflight(self, context: _OperatorRunContext) -> OperatorRunResult | None:
+        policy = context.policy
+        request = context.request
         if not fully_automated_operator_flag_enabled(policy):
             return context.blocked_by("level5_flag_disabled")
-
-        # Gate 2: an active policy must exist.
         if policy is None:
             return context.blocked_by("policy_not_found")
-
-        # Gate 3: live trading must remain disabled; the operator refuses to run otherwise.
         if live_trading_flag_enabled():
             return context.blocked_by("live_trading_flag_engaged")
-
-        # Gate 4: kill switches (policy-level and operator-level env switch).
         if policy.kill_switch_engaged:
             return context.blocked_by("kill_switch_engaged")
         if operator_kill_switch_engaged():
             return context.blocked_by("operator_kill_switch_engaged")
-
-        # Gate 5: only mock or paper brokers are reachable from the operator.
         if policy.broker not in {BrokerMode.mock, BrokerMode.paper}:
             return context.blocked_by("broker_mode_unsafe")
         if request.run_mode == "mock_submit" and policy.broker != BrokerMode.mock:
@@ -307,7 +359,6 @@ class OperatorService:
         if request.run_mode == "paper_submit" and policy.broker != BrokerMode.paper:
             return context.blocked_by("run_mode_broker_mismatch")
 
-        # Gate 6: the run must bind to the current policy version.
         review = self.version_guard.require_current_version(
             policy_id=policy.policy_id,
             current_version=policy.version,
@@ -323,83 +374,84 @@ class OperatorService:
                 source="operator_service",
             )
             return context.blocked_by("policy_review_required")
-
-        # Gate 7: the policy must be explicitly promoted to Level 5.
         if policy.authority_level != 5 or policy.execution_mode != ExecutionMode.fully_automated:
             return context.blocked_by("policy_not_promoted")
+        return None
 
-        # Step: deterministic strategy selection from the approved registry.
+    def _select_strategy(
+        self,
+        *,
+        context: _OperatorRunContext,
+        policy: UserPolicy,
+    ) -> _SelectedStrategy | OperatorRunResult:
         selection = self.registry.select_for_level5(policy_version=policy.version)
         self.audit.emit(
             user_id=policy.user_id,
             entity_type="operator_run",
-            entity_id=run_id,
+            entity_id=context.run_id,
             action="operator_strategy_selected",
             after_state=selection,
             source="operator_service",
         )
         if selection.selected_strategy_id is None:
-            # Spec: fall back to Level 4 when a guarded-ready strategy exists,
-            # otherwise degrade all the way to Level 2 suggestions.
             if self.registry.level4_available():
                 return context.blocked_by("no_level5_strategy_eligible", selection=selection)
             return context.blocked_by("no_approved_strategy_available", selection=selection)
         registry_entry = self.registry.require(selection.selected_strategy_id)
         context.decide("noop", "strategy_selected", strategy_id=registry_entry.strategy_id)
+        return _SelectedStrategy(selection=selection, registry_entry=registry_entry)
 
-        recipe = self._load_recipe(registry_entry.strategy_id)
+    def _prepare_run(
+        self,
+        *,
+        context: _OperatorRunContext,
+        policy: UserPolicy,
+        selected: _SelectedStrategy,
+    ) -> _PreparedOperatorRun | OperatorRunResult:
+        recipe = self._load_recipe(selected.registry_entry.strategy_id)
         if recipe is None:
-            return context.blocked_by("no_level5_strategy_eligible", selection=selection)
+            return context.blocked_by("no_level5_strategy_eligible", selection=selected.selection)
 
-        # Step: sync portfolio snapshot from the mock/paper broker and build the plan.
         broker = self.harness._broker_for_policy(policy)
-        snapshot = broker.get_positions(request.user_id)
-
-        # Gate 8: monthly loss stop halts all automatic trading before any planning.
+        snapshot = broker.get_positions(context.request.user_id)
         if snapshot.monthly_loss_ratio <= policy.monthly_loss_stop_all_autotrading:
-            return context.blocked_by("monthly_loss_stop_engaged", selection=selection)
+            return context.blocked_by("monthly_loss_stop_engaged", selection=selected.selection)
 
         signal_set = self._record_signal_set(recipe, policy)
-        signals = signal_set.signals
         if not signal_set.data_quality.usable:
             reason = signal_set.data_quality.reason_codes[0] if signal_set.data_quality.reason_codes else "signal_provider_unavailable"
-            context.decide("noop", reason, strategy_id=registry_entry.strategy_id)
-            return context.finish("completed", selection=selection, order_plan_ids=[])
+            context.decide("noop", reason, strategy_id=selected.registry_entry.strategy_id)
+            return context.finish("completed", selection=selected.selection, order_plan_ids=[])
 
-        plan = self.harness.create_portfolio_plan(policy_id=policy.policy_id, signals=signals, snapshot=snapshot)
+        plan = self.harness.create_portfolio_plan(policy_id=policy.policy_id, signals=signal_set.signals, snapshot=snapshot)
         proposals = self.harness.generate_order_proposals(portfolio_plan_id=plan.plan_id, snapshot=snapshot)
-
         if not proposals:
             if not plan.order_intents:
-                context.decide("noop", "no_order_intents", strategy_id=registry_entry.strategy_id)
-                return context.finish("completed", selection=selection, order_plan_ids=[])
-            return context.blocked_by("risk_check_failed", selection=selection)
+                context.decide("noop", "no_order_intents", strategy_id=selected.registry_entry.strategy_id)
+                return context.finish("completed", selection=selected.selection, order_plan_ids=[])
+            return context.blocked_by("risk_check_failed", selection=selected.selection)
+        return _PreparedOperatorRun(recipe=recipe, snapshot=snapshot, proposals=proposals)
 
-        if request.run_mode == "dry_run":
-            for proposal in proposals:
-                context.decide(
-                    "noop",
-                    "dry_run_no_submission",
-                    strategy_id=registry_entry.strategy_id,
-                    order_plan_id=proposal.order_plan_id,
-                    risk_check_id=proposal.risk_check_id,
-                )
-            return context.finish(
-                "completed",
-                selection=selection,
-                order_plan_ids=[proposal.order_plan_id for proposal in proposals],
-                risk_check_ids=[proposal.risk_check_id for proposal in proposals if proposal.risk_check_id],
+    def _finish_dry_run(
+        self,
+        *,
+        context: _OperatorRunContext,
+        selected: _SelectedStrategy,
+        proposals: list[OrderPlan],
+    ) -> OperatorRunResult:
+        for proposal in proposals:
+            context.decide(
+                "noop",
+                "dry_run_no_submission",
+                strategy_id=selected.registry_entry.strategy_id,
+                order_plan_id=proposal.order_plan_id,
+                risk_check_id=proposal.risk_check_id,
             )
-
-        return self._submit_proposals(
-            policy=policy,
-            registry_entry=registry_entry,
-            recipe=recipe,
-            snapshot=snapshot,
-            proposals=proposals,
-            selection=selection,
-            now=now,
-            context=context,
+        return context.finish(
+            "completed",
+            selection=selected.selection,
+            order_plan_ids=[proposal.order_plan_id for proposal in proposals],
+            risk_check_ids=[proposal.risk_check_id for proposal in proposals if proposal.risk_check_id],
         )
 
     def _load_recipe(self, strategy_id: str) -> StrategyRecipe | None:
@@ -432,9 +484,6 @@ class OperatorService:
             )
         return signal_set
 
-    def _record_signals(self, recipe: StrategyRecipe, policy: UserPolicy) -> list[Signal]:
-        return self._record_signal_set(recipe, policy).signals
-
     def _submit_proposals(
         self,
         *,
@@ -447,112 +496,179 @@ class OperatorService:
         now: datetime | None,
         context: _OperatorRunContext,
     ) -> OperatorRunResult:
-        # Authorization must use the wall clock at decision time: proposals are created
-        # after the run starts, so reusing the run start time would make every quote
-        # look stale (negative age). Tests may still inject a fixed `now`.
         authorization_time = now or utc_now()
-        submitted: list[str] = []
-        blocked: list[str] = []
-        broker_order_ids: list[str] = []
-        risk_check_ids: list[str] = []
-        fallback: FallbackDecision | None = None
+        state = _OperatorSubmissionState()
 
         for proposal in proposals:
-            state = self.harness._guardrail_state(
-                policy=policy,
-                strategy_id=registry_entry.strategy_id,
-                exclude_order_plan_id=proposal.order_plan_id,
-            )
-            result = authorize_level5(
-                order_plan=proposal,
+            result = self._authorize_proposal(
                 policy=policy,
                 registry_entry=registry_entry,
-                strategy=recipe,
+                recipe=recipe,
                 snapshot=snapshot,
-                state=state,
-                seen_idempotency_keys=self.harness._seen_idempotency_keys(
-                    exclude_order_plan_id=proposal.order_plan_id, submitted_only=True
-                ),
-                now=authorization_time,
+                proposal=proposal,
+                authorization_time=authorization_time,
             )
             if not result.authorized:
-                reason = result.first_failed_check or "operator_order_blocked"
-                proposal.blocked_reason = reason
-                self.repositories.order_plans.update(proposal)
-                self.harness.last_blocked_reason = reason
-                self.audit.emit(
-                    user_id=policy.user_id,
-                    entity_type="order_plan",
-                    entity_id=proposal.order_plan_id,
-                    action="operator_order_blocked",
-                    after_state={"reason": reason, "checks": result.model_dump(mode="json")},
-                    source="operator_service",
+                self._record_operator_block(
+                    policy=policy,
+                    registry_entry=registry_entry,
+                    proposal=proposal,
+                    result=result,
+                    context=context,
+                    state=state,
                 )
-                context.decide("block", reason, strategy_id=registry_entry.strategy_id, order_plan_id=proposal.order_plan_id)
-                blocked.append(proposal.order_plan_id)
-                if fallback is None and reason in CHECK_TO_FALLBACK_REASON:
-                    fallback = self.fallbacks.for_reason(CHECK_TO_FALLBACK_REASON[reason])
                 continue
 
-            proposal.approved_by = f"operator_policy_v{policy.version}"
-            transition_order_plan(
-                order_plan=proposal,
-                new_status=OrderStatus.user_approved,
-                audit=self.audit,
-                user_id=policy.user_id,
-                source="operator_service",
-                action="operator_order_authorized",
-            )
-            self.repositories.order_plans.update(proposal)
+            self._mark_operator_authorized(policy=policy, proposal=proposal)
             try:
                 order_plan, broker_order, fills = self.harness.submit_order_plan(proposal.order_plan_id)
             except (RiskCheckRequired, ApprovalRequired) as exc:
-                context.decide("block", str(exc), strategy_id=registry_entry.strategy_id, order_plan_id=proposal.order_plan_id)
-                blocked.append(proposal.order_plan_id)
-                if fallback is None:
-                    fallback = self.fallbacks.for_reason("risk_check_failed")
+                self._record_submission_gate_exception(
+                    registry_entry=registry_entry,
+                    proposal=proposal,
+                    error=exc,
+                    context=context,
+                    state=state,
+                )
                 continue
             except Exception as exc:
-                fallback = self._handle_broker_failure(policy=policy, proposal=proposal, error=exc)
+                state.fallback = self._handle_broker_failure(policy=policy, proposal=proposal, error=exc)
                 context.decide("fallback", "broker_failure", strategy_id=registry_entry.strategy_id, order_plan_id=proposal.order_plan_id)
-                blocked.append(proposal.order_plan_id)
+                state.blocked.append(proposal.order_plan_id)
                 break
 
-            submitted.append(order_plan.order_plan_id)
-            broker_order_ids.append(broker_order.broker_order_id)
-            if order_plan.risk_check_id:
-                risk_check_ids.append(order_plan.risk_check_id)
-            self.audit.emit(
-                user_id=policy.user_id,
-                entity_type="order_plan",
-                entity_id=order_plan.order_plan_id,
-                action="operator_order_submitted",
-                after_state={"broker_order_id": broker_order.broker_order_id, "fills": len(fills)},
-                source="operator_service",
-            )
-            context.decide(
-                "submit",
-                "operator_order_submitted",
-                strategy_id=registry_entry.strategy_id,
-                order_plan_id=order_plan.order_plan_id,
-                risk_check_id=order_plan.risk_check_id,
+            self._record_operator_submission(
+                policy=policy,
+                registry_entry=registry_entry,
+                order_plan=order_plan,
+                broker_order_id=broker_order.broker_order_id,
+                fill_count=len(fills),
+                context=context,
+                state=state,
             )
 
-        if submitted:
-            status: OperatorRunStatus = "completed"
-        elif fallback is not None:
-            status = "fallback" if fallback.to_level > 0 else "blocked"
-        else:
-            status = "blocked"
         return context.finish(
-            status,
-            fallback=fallback,
+            state.status(),
+            fallback=state.fallback,
             selection=selection,
-            submitted=submitted,
-            blocked=blocked,
-            order_plan_ids=submitted + blocked,
-            broker_order_ids=broker_order_ids,
-            risk_check_ids=risk_check_ids,
+            submitted=state.submitted,
+            blocked=state.blocked,
+            order_plan_ids=state.submitted + state.blocked,
+            broker_order_ids=state.broker_order_ids,
+            risk_check_ids=state.risk_check_ids,
+        )
+
+    def _authorize_proposal(
+        self,
+        *,
+        policy: UserPolicy,
+        registry_entry: StrategyRegistryEntry,
+        recipe: StrategyRecipe,
+        snapshot: PortfolioSnapshot,
+        proposal: OrderPlan,
+        authorization_time: datetime,
+    ):
+        guardrail_state = self.harness._guardrail_state(
+            policy=policy,
+            strategy_id=registry_entry.strategy_id,
+            exclude_order_plan_id=proposal.order_plan_id,
+        )
+        return authorize_level5(
+            order_plan=proposal,
+            policy=policy,
+            registry_entry=registry_entry,
+            strategy=recipe,
+            snapshot=snapshot,
+            state=guardrail_state,
+            seen_idempotency_keys=self.harness._seen_idempotency_keys(
+                exclude_order_plan_id=proposal.order_plan_id,
+                submitted_only=True,
+            ),
+            now=authorization_time,
+        )
+
+    def _record_operator_block(
+        self,
+        *,
+        policy: UserPolicy,
+        registry_entry: StrategyRegistryEntry,
+        proposal: OrderPlan,
+        result,
+        context: _OperatorRunContext,
+        state: _OperatorSubmissionState,
+    ) -> None:
+        reason = result.first_failed_check or "operator_order_blocked"
+        proposal.blocked_reason = reason
+        self.repositories.order_plans.update(proposal)
+        self.harness.last_blocked_reason = reason
+        self.audit.emit(
+            user_id=policy.user_id,
+            entity_type="order_plan",
+            entity_id=proposal.order_plan_id,
+            action="operator_order_blocked",
+            after_state={"reason": reason, "checks": result.model_dump(mode="json")},
+            source="operator_service",
+        )
+        context.decide("block", reason, strategy_id=registry_entry.strategy_id, order_plan_id=proposal.order_plan_id)
+        state.blocked.append(proposal.order_plan_id)
+        if state.fallback is None and reason in CHECK_TO_FALLBACK_REASON:
+            state.fallback = self.fallbacks.for_reason(CHECK_TO_FALLBACK_REASON[reason])
+
+    def _mark_operator_authorized(self, *, policy: UserPolicy, proposal: OrderPlan) -> None:
+        proposal.approved_by = f"operator_policy_v{policy.version}"
+        transition_order_plan(
+            order_plan=proposal,
+            new_status=OrderStatus.user_approved,
+            audit=self.audit,
+            user_id=policy.user_id,
+            source="operator_service",
+            action="operator_order_authorized",
+        )
+        self.repositories.order_plans.update(proposal)
+
+    def _record_submission_gate_exception(
+        self,
+        *,
+        registry_entry: StrategyRegistryEntry,
+        proposal: OrderPlan,
+        error: Exception,
+        context: _OperatorRunContext,
+        state: _OperatorSubmissionState,
+    ) -> None:
+        context.decide("block", str(error), strategy_id=registry_entry.strategy_id, order_plan_id=proposal.order_plan_id)
+        state.blocked.append(proposal.order_plan_id)
+        if state.fallback is None:
+            state.fallback = self.fallbacks.for_reason("risk_check_failed")
+
+    def _record_operator_submission(
+        self,
+        *,
+        policy: UserPolicy,
+        registry_entry: StrategyRegistryEntry,
+        order_plan: OrderPlan,
+        broker_order_id: str,
+        fill_count: int,
+        context: _OperatorRunContext,
+        state: _OperatorSubmissionState,
+    ) -> None:
+        state.submitted.append(order_plan.order_plan_id)
+        state.broker_order_ids.append(broker_order_id)
+        if order_plan.risk_check_id:
+            state.risk_check_ids.append(order_plan.risk_check_id)
+        self.audit.emit(
+            user_id=policy.user_id,
+            entity_type="order_plan",
+            entity_id=order_plan.order_plan_id,
+            action="operator_order_submitted",
+            after_state={"broker_order_id": broker_order_id, "fills": fill_count},
+            source="operator_service",
+        )
+        context.decide(
+            "submit",
+            "operator_order_submitted",
+            strategy_id=registry_entry.strategy_id,
+            order_plan_id=order_plan.order_plan_id,
+            risk_check_id=order_plan.risk_check_id,
         )
 
     def _handle_broker_failure(self, *, policy: UserPolicy, proposal: OrderPlan, error: Exception) -> FallbackDecision:

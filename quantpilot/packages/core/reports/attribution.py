@@ -1,12 +1,15 @@
 from __future__ import annotations
 
 from collections import Counter, defaultdict
+from dataclasses import dataclass, field
 from typing import Iterable, Sequence
 
 from quantpilot.packages.core.ledger.types import LedgerEntry, LedgerEventType
+from quantpilot.packages.core.normalization import first_not_none, symbol_key, unique_text
 from quantpilot.packages.core.reports.metrics_types import PaperTrialMetrics
 from quantpilot.packages.core.reports.report_types import (
     AttributionReport,
+    DecisionExplanationType,
     PolicyIntentSummary,
     PositionAttribution,
     RejectedTrimmedExplanation,
@@ -18,6 +21,66 @@ from quantpilot.packages.core.reports.report_types import (
 )
 from quantpilot.packages.core.risk.types import BatchRiskDecision
 from quantpilot.packages.core.schemas import OrderPlan, PortfolioPlan, PortfolioSnapshot, Signal, UserPolicy
+
+
+@dataclass(frozen=True)
+class _SelectedAttributionInputs:
+    entries: list[LedgerEntry]
+    signals: list[Signal]
+    orders: list[OrderPlan]
+    risk_decisions: list[BatchRiskDecision]
+    latest_plan: PortfolioPlan | None
+    intended_by_symbol: dict[str, float]
+    filled_by_symbol: dict[str, float]
+    rejected_by_symbol: dict[str, float]
+    touched_symbols: list[str]
+
+
+@dataclass
+class _RejectedTrimmedCollector:
+    explanations: list[RejectedTrimmedExplanation] = field(default_factory=list)
+    seen: set[tuple[str, str | None, str | None, str]] = field(default_factory=set)
+
+    def add(
+        self,
+        *,
+        decision_type: DecisionExplanationType,
+        order_plan_id: str | None,
+        intent_id: str | None,
+        symbol: str | None,
+        reason_codes: Iterable[str],
+        notional: float,
+        source: str,
+    ) -> None:
+        normalized_reasons = unique_text(reason_codes) or ["unknown"]
+        key = (decision_type, order_plan_id, intent_id, source)
+        if key in self.seen:
+            return
+        self.seen.add(key)
+        detail = ", ".join(normalized_reasons)
+        self.explanations.append(
+            RejectedTrimmedExplanation(
+                order_plan_id=order_plan_id,
+                intent_id=intent_id,
+                symbol=symbol_key(symbol) if symbol else None,
+                decision_type=decision_type,
+                reason_codes=normalized_reasons,
+                notional=round(notional, 2),
+                source=source,
+                explanation=f"{decision_type} {order_plan_id or intent_id or 'unknown'} because {detail}.",
+            )
+        )
+
+
+@dataclass(frozen=True)
+class _PositionAttributionContext:
+    entries_by_key: dict[str, list[LedgerEntry]]
+    orders_by_key: dict[str, OrderPlan]
+    signals_by_symbol: dict[str, Signal]
+    risk_reasons_by_key: dict[str, list[str]]
+    trimmed_keys: set[str]
+    rejected_keys: set[str]
+    keys: list[str]
 
 
 class AttributionReportBuilder:
@@ -33,6 +96,104 @@ class AttributionReportBuilder:
         batch_risk_decisions: Sequence[BatchRiskDecision] | None = None,
         snapshot: PortfolioSnapshot | None = None,
     ) -> AttributionReport:
+        selected = self._selected_inputs(
+            policy=policy,
+            ledger_entries=ledger_entries,
+            signals=signals,
+            orders=orders,
+            portfolio_plans=portfolio_plans,
+            batch_risk_decisions=batch_risk_decisions,
+        )
+        rejected_trimmed = self._rejected_trimmed_explanations(
+            entries=selected.entries,
+            orders=selected.orders,
+            batch_risk_decisions=selected.risk_decisions,
+        )
+        review_flags = self._review_flags(
+            entries=selected.entries,
+            paper_metrics=paper_metrics,
+            signals=selected.signals,
+            rejected_trimmed=rejected_trimmed,
+            policy=policy,
+        )
+        status, unavailable_reason = self._availability(entries=selected.entries, paper_metrics=paper_metrics)
+        return self._build_report(
+            policy=policy,
+            selected=selected,
+            paper_metrics=paper_metrics,
+            snapshot=snapshot,
+            rejected_trimmed=rejected_trimmed,
+            review_flags=review_flags,
+            status=status,
+            unavailable_reason=unavailable_reason,
+        )
+
+    def _build_report(
+        self,
+        *,
+        policy: UserPolicy,
+        selected: _SelectedAttributionInputs,
+        paper_metrics: PaperTrialMetrics,
+        snapshot: PortfolioSnapshot | None,
+        rejected_trimmed: Sequence[RejectedTrimmedExplanation],
+        review_flags: Sequence[ReviewFlag],
+        status: str,
+        unavailable_reason: str | None,
+    ) -> AttributionReport:
+        return AttributionReport(
+            status=status,
+            unavailable_reason=unavailable_reason,
+            policy_intent=self._policy_intent(policy),
+            ledger_event_count=len(selected.entries),
+            ledger_sources=sorted({entry.source for entry in selected.entries}),
+            data_modes=sorted({entry.data_mode for entry in selected.entries}),
+            paper_trial_metrics=paper_metrics,
+            signal_contributions=self._signal_contributions(
+                signals=selected.signals,
+                latest_plan=selected.latest_plan,
+                intended_by_symbol=selected.intended_by_symbol,
+                filled_by_symbol=selected.filled_by_symbol,
+            ),
+            risk_budget=self._risk_budget(
+                paper_metrics=paper_metrics,
+                batch_risk_decisions=selected.risk_decisions,
+            ),
+            sector_attribution=self._sector_attribution(
+                symbols=selected.touched_symbols,
+                intended_by_symbol=selected.intended_by_symbol,
+                filled_by_symbol=selected.filled_by_symbol,
+                rejected_by_symbol=selected.rejected_by_symbol,
+                latest_plan=selected.latest_plan,
+                snapshot=snapshot,
+            ),
+            theme_attribution=self._theme_attribution(
+                policy=policy,
+                symbols=selected.touched_symbols,
+                signals=selected.signals,
+                intended_by_symbol=selected.intended_by_symbol,
+                filled_by_symbol=selected.filled_by_symbol,
+            ),
+            position_attribution=self._position_attribution(
+                entries=selected.entries,
+                orders=selected.orders,
+                signals=selected.signals,
+                batch_risk_decisions=selected.risk_decisions,
+            ),
+            rejected_trimmed_explanations=rejected_trimmed,
+            review_flags=review_flags,
+            live_trading_enabled=False,
+        )
+
+    def _selected_inputs(
+        self,
+        *,
+        policy: UserPolicy,
+        ledger_entries: Sequence[LedgerEntry],
+        signals: Sequence[Signal] | None,
+        orders: Sequence[OrderPlan] | None,
+        portfolio_plans: Sequence[PortfolioPlan] | None,
+        batch_risk_decisions: Sequence[BatchRiskDecision] | None,
+    ) -> _SelectedAttributionInputs:
         entries = [entry for entry in ledger_entries if entry.policy_id == policy.policy_id]
         selected_signals = [
             signal
@@ -41,78 +202,36 @@ class AttributionReportBuilder:
         ]
         selected_orders = [order for order in (orders or []) if order.policy_id == policy.policy_id]
         selected_plans = [plan for plan in (portfolio_plans or []) if plan.policy_id == policy.policy_id]
-        risk_decisions = list(batch_risk_decisions or [])
         latest_plan = selected_plans[-1] if selected_plans else None
-
         intended_by_symbol = self._notional_by_symbol(entries, {LedgerEventType.order_intent})
         filled_by_symbol = self._notional_by_symbol(entries, {LedgerEventType.fill, LedgerEventType.partial_fill})
         rejected_by_symbol = self._notional_by_symbol(entries, {LedgerEventType.reject})
-        touched_symbols = self._touched_symbols(
+        return _SelectedAttributionInputs(
             entries=entries,
             signals=selected_signals,
             orders=selected_orders,
+            risk_decisions=list(batch_risk_decisions or []),
             latest_plan=latest_plan,
-        )
-        rejected_trimmed = self._rejected_trimmed_explanations(
-            entries=entries,
-            orders=selected_orders,
-            batch_risk_decisions=risk_decisions,
-        )
-        review_flags = self._review_flags(
-            entries=entries,
-            paper_metrics=paper_metrics,
-            signals=selected_signals,
-            rejected_trimmed=rejected_trimmed,
-            policy=policy,
-        )
-        status = "available" if entries and paper_metrics.status == "available" else "unavailable"
-        unavailable_reason = None
-        if status == "unavailable":
-            unavailable_reason = paper_metrics.unavailable_reason or "missing_required_report_inputs"
-
-        return AttributionReport(
-            status=status,
-            unavailable_reason=unavailable_reason,
-            policy_intent=self._policy_intent(policy),
-            ledger_event_count=len(entries),
-            ledger_sources=sorted({entry.source for entry in entries}),
-            data_modes=sorted({entry.data_mode for entry in entries}),
-            paper_trial_metrics=paper_metrics,
-            signal_contributions=self._signal_contributions(
-                signals=selected_signals,
-                latest_plan=latest_plan,
-                intended_by_symbol=intended_by_symbol,
-                filled_by_symbol=filled_by_symbol,
-            ),
-            risk_budget=self._risk_budget(
-                paper_metrics=paper_metrics,
-                batch_risk_decisions=risk_decisions,
-            ),
-            sector_attribution=self._sector_attribution(
-                symbols=touched_symbols,
-                intended_by_symbol=intended_by_symbol,
-                filled_by_symbol=filled_by_symbol,
-                rejected_by_symbol=rejected_by_symbol,
-                latest_plan=latest_plan,
-                snapshot=snapshot,
-            ),
-            theme_attribution=self._theme_attribution(
-                policy=policy,
-                symbols=touched_symbols,
-                signals=selected_signals,
-                intended_by_symbol=intended_by_symbol,
-                filled_by_symbol=filled_by_symbol,
-            ),
-            position_attribution=self._position_attribution(
+            intended_by_symbol=intended_by_symbol,
+            filled_by_symbol=filled_by_symbol,
+            rejected_by_symbol=rejected_by_symbol,
+            touched_symbols=self._touched_symbols(
                 entries=entries,
-                orders=selected_orders,
                 signals=selected_signals,
-                batch_risk_decisions=risk_decisions,
+                orders=selected_orders,
+                latest_plan=latest_plan,
             ),
-            rejected_trimmed_explanations=rejected_trimmed,
-            review_flags=review_flags,
-            live_trading_enabled=False,
         )
+
+    def _availability(
+        self,
+        *,
+        entries: Sequence[LedgerEntry],
+        paper_metrics: PaperTrialMetrics,
+    ) -> tuple[str, str | None]:
+        if entries and paper_metrics.status == "available":
+            return "available", None
+        return "unavailable", paper_metrics.unavailable_reason or "missing_required_report_inputs"
 
     def unavailable_report(
         self,
@@ -345,11 +464,27 @@ class AttributionReportBuilder:
         signals: Sequence[Signal],
         batch_risk_decisions: Sequence[BatchRiskDecision],
     ) -> list[PositionAttribution]:
-        entries_by_key: dict[str, list[LedgerEntry]] = defaultdict(list)
-        for entry in entries:
-            entries_by_key[self._entry_key(entry)].append(entry)
+        context = self._position_attribution_context(
+            entries=entries,
+            orders=orders,
+            signals=signals,
+            batch_risk_decisions=batch_risk_decisions,
+        )
+        return [
+            self._build_position_attribution(key=key, context=context)
+            for key in context.keys
+        ]
+
+    def _position_attribution_context(
+        self,
+        *,
+        entries: Sequence[LedgerEntry],
+        orders: Sequence[OrderPlan],
+        signals: Sequence[Signal],
+        batch_risk_decisions: Sequence[BatchRiskDecision],
+    ) -> _PositionAttributionContext:
+        entries_by_key = self._entries_by_key(entries)
         orders_by_key = {order.order_plan_id: order for order in orders}
-        signals_by_symbol = {self._symbol(signal.symbol): signal for signal in signals}
         risk_reasons_by_key = self._risk_reasons_by_key(batch_risk_decisions)
         trimmed_keys = {
             order_id
@@ -362,59 +497,84 @@ class AttributionReportBuilder:
             for decision in batch_risk_decisions
             for order_id in decision.rejected_order_plan_ids
         }
+        return _PositionAttributionContext(
+            entries_by_key=entries_by_key,
+            orders_by_key=orders_by_key,
+            signals_by_symbol={self._symbol(signal.symbol): signal for signal in signals},
+            risk_reasons_by_key=risk_reasons_by_key,
+            trimmed_keys=trimmed_keys,
+            rejected_keys=rejected_keys,
+            keys=sorted(set(entries_by_key) | set(orders_by_key) | set(risk_reasons_by_key)),
+        )
 
-        keys = sorted(set(entries_by_key) | set(orders_by_key) | set(risk_reasons_by_key))
-        attributions: list[PositionAttribution] = []
-        for key in keys:
-            grouped_entries = entries_by_key.get(key, [])
-            order = orders_by_key.get(key)
-            symbol = self._symbol(
-                self._first_not_none([entry.symbol for entry in grouped_entries])
-                or (order.intent.symbol if order is not None else "unknown")
-            )
-            intended = self._entry_notional_sum(grouped_entries, {LedgerEventType.order_intent})
-            if intended <= 0 and order is not None:
-                intended = round(order.intent.notional, 2)
-            filled = self._entry_notional_sum(grouped_entries, {LedgerEventType.fill, LedgerEventType.partial_fill})
-            rejected = self._entry_notional_sum(grouped_entries, {LedgerEventType.reject})
-            risk_reasons = risk_reasons_by_key.get(key, [])
-            status = self._position_status(
-                key=key,
-                intended=intended,
-                filled=filled,
-                rejected=rejected,
-                order=order,
-                trimmed_keys=trimmed_keys,
-                rejected_keys=rejected_keys,
-            )
-            signal = signals_by_symbol.get(symbol)
-            signal_reason = order.intent.reason if order is not None else (signal.reason if signal is not None else None)
-            explanation = self._position_explanation(
+    def _build_position_attribution(
+        self,
+        *,
+        key: str,
+        context: _PositionAttributionContext,
+    ) -> PositionAttribution:
+        grouped_entries = context.entries_by_key.get(key, [])
+        order = context.orders_by_key.get(key)
+        symbol = self._position_symbol(grouped_entries=grouped_entries, order=order)
+        intended = self._position_intended_notional(grouped_entries=grouped_entries, order=order)
+        filled = self._entry_notional_sum(grouped_entries, {LedgerEventType.fill, LedgerEventType.partial_fill})
+        rejected = self._entry_notional_sum(grouped_entries, {LedgerEventType.reject})
+        risk_reasons = context.risk_reasons_by_key.get(key, [])
+        status = self._position_status(
+            key=key,
+            intended=intended,
+            filled=filled,
+            rejected=rejected,
+            order=order,
+            trimmed_keys=context.trimmed_keys,
+            rejected_keys=context.rejected_keys,
+        )
+        signal = context.signals_by_symbol.get(symbol)
+        signal_reason = order.intent.reason if order is not None else (signal.reason if signal is not None else None)
+        return PositionAttribution(
+            symbol=symbol,
+            order_plan_id=order.order_plan_id if order is not None else self._order_plan_id(grouped_entries),
+            intent_id=(order.intent.intent_id if order is not None else self._intent_id(grouped_entries)),
+            side=(order.intent.side if order is not None else self._side(grouped_entries)),
+            status=status,
+            intended_notional=intended,
+            filled_notional=filled,
+            rejected_notional=rejected,
+            target_weight=(order.intent.target_weight if order is not None else self._target_weight(grouped_entries)),
+            signal_reason=signal_reason,
+            risk_reasons=risk_reasons,
+            ledger_event_ids=[entry.ledger_entry_id for entry in grouped_entries],
+            explanation=self._position_explanation(
                 symbol=symbol,
                 status=status,
                 intended=intended,
                 filled=filled,
                 rejected=rejected,
                 risk_reasons=risk_reasons,
-            )
-            attributions.append(
-                PositionAttribution(
-                    symbol=symbol,
-                    order_plan_id=order.order_plan_id if order is not None else self._order_plan_id(grouped_entries),
-                    intent_id=(order.intent.intent_id if order is not None else self._intent_id(grouped_entries)),
-                    side=(order.intent.side if order is not None else self._side(grouped_entries)),
-                    status=status,
-                    intended_notional=intended,
-                    filled_notional=filled,
-                    rejected_notional=rejected,
-                    target_weight=(order.intent.target_weight if order is not None else self._target_weight(grouped_entries)),
-                    signal_reason=signal_reason,
-                    risk_reasons=risk_reasons,
-                    ledger_event_ids=[entry.ledger_entry_id for entry in grouped_entries],
-                    explanation=explanation,
-                )
-            )
-        return attributions
+            ),
+        )
+
+    def _position_symbol(
+        self,
+        *,
+        grouped_entries: Sequence[LedgerEntry],
+        order: OrderPlan | None,
+    ) -> str:
+        return self._symbol(
+            self._first_not_none([entry.symbol for entry in grouped_entries])
+            or (order.intent.symbol if order is not None else "unknown")
+        )
+
+    def _position_intended_notional(
+        self,
+        *,
+        grouped_entries: Sequence[LedgerEntry],
+        order: OrderPlan | None,
+    ) -> float:
+        intended = self._entry_notional_sum(grouped_entries, {LedgerEventType.order_intent})
+        if intended <= 0 and order is not None:
+            return round(order.intent.notional, 2)
+        return intended
 
     def _rejected_trimmed_explanations(
         self,
@@ -424,45 +584,27 @@ class AttributionReportBuilder:
         batch_risk_decisions: Sequence[BatchRiskDecision],
     ) -> list[RejectedTrimmedExplanation]:
         order_by_id = {order.order_plan_id: order for order in orders}
-        entries_by_key: dict[str, list[LedgerEntry]] = defaultdict(list)
-        for entry in entries:
-            entries_by_key[self._entry_key(entry)].append(entry)
-        explanations: list[RejectedTrimmedExplanation] = []
-        seen: set[tuple[str, str | None, str | None, str]] = set()
+        entries_by_key = self._entries_by_key(entries)
+        collector = _RejectedTrimmedCollector()
+        self._collect_ledger_rejections(entries, collector)
+        self._collect_batch_risk_rejections(
+            batch_risk_decisions=batch_risk_decisions,
+            order_by_id=order_by_id,
+            entries_by_key=entries_by_key,
+            collector=collector,
+        )
+        self._collect_order_plan_rejections(orders, collector)
+        return collector.explanations
 
-        def add(
-            *,
-            decision_type: str,
-            order_plan_id: str | None,
-            intent_id: str | None,
-            symbol: str | None,
-            reason_codes: Iterable[str],
-            notional: float,
-            source: str,
-        ) -> None:
-            normalized_reasons = self._unique(reason_codes) or ["unknown"]
-            key = (decision_type, order_plan_id, intent_id, source)
-            if key in seen:
-                return
-            seen.add(key)
-            detail = ", ".join(normalized_reasons)
-            explanations.append(
-                RejectedTrimmedExplanation(
-                    order_plan_id=order_plan_id,
-                    intent_id=intent_id,
-                    symbol=self._symbol(symbol) if symbol else None,
-                    decision_type=decision_type,  # type: ignore[arg-type]
-                    reason_codes=normalized_reasons,
-                    notional=round(notional, 2),
-                    source=source,
-                    explanation=f"{decision_type} {order_plan_id or intent_id or 'unknown'} because {detail}.",
-                )
-            )
-
+    def _collect_ledger_rejections(
+        self,
+        entries: Sequence[LedgerEntry],
+        collector: _RejectedTrimmedCollector,
+    ) -> None:
         for entry in entries:
             if entry.event_type != LedgerEventType.reject:
                 continue
-            add(
+            collector.add(
                 decision_type="rejected",
                 order_plan_id=entry.order_plan_id,
                 intent_id=entry.intent_id,
@@ -472,42 +614,112 @@ class AttributionReportBuilder:
                 source="reconciliation_ledger",
             )
 
+    def _collect_batch_risk_rejections(
+        self,
+        *,
+        batch_risk_decisions: Sequence[BatchRiskDecision],
+        order_by_id: dict[str, OrderPlan],
+        entries_by_key: dict[str, list[LedgerEntry]],
+        collector: _RejectedTrimmedCollector,
+    ) -> None:
         for decision in batch_risk_decisions:
             fallback_reasons = self._unique([*decision.failed_checks, *decision.stale_input_reasons])
             decision_type = "trimmed" if decision.mode == "partial_batch" else "rejected"
-            handled: set[str] = set()
-            for order_key, reasons in decision.rejected_reasons.items():
-                order = order_by_id.get(order_key)
-                grouped = entries_by_key.get(order_key, [])
-                add(
-                    decision_type=decision_type,
-                    order_plan_id=order.order_plan_id if order is not None else order_key,
-                    intent_id=order.intent.intent_id if order is not None else self._intent_id(grouped),
-                    symbol=order.intent.symbol if order is not None else self._symbol_from_entries(grouped),
-                    reason_codes=reasons or fallback_reasons,
-                    notional=order.intent.notional if order is not None else self._entry_notional_sum(grouped),
-                    source="batch_risk_gate",
-                )
-                handled.add(order_key)
-            for order_id in decision.rejected_order_plan_ids:
-                if order_id in handled:
-                    continue
-                order = order_by_id.get(order_id)
-                grouped = entries_by_key.get(order_id, [])
-                add(
-                    decision_type=decision_type,
-                    order_plan_id=order.order_plan_id if order is not None else order_id,
-                    intent_id=order.intent.intent_id if order is not None else self._intent_id(grouped),
-                    symbol=order.intent.symbol if order is not None else self._symbol_from_entries(grouped),
-                    reason_codes=fallback_reasons,
-                    notional=order.intent.notional if order is not None else self._entry_notional_sum(grouped),
-                    source="batch_risk_gate",
-                )
+            handled = self._collect_batch_rejected_reasons(
+                decision=decision,
+                decision_type=decision_type,
+                fallback_reasons=fallback_reasons,
+                order_by_id=order_by_id,
+                entries_by_key=entries_by_key,
+                collector=collector,
+            )
+            self._collect_batch_rejected_order_ids(
+                decision=decision,
+                decision_type=decision_type,
+                fallback_reasons=fallback_reasons,
+                handled=handled,
+                order_by_id=order_by_id,
+                entries_by_key=entries_by_key,
+                collector=collector,
+            )
 
+    def _collect_batch_rejected_reasons(
+        self,
+        *,
+        decision: BatchRiskDecision,
+        decision_type: DecisionExplanationType,
+        fallback_reasons: list[str],
+        order_by_id: dict[str, OrderPlan],
+        entries_by_key: dict[str, list[LedgerEntry]],
+        collector: _RejectedTrimmedCollector,
+    ) -> set[str]:
+        handled: set[str] = set()
+        for order_key, reasons in decision.rejected_reasons.items():
+            order = order_by_id.get(order_key)
+            grouped = entries_by_key.get(order_key, [])
+            self._collect_batch_order(
+                decision_type=decision_type,
+                order_key=order_key,
+                order=order,
+                grouped=grouped,
+                reason_codes=reasons or fallback_reasons,
+                collector=collector,
+            )
+            handled.add(order_key)
+        return handled
+
+    def _collect_batch_rejected_order_ids(
+        self,
+        *,
+        decision: BatchRiskDecision,
+        decision_type: DecisionExplanationType,
+        fallback_reasons: list[str],
+        handled: set[str],
+        order_by_id: dict[str, OrderPlan],
+        entries_by_key: dict[str, list[LedgerEntry]],
+        collector: _RejectedTrimmedCollector,
+    ) -> None:
+        for order_id in decision.rejected_order_plan_ids:
+            if order_id in handled:
+                continue
+            self._collect_batch_order(
+                decision_type=decision_type,
+                order_key=order_id,
+                order=order_by_id.get(order_id),
+                grouped=entries_by_key.get(order_id, []),
+                reason_codes=fallback_reasons,
+                collector=collector,
+            )
+
+    def _collect_batch_order(
+        self,
+        *,
+        decision_type: DecisionExplanationType,
+        order_key: str,
+        order: OrderPlan | None,
+        grouped: Sequence[LedgerEntry],
+        reason_codes: Iterable[str],
+        collector: _RejectedTrimmedCollector,
+    ) -> None:
+        collector.add(
+            decision_type=decision_type,
+            order_plan_id=order.order_plan_id if order is not None else order_key,
+            intent_id=order.intent.intent_id if order is not None else self._intent_id(grouped),
+            symbol=order.intent.symbol if order is not None else self._symbol_from_entries(grouped),
+            reason_codes=reason_codes,
+            notional=order.intent.notional if order is not None else self._entry_notional_sum(grouped),
+            source="batch_risk_gate",
+        )
+
+    def _collect_order_plan_rejections(
+        self,
+        orders: Sequence[OrderPlan],
+        collector: _RejectedTrimmedCollector,
+    ) -> None:
         for order in orders:
             if not order.blocked_reason:
                 continue
-            add(
+            collector.add(
                 decision_type="rejected",
                 order_plan_id=order.order_plan_id,
                 intent_id=order.intent.intent_id,
@@ -516,7 +728,6 @@ class AttributionReportBuilder:
                 notional=order.intent.notional,
                 source="order_plan",
             )
-        return explanations
 
     def _review_flags(
         self,
@@ -705,27 +916,20 @@ class AttributionReportBuilder:
     def _entry_key(self, entry: LedgerEntry) -> str:
         return entry.order_plan_id or entry.intent_id or entry.ledger_entry_id
 
+    def _entries_by_key(self, entries: Sequence[LedgerEntry]) -> dict[str, list[LedgerEntry]]:
+        entries_by_key: dict[str, list[LedgerEntry]] = defaultdict(list)
+        for entry in entries:
+            entries_by_key[self._entry_key(entry)].append(entry)
+        return entries_by_key
+
     def _symbol(self, value: str) -> str:
-        return value.strip().upper()
+        return symbol_key(value)
 
     def _unique(self, values: Iterable[str | None]) -> list[str]:
-        seen: set[str] = set()
-        result: list[str] = []
-        for value in values:
-            if value is None:
-                continue
-            normalized = str(value).strip()
-            if not normalized or normalized in seen:
-                continue
-            seen.add(normalized)
-            result.append(normalized)
-        return result
+        return unique_text(values)
 
     def _first_not_none(self, values: Iterable[str | None]) -> str | None:
-        for value in values:
-            if value is not None:
-                return value
-        return None
+        return first_not_none(values)
 
     def _order_plan_id(self, entries: Sequence[LedgerEntry]) -> str | None:
         return self._first_not_none(entry.order_plan_id for entry in entries)

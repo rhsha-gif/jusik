@@ -4,7 +4,13 @@ from collections.abc import Sequence
 from typing import Any
 
 from quantpilot.packages.core.schemas import DataMode, utc_now
-from quantpilot.packages.core.marketdata.providers import _bar_symbol, _filter_bars
+from quantpilot.packages.core.marketdata.symbols import (
+    filter_bars_by_symbols,
+    symbol_from_bar,
+    symbol_key,
+    symbol_set,
+    unique_symbols_from_bars,
+)
 from quantpilot.packages.core.marketdata.types import (
     MarketDataQuality,
     OHLCVSnapshot,
@@ -48,7 +54,7 @@ class FakeOHLCVProvider:
                 usable=False,
                 degraded=True,
                 reason_codes=["provider_stale"],
-                symbol_count=len({_bar_symbol(bar) for bar in bars if _bar_symbol(bar)}),
+                symbol_count=len(unique_symbols_from_bars(bars)),
             ),
         )
 
@@ -59,12 +65,12 @@ class FakeOHLCVProvider:
         horizon: str | None = None,
     ) -> OHLCVSnapshot:
         del horizon
-        bars = _filter_bars(self._bars, symbols)
+        bars = filter_bars_by_symbols(self._bars, symbols)
         quality = self._quality or MarketDataQuality(
             usable=bool(bars),
             degraded=not bool(bars),
             reason_codes=[] if bars else ["ohlcv_empty"],
-            symbol_count=len({_bar_symbol(bar) for bar in bars if _bar_symbol(bar)}),
+            symbol_count=len(unique_symbols_from_bars(bars)),
         )
         return OHLCVSnapshot(
             bars=bars,
@@ -81,13 +87,13 @@ class FakeQuoteProvider:
         status: ProviderStatus | None = None,
         quality: MarketDataQuality | None = None,
     ) -> None:
-        self._quotes = {symbol.upper(): float(price) for symbol, price in (quotes or {}).items()}
+        self._quotes = {symbol_key(symbol): float(price) for symbol, price in (quotes or {}).items()}
         self._status = status or ProviderStatus(provider_name="fake_quote", data_mode=DataMode.fixture)
         self._quality = quality
 
     @classmethod
     def from_bars(cls, bars: list[dict[str, Any]]) -> "FakeQuoteProvider":
-        return cls({_bar_symbol(bar): float(bar["close"]) for bar in bars if _bar_symbol(bar)})
+        return cls({symbol: float(bar["close"]) for bar in bars if (symbol := symbol_from_bar(bar))})
 
     @classmethod
     def unavailable(cls, *, reason: str = "fake quote provider unavailable") -> "FakeQuoteProvider":
@@ -103,7 +109,7 @@ class FakeQuoteProvider:
         )
 
     def get_quotes(self, symbols: Sequence[str]) -> QuoteSnapshot:
-        wanted = {str(symbol).strip().upper() for symbol in symbols}
+        wanted = symbol_set(symbols)
         selected = {
             symbol: Quote(symbol=symbol, last=price, as_of=utc_now())
             for symbol, price in self._quotes.items()

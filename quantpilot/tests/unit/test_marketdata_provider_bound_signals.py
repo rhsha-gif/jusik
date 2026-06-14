@@ -58,6 +58,18 @@ def test_fake_quote_provider_returns_requested_quotes() -> None:
     assert snapshot.provider_status.state == "available"
 
 
+def test_provider_symbol_matching_is_normalized() -> None:
+    bars = [{"symbol": " aaa ", "close": 105.0}]
+
+    ohlcv = FakeOHLCVProvider(bars).get_ohlcv(["AAA"])
+    quotes = FakeQuoteProvider.from_bars(bars).get_quotes([" aaa "])
+
+    assert len(ohlcv.bars) == 1
+    assert ohlcv.data_quality.symbol_count == 1
+    assert set(quotes.quotes) == {"AAA"}
+    assert quotes.provider_status.state == "available"
+
+
 def test_provider_unavailable_returns_no_buy_ready_signals() -> None:
     signal_set = generate_provider_bound_signals(
         load_default_strategy(),

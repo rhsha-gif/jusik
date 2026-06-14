@@ -6,6 +6,7 @@ import pytest
 
 from quantpilot.packages.core.execution.state_machine import ApprovalRequired, RiskCheckRequired
 from quantpilot.packages.core.harness_service import HarnessService
+from quantpilot.packages.core.ledger.types import LedgerEventType
 from quantpilot.packages.core.portfolio.planner import fixture_portfolio_snapshot, proposal_idempotency_key
 from quantpilot.packages.core.schemas import OrderStatus, RiskCheck, UserPolicy, utc_now
 
@@ -111,6 +112,11 @@ def test_level3_proposal_has_explanation_and_requires_user_approval() -> None:
     assert proposal.explanation.symbol == proposal.intent.symbol
     assert proposal.explanation.risk_check_id == proposal.risk_check_id
     assert all(item.explanation is not None and item.explanation.idempotency_key == item.idempotency_key for item in proposals)
+    ledger_entries = service.ledger.by_order_plan_id(proposal.order_plan_id)
+    assert [entry.event_type for entry in ledger_entries] == [LedgerEventType.order_intent]
+    actions = [event.action for event in service.repositories.audit_logs.list()]
+    assert "risk_check_passed" in actions
+    assert "proposal_created" in actions
     with pytest.raises(ApprovalRequired):
         service.submit_order_plan(proposal.order_plan_id)
 
@@ -142,6 +148,30 @@ def test_user_modification_creates_re_risked_proposal_with_new_key() -> None:
     assert modified.replaces_order_plan_id == proposal.order_plan_id
     assert modified.idempotency_key != proposal.idempotency_key
     assert modified.risk_check_id is not None
+    assert service.ledger.by_order_plan_id(modified.order_plan_id)[0].event_type == LedgerEventType.order_intent
+    actions = [event.action for event in service.repositories.audit_logs.list()]
+    assert "proposal_modified" in actions
+    assert "proposal_created" in actions
+
+
+def test_user_modification_rejects_buy_chasing_without_mutating_original() -> None:
+    service, plan_id = _service_with_plan()
+    proposal = next(
+        item
+        for item in service.generate_order_proposals(portfolio_plan_id=plan_id)
+        if item.intent.side == "buy" and item.auto_order_reference_price is not None
+    )
+
+    with pytest.raises(RuntimeError, match="buy limit price cannot chase"):
+        service.modify_order_plan(
+            proposal.order_plan_id,
+            quantity=proposal.intent.quantity,
+            limit_price=proposal.auto_order_reference_price + 0.01,
+        )
+
+    original = service.repositories.order_plans.require(proposal.order_plan_id)
+    assert original.status == OrderStatus.proposed
+    assert original.idempotency_key == proposal.idempotency_key
 
 
 def test_expired_risk_check_prevents_submission() -> None:

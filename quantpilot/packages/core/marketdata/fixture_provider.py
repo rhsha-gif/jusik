@@ -6,7 +6,12 @@ from pathlib import Path
 from typing import Any
 
 from quantpilot.packages.core.schemas import DataMode, utc_now
-from quantpilot.packages.core.marketdata.providers import _bar_symbol, _filter_bars
+from quantpilot.packages.core.marketdata.symbols import (
+    filter_bars_by_symbols,
+    symbol_from_bar,
+    symbol_set,
+    unique_symbols_from_bars,
+)
 from quantpilot.packages.core.marketdata.types import (
     MarketDataQuality,
     OHLCVSnapshot,
@@ -27,13 +32,12 @@ def load_fixture_ohlcv(path: Path | None = None) -> list[dict[str, Any]]:
 
 
 def _quality(bars: list[dict[str, Any]]) -> MarketDataQuality:
-    symbols = {_bar_symbol(bar) for bar in bars if _bar_symbol(bar)}
     usable = bool(bars)
     return MarketDataQuality(
         usable=usable,
         degraded=not usable,
         reason_codes=[] if usable else ["ohlcv_empty"],
-        symbol_count=len(symbols),
+        symbol_count=len(unique_symbols_from_bars(bars)),
         data_mode=DataMode.fixture,
     )
 
@@ -50,7 +54,7 @@ class FixtureOHLCVProvider:
         horizon: str | None = None,
     ) -> OHLCVSnapshot:
         del horizon
-        bars = _filter_bars(self._bars, symbols)
+        bars = filter_bars_by_symbols(self._bars, symbols)
         return OHLCVSnapshot(
             bars=bars,
             provider_status=ProviderStatus(provider_name=self.provider_name, data_mode=DataMode.fixture),
@@ -69,10 +73,10 @@ class FixtureQuoteProvider:
         self._bars = [dict(bar) for bar in (bars if bars is not None else load_fixture_ohlcv())]
 
     def get_quotes(self, symbols: Sequence[str]) -> QuoteSnapshot:
-        wanted = {str(symbol).strip().upper() for symbol in symbols}
+        wanted = symbol_set(symbols)
         quotes: dict[str, Quote] = {}
         for bar in self._bars:
-            symbol = _bar_symbol(bar)
+            symbol = symbol_from_bar(bar)
             if not wanted or symbol in wanted:
                 quotes[symbol] = Quote(symbol=symbol, last=float(bar["close"]), as_of=utc_now())
 

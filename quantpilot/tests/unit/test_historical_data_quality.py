@@ -145,6 +145,20 @@ def test_invalid_ohlc_blocks() -> None:
     assert "invalid_ohlc" in _codes(report)
 
 
+def test_ohlcv_issue_order_keeps_price_checks_before_volume_checks() -> None:
+    report = _report(
+        [_bar("AAA", date(2026, 1, 5), high=98.0, low=99.0, volume=0)],
+        start_date=date(2026, 1, 5),
+        end_date=date(2026, 1, 5),
+    )
+
+    assert [(issue.code, issue.message) for issue in report.issues] == [
+        ("invalid_ohlc", "high 98.0 is below low 99.0"),
+        ("invalid_ohlc", "open and close must fall within low/high range"),
+        ("invalid_volume", "volume must be positive"),
+    ]
+
+
 def test_duplicate_date_blocks() -> None:
     report = _report(
         [_bar("AAA", date(2026, 1, 5)), _bar("AAA", date(2026, 1, 5), close=100.5)],

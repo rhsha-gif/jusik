@@ -153,3 +153,20 @@ def test_monthly_loss_stop_rejects_batch() -> None:
 
     assert not decision.passed
     assert "monthly_loss_stop_all_autotrading" in decision.failed_checks
+
+
+def test_failed_check_order_is_stable_for_multiple_rejections() -> None:
+    policy = UserPolicy(kill_switch_engaged=True, max_daily_turnover=50_000)
+    intents = [_intent("AAA", 100_000)]
+
+    decision = run_batch_risk_gate(
+        policy=policy,
+        portfolio_plan=_plan(policy, intents),
+        snapshot=fixture_portfolio_snapshot(),
+        quotes={"AAA": 100},
+    )
+
+    assert decision.failed_checks == [
+        "kill_switch_not_engaged",
+        "max_daily_turnover_after_batch",
+    ]

@@ -131,6 +131,18 @@ def test_fees_and_slippage_reduce_return() -> None:
     assert any("unrealistic_cost_assumption" in warning for warning in zero.warnings)
 
 
+def test_backtest_fill_economics_are_deterministic() -> None:
+    result = run_backtest(_buy_request(), PriceHistoryOnlyProvider(_rows()))
+    trade = result.trades[0]
+
+    assert trade.status == "filled"
+    assert trade.side == "buy"
+    assert trade.fill_price == pytest.approx(100.05)
+    assert trade.notional == pytest.approx(5000.0)
+    assert trade.fees == pytest.approx(7.5)
+    assert trade.slippage_cost == pytest.approx(2.498751)
+
+
 def test_max_drawdown_calculation_on_hand_written_equity_curve() -> None:
     assert calculate_max_drawdown([100.0, 120.0, 90.0, 110.0]) == pytest.approx(0.25)
 

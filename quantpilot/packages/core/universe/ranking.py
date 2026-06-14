@@ -3,6 +3,7 @@ from __future__ import annotations
 from collections.abc import Mapping, Sequence
 from typing import Any
 
+from quantpilot.packages.core.normalization import parse_float, symbol_key
 from quantpilot.packages.core.schemas import CandidateUniverseItem, PortfolioSnapshot, UserPolicy
 from quantpilot.packages.core.universe.ranking_types import CandidateScore, RankedCandidate, RankingComponentName, RankingExplanation
 
@@ -27,16 +28,11 @@ def _clamp_score(value: float) -> float:
 
 
 def _symbol(value: str) -> str:
-    return value.strip().upper()
+    return symbol_key(value)
 
 
 def _as_float(value: Any) -> float | None:
-    if value is None:
-        return None
-    try:
-        return float(value)
-    except (TypeError, ValueError):
-        return None
+    return parse_float(value)
 
 
 def _as_bool(value: Any) -> bool | None:

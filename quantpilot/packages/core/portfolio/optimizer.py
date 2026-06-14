@@ -3,6 +3,7 @@ from __future__ import annotations
 from dataclasses import dataclass, field
 from typing import Iterable
 
+from quantpilot.packages.core.normalization import symbol_key
 from quantpilot.packages.core.portfolio.optimizer_types import (
     ExpectedReturnRiskProxy,
     OptimizationInput,
@@ -30,7 +31,7 @@ class _Candidate:
 
 
 def _symbol(value: str) -> str:
-    return value.strip().upper()
+    return symbol_key(value)
 
 
 def _weight(value: float) -> float:

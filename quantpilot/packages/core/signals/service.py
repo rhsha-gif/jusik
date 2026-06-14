@@ -9,6 +9,7 @@ from quantpilot.packages.core.marketdata.fixture_provider import (
     load_fixture_ohlcv as _load_fixture_ohlcv,
 )
 from quantpilot.packages.core.marketdata.providers import OHLCVProvider, QuoteProvider
+from quantpilot.packages.core.marketdata.symbols import unique_symbols_from_bars, unique_symbols_from_securities
 from quantpilot.packages.core.marketdata.types import (
     MarketDataQuality,
     ProviderStatus,
@@ -225,33 +226,6 @@ def generate_signals(
     return signals
 
 
-def _symbol_key(value: Any) -> str:
-    return str(value).strip().upper()
-
-
-def _bar_symbols(bars: list[dict[str, Any]]) -> list[str]:
-    symbols = sorted(
-        {
-            _symbol_key(bar.get("symbol", bar.get("ticker", "")))
-            for bar in bars
-            if _symbol_key(bar.get("symbol", bar.get("ticker", "")))
-        }
-    )
-    return symbols
-
-
-def _security_symbols(securities: list[dict[str, Any]] | None) -> list[str]:
-    if securities is None:
-        return []
-    return sorted(
-        {
-            _symbol_key(security.get("ticker", security.get("symbol", "")))
-            for security in securities
-            if _symbol_key(security.get("ticker", security.get("symbol", "")))
-        }
-    )
-
-
 def _issue_codes_for_status(channel: str, status: ProviderStatus) -> list[str]:
     if status.state == "unavailable":
         return ["provider_unavailable", f"{channel}_provider_unavailable"]
@@ -372,7 +346,7 @@ def generate_provider_bound_signals(
     securities: list[dict[str, Any]] | None = None,
     horizon: str | None = None,
 ) -> SignalSet:
-    requested_symbols = _security_symbols(securities)
+    requested_symbols = unique_symbols_from_securities(securities)
     provider_status: dict[str, ProviderStatus] = {}
     qualities: list[MarketDataQuality] = []
 
@@ -415,7 +389,7 @@ def generate_provider_bound_signals(
     bars = ohlcv.bars
     provider_status["ohlcv"] = ohlcv.provider_status
     qualities.append(ohlcv.data_quality)
-    signal_symbols = _bar_symbols(bars) or requested_symbols
+    signal_symbols = unique_symbols_from_bars(bars) or requested_symbols
 
     if quote_provider is not None:
         try:

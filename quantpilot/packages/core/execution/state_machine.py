@@ -98,6 +98,30 @@ def is_krx_auto_order_window(now: datetime | None = None) -> bool:
     return open_minutes <= minutes < close_minutes
 
 
+def _quote_not_stale(*, order_plan: OrderPlan, policy: UserPolicy, current_time: datetime) -> bool:
+    quote_age = (current_time - order_plan.intent.quote_time).total_seconds()
+    return 0 <= quote_age <= policy.stale_quote_max_age_seconds
+
+
+def _order_type_allowed(*, order_plan: OrderPlan, policy: UserPolicy) -> bool:
+    if order_plan.intent.order_type not in policy.allowed_order_types:
+        return False
+    return order_plan.intent.order_type != OrderType.market or market_orders_enabled()
+
+
+def _monthly_loss_stop_clear(*, snapshot: PortfolioSnapshot, policy: UserPolicy) -> bool:
+    return snapshot.monthly_loss_ratio > policy.monthly_loss_stop_all_autotrading
+
+
+def _monthly_loss_pause_allows_order(*, order_plan: OrderPlan, snapshot: PortfolioSnapshot, policy: UserPolicy) -> bool:
+    monthly_pause_buy = order_plan.intent.side == "buy" and snapshot.monthly_loss_ratio <= policy.monthly_loss_pause_new_buys
+    return not monthly_pause_buy
+
+
+def _idempotency_key_new(*, order_plan: OrderPlan, seen: set[str], guardrail_state: GuardrailState) -> bool:
+    return order_plan.idempotency_key not in seen and order_plan.idempotency_key not in set(guardrail_state.submitted_idempotency_keys)
+
+
 class _AuthorityRecorder:
     def __init__(self, *, policy_version: int) -> None:
         self.policy_version = policy_version
@@ -158,8 +182,7 @@ def authorize_level4(
     if result := record("broker_health", guardrail_state.broker_healthy, "broker heartbeat must be healthy"):
         return result
 
-    quote_age = (current_time - order_plan.intent.quote_time).total_seconds()
-    if result := record("quote_not_stale", 0 <= quote_age <= policy.stale_quote_max_age_seconds, "quote must be fresh for automatic submission"):
+    if result := record("quote_not_stale", _quote_not_stale(order_plan=order_plan, policy=policy, current_time=current_time), "quote must be fresh for automatic submission"):
         return result
 
     promotion_ok = strategy.promotion_status in {"approved", "validated_l4"}
@@ -172,23 +195,18 @@ def authorize_level4(
     if result := record("krx_auto_order_window", is_krx_auto_order_window(current_time), "automatic orders are blocked during auction windows"):
         return result
 
-    order_type_allowed = order_plan.intent.order_type in policy.allowed_order_types
-    if order_plan.intent.order_type == OrderType.market and not market_orders_enabled():
-        order_type_allowed = False
-    if result := record("order_type_allowed", order_type_allowed, "market orders require MARKET_ORDERS_ENABLED=true"):
+    if result := record("order_type_allowed", _order_type_allowed(order_plan=order_plan, policy=policy), "market orders require MARKET_ORDERS_ENABLED=true"):
         return result
 
-    monthly_stop = snapshot.monthly_loss_ratio <= policy.monthly_loss_stop_all_autotrading
-    if result := record("monthly_loss_stop_not_triggered", not monthly_stop, "monthly stop blocks all automatic trading"):
+    if result := record("monthly_loss_stop_not_triggered", _monthly_loss_stop_clear(snapshot=snapshot, policy=policy), "monthly stop blocks all automatic trading"):
         return result
-    monthly_pause_buy = order_plan.intent.side == "buy" and snapshot.monthly_loss_ratio <= policy.monthly_loss_pause_new_buys
-    if result := record("monthly_loss_pause_allows_order", not monthly_pause_buy, "monthly pause blocks new automatic buys"):
+    if result := record("monthly_loss_pause_allows_order", _monthly_loss_pause_allows_order(order_plan=order_plan, snapshot=snapshot, policy=policy), "monthly pause blocks new automatic buys"):
         return result
 
     conflict_key = f"{strategy.strategy_id}:{order_plan.intent.symbol}:{order_plan.intent.side}"
     if result := record("no_unfilled_conflicting_order", conflict_key not in set(guardrail_state.unfilled_order_keys), "no matching unfilled order may exist"):
         return result
-    if result := record("idempotency_key_new", order_plan.idempotency_key not in seen and order_plan.idempotency_key not in set(guardrail_state.submitted_idempotency_keys), "idempotency key must be new"):
+    if result := record("idempotency_key_new", _idempotency_key_new(order_plan=order_plan, seen=seen, guardrail_state=guardrail_state), "idempotency key must be new"):
         return result
 
     risk_check = run_risk_check(
@@ -249,8 +267,7 @@ def authorize_level5(
     if result := record("broker_health", guardrail_state.broker_healthy, "broker heartbeat must be healthy"):
         return result
 
-    quote_age = (current_time - order_plan.intent.quote_time).total_seconds()
-    if result := record("quote_not_stale", 0 <= quote_age <= policy.stale_quote_max_age_seconds, "quote must be fresh for automatic submission"):
+    if result := record("quote_not_stale", _quote_not_stale(order_plan=order_plan, policy=policy, current_time=current_time), "quote must be fresh for automatic submission"):
         return result
 
     registry_ok = registry_entry.status == "validated_l5"
@@ -269,23 +286,18 @@ def authorize_level5(
     if result := record("krx_auto_order_window", is_krx_auto_order_window(current_time), "automatic orders are blocked during auction windows"):
         return result
 
-    order_type_allowed = order_plan.intent.order_type in policy.allowed_order_types
-    if order_plan.intent.order_type == OrderType.market and not market_orders_enabled():
-        order_type_allowed = False
-    if result := record("order_type_allowed", order_type_allowed, "market orders require MARKET_ORDERS_ENABLED=true"):
+    if result := record("order_type_allowed", _order_type_allowed(order_plan=order_plan, policy=policy), "market orders require MARKET_ORDERS_ENABLED=true"):
         return result
 
-    monthly_stop = snapshot.monthly_loss_ratio <= policy.monthly_loss_stop_all_autotrading
-    if result := record("monthly_loss_stop_not_triggered", not monthly_stop, "monthly stop blocks all automatic trading"):
+    if result := record("monthly_loss_stop_not_triggered", _monthly_loss_stop_clear(snapshot=snapshot, policy=policy), "monthly stop blocks all automatic trading"):
         return result
-    monthly_pause_buy = order_plan.intent.side == "buy" and snapshot.monthly_loss_ratio <= policy.monthly_loss_pause_new_buys
-    if result := record("monthly_loss_pause_allows_order", not monthly_pause_buy, "monthly pause blocks new automatic buys"):
+    if result := record("monthly_loss_pause_allows_order", _monthly_loss_pause_allows_order(order_plan=order_plan, snapshot=snapshot, policy=policy), "monthly pause blocks new automatic buys"):
         return result
 
     conflict_key = f"{registry_entry.strategy_id}:{order_plan.intent.symbol}:{order_plan.intent.side}"
     if result := record("no_unfilled_conflicting_order", conflict_key not in set(guardrail_state.unfilled_order_keys), "no matching unfilled order may exist"):
         return result
-    if result := record("idempotency_key_new", order_plan.idempotency_key not in seen and order_plan.idempotency_key not in set(guardrail_state.submitted_idempotency_keys), "idempotency key must be new"):
+    if result := record("idempotency_key_new", _idempotency_key_new(order_plan=order_plan, seen=seen, guardrail_state=guardrail_state), "idempotency key must be new"):
         return result
 
     risk_check = run_risk_check(

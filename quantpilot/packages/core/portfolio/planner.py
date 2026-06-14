@@ -4,6 +4,7 @@ from datetime import date
 from hashlib import sha256
 from typing import Literal
 
+from quantpilot.packages.core.normalization import symbol_key
 from quantpilot.packages.core.portfolio.optimizer import DeterministicPortfolioOptimizer
 from quantpilot.packages.core.portfolio.optimizer_types import (
     ExpectedReturnRiskProxy,
@@ -77,7 +78,7 @@ def _quote_for_symbol(snapshot: PortfolioSnapshot, symbol: str, quotes: dict[str
 
 
 def _symbol(value: str) -> str:
-    return value.strip().upper()
+    return symbol_key(value)
 
 
 def _cash_target_from_targets(

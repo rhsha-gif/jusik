@@ -34,3 +34,10 @@ def test_no_fallback_ever_enables_order_submission() -> None:
     manager = FallbackManager()
     for reason_code in FALLBACK_MATRIX:
         assert manager.for_reason(reason_code).order_submission_enabled is False
+
+
+def test_level5_authority_check_fallback_mappings_are_known_reason_codes() -> None:
+    from quantpilot.packages.core.execution.fallback_manager import FALLBACK_MATRIX
+    from quantpilot.packages.core.operator.service import CHECK_TO_FALLBACK_REASON
+
+    assert set(CHECK_TO_FALLBACK_REASON.values()) <= set(FALLBACK_MATRIX)

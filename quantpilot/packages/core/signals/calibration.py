@@ -5,6 +5,7 @@ from datetime import date
 from typing import Any
 
 from quantpilot.packages.core.marketdata.types import MarketDataQuality, ProviderStatus
+from quantpilot.packages.core.normalization import symbol_key
 from quantpilot.packages.core.schemas import DataMode, Signal, SignalAction, UserPolicy
 from quantpilot.packages.core.signals.multifactor import build_multi_factor_score
 from quantpilot.packages.core.signals.types import (
@@ -32,7 +33,7 @@ HORIZON_MULTIPLIERS = {
 
 
 def _symbol(value: str) -> str:
-    return value.strip().upper()
+    return symbol_key(value)
 
 
 def _clamp_unit(value: float) -> float:

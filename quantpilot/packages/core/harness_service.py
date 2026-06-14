@@ -1,32 +1,26 @@
 from __future__ import annotations
 
-from dataclasses import dataclass
-from datetime import datetime, timedelta
-
 from quantpilot.packages.brokers.mock_broker import MockBroker
 from quantpilot.packages.brokers.paper_broker import PaperBroker
-from quantpilot.packages.core.execution.state_machine import ApprovalRequired, RiskCheckRequired, authorize_level4, transition_order_plan
+from quantpilot.packages.core.execution.state_machine import authorize_level4, transition_order_plan
 from quantpilot.packages.core.execution.order_context import (
-    SubmitBatchContext,
     build_guardrail_state,
-    build_submit_batch_context,
     collect_seen_idempotency_keys,
-    orders_for_submit_batch,
     quotes_for_intents,
 )
+from quantpilot.packages.core.execution.proposal_service import ProposalService
+from quantpilot.packages.core.execution.submission_service import SubmissionService
 from quantpilot.packages.core.policy.parser import DEFAULT_POLICY_TEXT, parse_policy_text
 from quantpilot.packages.core.level12.service import Level12RunResult, Level12Service
 from quantpilot.packages.core.ledger.service import ReconciliationLedgerService
 from quantpilot.packages.core.portfolio.planner import (
     build_portfolio_plan,
-    current_weight,
     fixture_portfolio_snapshot,
-    proposal_idempotency_key,
 )
 from quantpilot.packages.core.reports.service import build_operation_report
 from quantpilot.packages.core.risk.batch import run_batch_risk_gate
 from quantpilot.packages.core.risk.gatekeeper import run_risk_check
-from quantpilot.packages.core.risk.types import BatchRiskConfig, BatchRiskDecision
+from quantpilot.packages.core.risk.types import BatchRiskConfig
 from quantpilot.packages.core.schemas import (
     BrokerMode,
     BrokerOrder,
@@ -39,12 +33,8 @@ from quantpilot.packages.core.schemas import (
     OrderStatus,
     PortfolioPlan,
     PortfolioSnapshot,
-    ProposalExplanation,
-    RiskCheck,
     Signal,
-    StrategyRecipe,
     UserPolicy,
-    new_id,
     utc_now,
 )
 from quantpilot.packages.core.data.providers import (
@@ -58,14 +48,6 @@ from quantpilot.packages.core.signals.service import generate_signals
 from quantpilot.packages.core.strategies.loader import load_default_strategy
 from quantpilot.packages.db.audit import AuditRecorder
 from quantpilot.packages.db.repositories import RepositoryRegistry
-
-
-@dataclass(frozen=True)
-class _ProposalCandidate:
-    order_plan: OrderPlan
-    signal: Signal | None
-    strategy_id: str
-    strategy_version: str
 
 
 class HarnessService:
@@ -205,29 +187,15 @@ class HarnessService:
         portfolio_plan = self.repositories.portfolio_plans.require(portfolio_plan_id)
         policy = self.repositories.policies.require(portfolio_plan.policy_id)
         portfolio_snapshot = snapshot or fixture_portfolio_snapshot()
-        candidate_orders = [
-            OrderPlan(
-                policy_id=policy.policy_id,
-                policy_version=policy.version,
-                intent=intent,
-                idempotency_key=f"{policy.policy_id}:{portfolio_plan.plan_id}:{intent.intent_id}",
-            )
-            for intent in portfolio_plan.order_intents
-        ]
+        candidate_orders = self._candidate_order_plans(policy=policy, portfolio_plan=portfolio_plan)
         accepted_order_ids = {order.order_plan_id for order in candidate_orders}
         if run_risk:
-            decision = run_batch_risk_gate(
+            decision = self._order_creation_batch_decision(
                 policy=policy,
                 portfolio_plan=portfolio_plan,
                 snapshot=portfolio_snapshot,
-                quotes=self._quotes_for_intents([order.intent for order in candidate_orders]),
-                order_plans=candidate_orders,
-                config=BatchRiskConfig(
-                    partial_allow=partial_allow,
-                    quote_max_age_seconds=policy.human_review_quote_max_age_seconds,
-                ),
-                guardrail_state=self._guardrail_state(policy=policy, strategy_id="order_planner_stub"),
-                seen_idempotency_keys=self._seen_idempotency_keys(),
+                candidate_orders=candidate_orders,
+                partial_allow=partial_allow,
             )
             if not decision.passed:
                 self.audit.emit(
@@ -241,15 +209,73 @@ class HarnessService:
                 return []
             accepted_order_ids = set(decision.accepted_order_plan_ids)
             if decision.mode == "partial_batch":
-                self.audit.emit(
-                    user_id=policy.user_id,
-                    entity_type="portfolio_plan",
-                    entity_id=portfolio_plan.plan_id,
-                    action="batch_risk_partial_allowed",
-                    after_state=decision,
-                    source="batch_risk_gate",
-                )
+                self._record_partial_batch(policy=policy, portfolio_plan=portfolio_plan, decision=decision)
 
+        return self._persist_order_plan_candidates(
+            policy=policy,
+            candidate_orders=candidate_orders,
+            accepted_order_ids=accepted_order_ids,
+            portfolio_plan=portfolio_plan,
+            portfolio_snapshot=portfolio_snapshot,
+            run_risk=run_risk,
+            propose_passed=propose_passed,
+        )
+
+    def _candidate_order_plans(self, *, policy: UserPolicy, portfolio_plan: PortfolioPlan) -> list[OrderPlan]:
+        return [
+            OrderPlan(
+                policy_id=policy.policy_id,
+                policy_version=policy.version,
+                intent=intent,
+                idempotency_key=f"{policy.policy_id}:{portfolio_plan.plan_id}:{intent.intent_id}",
+            )
+            for intent in portfolio_plan.order_intents
+        ]
+
+    def _order_creation_batch_decision(
+        self,
+        *,
+        policy: UserPolicy,
+        portfolio_plan: PortfolioPlan,
+        snapshot: PortfolioSnapshot,
+        candidate_orders: list[OrderPlan],
+        partial_allow: bool,
+    ):
+        return run_batch_risk_gate(
+            policy=policy,
+            portfolio_plan=portfolio_plan,
+            snapshot=snapshot,
+            quotes=self._quotes_for_intents([order.intent for order in candidate_orders]),
+            order_plans=candidate_orders,
+            config=BatchRiskConfig(
+                partial_allow=partial_allow,
+                quote_max_age_seconds=policy.human_review_quote_max_age_seconds,
+            ),
+            guardrail_state=self._guardrail_state(policy=policy, strategy_id="order_planner_stub"),
+            seen_idempotency_keys=self._seen_idempotency_keys(),
+        )
+
+    def _record_partial_batch(self, *, policy: UserPolicy, portfolio_plan: PortfolioPlan, decision) -> None:
+        self.audit.emit(
+            user_id=policy.user_id,
+            entity_type="portfolio_plan",
+            entity_id=portfolio_plan.plan_id,
+            action="batch_risk_partial_allowed",
+            after_state=decision,
+            source="batch_risk_gate",
+        )
+
+    def _persist_order_plan_candidates(
+        self,
+        *,
+        policy: UserPolicy,
+        candidate_orders: list[OrderPlan],
+        accepted_order_ids: set[str],
+        portfolio_plan: PortfolioPlan,
+        portfolio_snapshot: PortfolioSnapshot,
+        run_risk: bool,
+        propose_passed: bool,
+    ) -> list[OrderPlan]:
         created: list[OrderPlan] = []
         for order_plan in candidate_orders:
             if order_plan.order_plan_id not in accepted_order_ids:
@@ -315,61 +341,19 @@ class HarnessService:
             exclude_order_plan_ids=exclude_order_plan_ids,
         )
 
-    def _signal_by_symbol(self) -> dict[str, Signal]:
-        return {signal.symbol: signal for signal in self.repositories.signals.list()}
-
-    def _latest_strategy_for_signals(self) -> StrategyRecipe:
-        strategy = self.load_strategy()
-        return strategy
-
     def _quotes_for_intents(self, intents: list[OrderIntent]) -> dict[str, float]:
         return quotes_for_intents(intents)
 
-    def _proposal_explanation(
-        self,
-        *,
-        policy: UserPolicy,
-        order_plan: OrderPlan,
-        signal: Signal | None,
-        strategy_id: str,
-        strategy_version: str,
-        snapshot: PortfolioSnapshot,
-        risk_check: RiskCheck,
-        now: datetime,
-    ) -> ProposalExplanation:
-        intent = order_plan.intent
-        current = current_weight(snapshot, intent.symbol)
-        quote_age = (now - intent.quote_time).total_seconds()
-        warnings = []
-        if quote_age > policy.stale_quote_max_age_seconds:
-            warnings.append("stale_quote_warning")
-        return ProposalExplanation(
-            symbol=intent.symbol,
-            action=intent.side,
-            quantity=intent.quantity,
-            target_weight_delta=round(intent.target_weight - current, 6),
-            reference_price=float(intent.limit_price or 0),
-            estimated_cash_impact=round(intent.notional if intent.side == "buy" else -intent.notional, 2),
-            strategy_id=strategy_id,
-            strategy_version=strategy_version,
-            signal_reason=signal.reason if signal else intent.reason,
-            reason_codes=signal.reason_codes if signal else [],
-            current_weight=round(current, 6),
-            target_weight=intent.target_weight,
-            weight_delta=round(intent.target_weight - current, 6),
-            quote_price=float(intent.limit_price or 0),
-            quote_age_seconds=round(max(0.0, quote_age), 3),
-            limit_price=intent.limit_price,
-            estimated_notional=intent.notional,
-            stop_price_hint=signal.stop_price_hint if signal else None,
-            take_profit_hint=signal.take_profit_hint if signal else None,
-            risk_checks_passed=risk_check.passed_checks,
-            risk_checks_failed=risk_check.failed_checks,
-            risk_check_id=risk_check.risk_check_id,
-            risk_check_expires_at=risk_check.expires_at,
-            idempotency_key=order_plan.idempotency_key,
-            policy_version=policy.version,
-            warnings=warnings,
+    def _proposal_service(self) -> ProposalService:
+        return ProposalService(
+            repositories=self.repositories,
+            audit=self.audit,
+            ledger=self.ledger,
+            load_strategy=self.load_strategy,
+            seen_idempotency_keys=self._seen_idempotency_keys,
+            guardrail_state=self._guardrail_state,
+            risk_check=run_risk_check,
+            now=utc_now,
         )
 
     def generate_order_proposals(
@@ -379,207 +363,11 @@ class HarnessService:
         snapshot: PortfolioSnapshot | None = None,
         partial_allow: bool = False,
     ) -> list[OrderPlan]:
-        portfolio_plan = self.repositories.portfolio_plans.require(portfolio_plan_id)
-        policy = self.repositories.policies.require(portfolio_plan.policy_id)
-        strategy = self._latest_strategy_for_signals()
-        signals_by_symbol = self._signal_by_symbol()
-        portfolio_snapshot = snapshot or fixture_portfolio_snapshot()
-        now = utc_now()
-        created: list[OrderPlan] = []
-
-        if policy.kill_switch_engaged:
-            self.audit.emit(
-                user_id=policy.user_id,
-                entity_type="portfolio_plan",
-                entity_id=portfolio_plan.plan_id,
-                action="proposal_blocked",
-                after_state={"reason": "kill_switch_not_engaged"},
-                source="level3_proposal_service",
-            )
-            return []
-
-        ordered_intents = sorted(
-            portfolio_plan.order_intents,
-            key=lambda intent: abs(intent.target_weight - current_weight(portfolio_snapshot, intent.symbol)),
-            reverse=True,
+        return self._proposal_service().generate_order_proposals(
+            portfolio_plan_id=portfolio_plan_id,
+            snapshot=snapshot,
+            partial_allow=partial_allow,
         )
-        if not ordered_intents:
-            self.audit.emit(
-                user_id=policy.user_id,
-                entity_type="portfolio_plan",
-                entity_id=portfolio_plan.plan_id,
-                action="proposal_blocked",
-                after_state={"reason": "no_order_intents"},
-                source="level3_proposal_service",
-            )
-            return []
-
-        existing_seen_keys = self._seen_idempotency_keys()
-        candidate_records: list[_ProposalCandidate] = []
-        for intent in ordered_intents:
-            signal = signals_by_symbol.get(intent.symbol)
-            strategy_id = signal.strategy_id if signal else strategy.strategy_id
-            strategy_version = signal.recipe_version if signal else strategy.version
-            trading_date = signal.signal_date if signal else now.date()
-            key = proposal_idempotency_key(
-                policy=policy,
-                strategy_id=strategy_id,
-                strategy_version=strategy_version,
-                symbol=intent.symbol,
-                side=intent.side,
-                trading_date=trading_date,
-            )
-            if key in existing_seen_keys:
-                self.audit.emit(
-                    user_id=policy.user_id,
-                    entity_type="portfolio_plan",
-                    entity_id=portfolio_plan.plan_id,
-                    action="proposal_blocked",
-                    after_state={"reason": "duplicate_order_blocked", "idempotency_key": key},
-                    source="level3_proposal_service",
-                )
-                continue
-
-            order_plan = OrderPlan(
-                policy_id=policy.policy_id,
-                policy_version=policy.version,
-                intent=intent,
-                idempotency_key=key,
-                auto_order_reference_price=intent.limit_price,
-                expires_at=now + timedelta(minutes=policy.order_expiry_minutes),
-            )
-            candidate_records.append(
-                _ProposalCandidate(
-                    order_plan=order_plan,
-                    signal=signal,
-                    strategy_id=strategy_id,
-                    strategy_version=strategy_version,
-                )
-            )
-
-        if not candidate_records:
-            return []
-
-        candidate_orders = [candidate.order_plan for candidate in candidate_records]
-        batch_decision = run_batch_risk_gate(
-            policy=policy,
-            portfolio_plan=portfolio_plan,
-            snapshot=portfolio_snapshot,
-            quotes=self._quotes_for_intents([order.intent for order in candidate_orders]),
-            order_plans=candidate_orders,
-            config=BatchRiskConfig(
-                partial_allow=partial_allow,
-                quote_max_age_seconds=policy.human_review_quote_max_age_seconds,
-            ),
-            guardrail_state=self._guardrail_state(policy=policy, strategy_id=strategy.strategy_id),
-            seen_idempotency_keys=existing_seen_keys,
-            now=now,
-        )
-        if not batch_decision.passed:
-            self.audit.emit(
-                user_id=policy.user_id,
-                entity_type="portfolio_plan",
-                entity_id=portfolio_plan.plan_id,
-                action="batch_risk_rejected",
-                after_state=batch_decision,
-                source="batch_risk_gate",
-            )
-            return []
-        if batch_decision.mode == "partial_batch":
-            self.audit.emit(
-                user_id=policy.user_id,
-                entity_type="portfolio_plan",
-                entity_id=portfolio_plan.plan_id,
-                action="batch_risk_partial_allowed",
-                after_state=batch_decision,
-                source="batch_risk_gate",
-            )
-
-        accepted_order_ids = set(batch_decision.accepted_order_plan_ids)
-        seen_keys = set(existing_seen_keys)
-        for candidate in candidate_records:
-            order_plan = candidate.order_plan
-            signal = candidate.signal
-            strategy_id = candidate.strategy_id
-            strategy_version = candidate.strategy_version
-            if order_plan.order_plan_id not in accepted_order_ids:
-                self.audit.emit(
-                    user_id=policy.user_id,
-                    entity_type="order_plan",
-                    entity_id=order_plan.order_plan_id,
-                    action="proposal_blocked",
-                    after_state={
-                        "reason": "batch_risk_rejected",
-                        "batch_reasons": batch_decision.rejected_reasons.get(order_plan.order_plan_id, []),
-                    },
-                    source="batch_risk_gate",
-                )
-                continue
-
-            intent = order_plan.intent
-            state = self._guardrail_state(policy=policy, strategy_id=strategy_id, exclude_order_plan_id=order_plan.order_plan_id)
-            risk_check = run_risk_check(
-                policy=policy,
-                order_plan=order_plan,
-                snapshot=portfolio_snapshot,
-                seen_idempotency_keys=seen_keys,
-                guardrail_state=state,
-                quote_max_age_seconds=policy.human_review_quote_max_age_seconds,
-                strategy_id=strategy_id,
-            )
-            if not risk_check.passed:
-                self.audit.emit(
-                    user_id=policy.user_id,
-                    entity_type="order_plan",
-                    entity_id=order_plan.order_plan_id,
-                    action="proposal_blocked",
-                    after_state={"failed_checks": risk_check.failed_checks, "idempotency_key": order_plan.idempotency_key},
-                    source="level3_proposal_service",
-                )
-                continue
-
-            order_plan.risk_check_id = risk_check.risk_check_id
-            order_plan.risk_check_expires_at = risk_check.expires_at
-            order_plan.explanation = self._proposal_explanation(
-                policy=policy,
-                order_plan=order_plan,
-                signal=signal,
-                strategy_id=strategy_id,
-                strategy_version=strategy_version,
-                snapshot=portfolio_snapshot,
-                risk_check=risk_check,
-                now=now,
-            )
-            self.repositories.order_plans.add(order_plan)
-            self.ledger.record_order_intent(
-                policy=policy,
-                order_plan=order_plan,
-                metadata={
-                    "portfolio_plan_id": portfolio_plan.plan_id,
-                    "strategy_id": strategy_id,
-                    "strategy_version": strategy_version,
-                    "source": "level3_proposal_service",
-                },
-            )
-            transition_order_plan(
-                order_plan=order_plan,
-                new_status=OrderStatus.risk_checked,
-                audit=self.audit,
-                user_id=policy.user_id,
-                source="risk_gatekeeper",
-                action="risk_check_passed",
-            )
-            transition_order_plan(
-                order_plan=order_plan,
-                new_status=OrderStatus.proposed,
-                audit=self.audit,
-                user_id=policy.user_id,
-                source="level3_proposal_service",
-                action="proposal_created",
-            )
-            created.append(self.repositories.order_plans.update(order_plan))
-            seen_keys.add(order_plan.idempotency_key)
-        return created
 
     def apply_risk_check(self, order_plan_id: str, *, snapshot: PortfolioSnapshot | None = None):
         order_plan = self.repositories.order_plans.require(order_plan_id)
@@ -662,110 +450,11 @@ class HarnessService:
         return self.repositories.order_plans.update(order_plan)
 
     def modify_order_plan(self, order_plan_id: str, *, quantity: float, limit_price: float | None) -> OrderPlan:
-        original = self.repositories.order_plans.require(order_plan_id)
-        policy = self.repositories.policies.require(original.policy_id)
-        if original.status != OrderStatus.proposed:
-            raise RuntimeError("only proposed orders can be modified")
-        if quantity <= 0 or quantity > original.intent.quantity:
-            raise RuntimeError("quantity can only be reduced")
-        if original.intent.limit_price is not None and limit_price is not None:
-            lower = original.intent.limit_price * 0.98
-            upper = original.intent.limit_price * 1.02
-            if not lower <= limit_price <= upper:
-                raise RuntimeError("limit_price modification must stay within 2 percent")
-            if original.intent.side == "buy" and original.auto_order_reference_price is not None and limit_price > original.auto_order_reference_price:
-                raise RuntimeError("buy limit price cannot chase above the reference price")
-
-        modified_intent = OrderIntent(
-            symbol=original.intent.symbol,
-            side=original.intent.side,
-            order_type=original.intent.order_type,
+        return self._proposal_service().modify_order_plan(
+            order_plan_id,
             quantity=quantity,
             limit_price=limit_price,
-            notional=round(quantity * (limit_price or original.intent.limit_price or 0), 2),
-            target_weight=original.intent.target_weight,
-            reason=original.intent.reason,
-            quote_time=utc_now(),
         )
-        new_order = OrderPlan(
-            policy_id=policy.policy_id,
-            policy_version=policy.version,
-            intent=modified_intent,
-            idempotency_key=f"{original.idempotency_key}:mod:{new_id('mod')}",
-            auto_order_reference_price=original.auto_order_reference_price,
-            replaces_order_plan_id=original.order_plan_id,
-            expires_at=utc_now() + timedelta(minutes=policy.order_expiry_minutes),
-        )
-        strategy_id = original.explanation.strategy_id if original.explanation else "unknown_strategy"
-        risk_check = run_risk_check(
-            policy=policy,
-            order_plan=new_order,
-            snapshot=fixture_portfolio_snapshot(),
-            seen_idempotency_keys=self._seen_idempotency_keys(),
-            guardrail_state=self._guardrail_state(policy=policy, strategy_id=strategy_id, exclude_order_plan_id=original.order_plan_id),
-            quote_max_age_seconds=policy.human_review_quote_max_age_seconds,
-            strategy_id=strategy_id,
-        )
-        if not risk_check.passed:
-            self.audit.emit(
-                user_id=policy.user_id,
-                entity_type="order_plan",
-                entity_id=original.order_plan_id,
-                action="proposal_blocked",
-                after_state={"reason": "modified_proposal_failed_risk", "failed_checks": risk_check.failed_checks},
-                source="user_modification",
-            )
-            raise RiskCheckRequired("modified proposal failed risk check")
-
-        new_order.risk_check_id = risk_check.risk_check_id
-        new_order.risk_check_expires_at = risk_check.expires_at
-        if original.explanation is not None:
-            new_order.explanation = original.explanation.model_copy(
-                update={
-                    "quantity": modified_intent.quantity,
-                    "limit_price": modified_intent.limit_price,
-                    "estimated_notional": modified_intent.notional,
-                    "estimated_cash_impact": modified_intent.notional if modified_intent.side == "buy" else -modified_intent.notional,
-                    "risk_checks_passed": risk_check.passed_checks,
-                    "risk_checks_failed": risk_check.failed_checks,
-                    "risk_check_id": risk_check.risk_check_id,
-                    "risk_check_expires_at": risk_check.expires_at,
-                    "idempotency_key": new_order.idempotency_key,
-                }
-            )
-
-        transition_order_plan(
-            order_plan=original,
-            new_status=OrderStatus.modified,
-            audit=self.audit,
-            user_id=policy.user_id,
-            source="user_modification",
-            action="proposal_modified",
-        )
-        self.repositories.order_plans.update(original)
-        self.repositories.order_plans.add(new_order)
-        self.ledger.record_order_intent(
-            policy=policy,
-            order_plan=new_order,
-            metadata={"replaces_order_plan_id": original.order_plan_id, "source": "user_modification"},
-        )
-        transition_order_plan(
-            order_plan=new_order,
-            new_status=OrderStatus.risk_checked,
-            audit=self.audit,
-            user_id=policy.user_id,
-            source="risk_gatekeeper",
-            action="risk_check_passed",
-        )
-        transition_order_plan(
-            order_plan=new_order,
-            new_status=OrderStatus.proposed,
-            audit=self.audit,
-            user_id=policy.user_id,
-            source="user_modification",
-            action="proposal_created",
-        )
-        return self.repositories.order_plans.update(new_order)
 
     def _broker_for_policy(self, policy: UserPolicy):
         if policy.broker == BrokerMode.paper:
@@ -774,199 +463,20 @@ class HarnessService:
             return MockBroker()
         raise RuntimeError("live broker mode is disabled in the pre-harness")
 
-    def _orders_for_submit_batch(self, order_plan: OrderPlan) -> list[OrderPlan]:
-        return orders_for_submit_batch(self.repositories.order_plans.list(), order_plan)
-
-    def _submit_batch_context(
-        self,
-        *,
-        policy: UserPolicy,
-        order_plan: OrderPlan,
-        strategy_id: str,
-    ) -> SubmitBatchContext:
-        return build_submit_batch_context(
-            order_plans=self.repositories.order_plans.list(),
-            order_plan=order_plan,
-            policy=policy,
-            strategy_id=strategy_id,
-            autopilot_paused=self.autopilot_paused,
-            last_blocked_reason=self.last_blocked_reason,
-        )
-
-    def _portfolio_plan_for_order_batch(self, *, policy: UserPolicy, order_plans: list[OrderPlan]) -> PortfolioPlan:
-        return PortfolioPlan(
-            policy_id=policy.policy_id,
-            policy_version=policy.version,
-            target_weights={},
-            cash_target_weight=0.0,
-            order_intents=[order.intent for order in order_plans],
-        )
-
-    def _strategy_id_for_order(self, order_plan: OrderPlan) -> str:
-        return order_plan.explanation.strategy_id if order_plan.explanation else "unknown_strategy"
-
-    def _fresh_submission_risk_check(
-        self,
-        *,
-        policy: UserPolicy,
-        order_plan: OrderPlan,
-        snapshot: PortfolioSnapshot,
-        strategy_id: str,
-    ):
-        return run_risk_check(
-            policy=policy,
-            order_plan=order_plan,
-            snapshot=snapshot,
-            seen_idempotency_keys=self._seen_idempotency_keys(exclude_order_plan_id=order_plan.order_plan_id, submitted_only=True),
-            guardrail_state=self._guardrail_state(policy=policy, strategy_id=strategy_id, exclude_order_plan_id=order_plan.order_plan_id),
-            quote_max_age_seconds=policy.stale_quote_max_age_seconds,
-            strategy_id=strategy_id,
-        )
-
-    def _submit_batch_risk_decision(
-        self,
-        *,
-        policy: UserPolicy,
-        order_plan: OrderPlan,
-        snapshot: PortfolioSnapshot,
-        strategy_id: str,
-    ) -> BatchRiskDecision:
-        context = self._submit_batch_context(
-            policy=policy,
-            order_plan=order_plan,
-            strategy_id=strategy_id,
-        )
-        return run_batch_risk_gate(
-            policy=policy,
-            portfolio_plan=self._portfolio_plan_for_order_batch(policy=policy, order_plans=context.batch_orders),
-            snapshot=snapshot,
-            quotes=context.quotes,
-            order_plans=context.batch_orders,
-            config=BatchRiskConfig(quote_max_age_seconds=policy.stale_quote_max_age_seconds),
-            guardrail_state=context.guardrail_state,
-            seen_idempotency_keys=context.seen_idempotency_keys,
-        )
-
-    def _submit_to_broker(self, *, policy: UserPolicy, order_plan: OrderPlan) -> tuple[OrderPlan, BrokerOrder, list[Fill]]:
-        broker = self._broker_for_policy(policy)
-        transition_order_plan(
-            order_plan=order_plan,
-            new_status=OrderStatus.submitted,
+    def _submission_service(self) -> SubmissionService:
+        return SubmissionService(
+            repositories=self.repositories,
             audit=self.audit,
-            user_id=policy.user_id,
-            source="execution_service",
+            ledger=self.ledger,
+            broker_for_policy=self._broker_for_policy,
+            guardrail_state=self._guardrail_state,
+            autopilot_paused=lambda: self.autopilot_paused,
+            last_blocked_reason=lambda: self.last_blocked_reason,
+            now=utc_now,
         )
-        broker_order, fills = broker.submit_order(order_plan)
-        self.repositories.broker_orders.add(broker_order)
-        self.ledger.record_submitted(policy=policy, order_plan=order_plan, broker_order=broker_order)
-        transition_order_plan(
-            order_plan=order_plan,
-            new_status=OrderStatus.accepted,
-            audit=self.audit,
-            user_id=policy.user_id,
-            source="broker_adapter",
-        )
-        for index, fill in enumerate(fills):
-            self.repositories.fills.add(fill)
-            self.audit.emit(
-                user_id=policy.user_id,
-                entity_type="fill",
-                entity_id=fill.fill_id,
-                action="fill_recorded",
-                after_state=fill,
-                source="broker_adapter",
-            )
-            self.ledger.record_fill(
-                policy=policy,
-                order_plan=order_plan,
-                broker_order=broker_order,
-                fill=fill,
-                partial=len(fills) > 1 and index < len(fills) - 1,
-            )
-        if len(fills) > 1:
-            transition_order_plan(
-                order_plan=order_plan,
-                new_status=OrderStatus.partially_filled,
-                audit=self.audit,
-                user_id=policy.user_id,
-                source="broker_adapter",
-            )
-        transition_order_plan(
-            order_plan=order_plan,
-            new_status=OrderStatus.filled,
-            audit=self.audit,
-            user_id=policy.user_id,
-            source="broker_adapter",
-        )
-        if fills:
-            self.ledger.record_position_update(policy=policy, order_plan=order_plan, broker_order=broker_order, fills=fills)
-        self.repositories.order_plans.update(order_plan)
-        return order_plan, broker_order, fills
 
     def submit_order_plan(self, order_plan_id: str) -> tuple[OrderPlan, BrokerOrder, list[Fill]]:
-        order_plan = self.repositories.order_plans.require(order_plan_id)
-        policy = self.repositories.policies.require(order_plan.policy_id)
-
-        if order_plan.risk_check_id is None or order_plan.status == OrderStatus.draft:
-            raise RiskCheckRequired("risk_checked is required before submission")
-        if order_plan.risk_check_expires_at is not None and order_plan.risk_check_expires_at <= utc_now():
-            transition_order_plan(
-                order_plan=order_plan,
-                new_status=OrderStatus.expired,
-                audit=self.audit,
-                user_id=policy.user_id,
-                source="execution_service",
-                action="risk_check_expired",
-            )
-            self.repositories.order_plans.update(order_plan)
-            raise RiskCheckRequired("fresh risk check is required before submission")
-        if policy.execution_mode.value == "approval_required" and order_plan.status != OrderStatus.user_approved:
-            raise ApprovalRequired("explicit user approval is required before submission")
-
-        strategy_id = self._strategy_id_for_order(order_plan)
-        snapshot = fixture_portfolio_snapshot()
-        fresh_risk = self._fresh_submission_risk_check(
-            policy=policy,
-            order_plan=order_plan,
-            snapshot=snapshot,
-            strategy_id=strategy_id,
-        )
-        if not fresh_risk.passed:
-            self.audit.emit(
-                user_id=policy.user_id,
-                entity_type="order_plan",
-                entity_id=order_plan.order_plan_id,
-                action="risk_check_failed",
-                before_state=order_plan,
-                after_state={"failed_checks": fresh_risk.failed_checks},
-                source="execution_service",
-            )
-            raise RiskCheckRequired(f"fresh risk check failed: {fresh_risk.failed_checks}")
-        order_plan.risk_check_id = fresh_risk.risk_check_id
-        order_plan.risk_check_expires_at = fresh_risk.expires_at
-
-        batch_decision = self._submit_batch_risk_decision(
-            policy=policy,
-            order_plan=order_plan,
-            snapshot=snapshot,
-            strategy_id=strategy_id,
-        )
-        if not batch_decision.passed or order_plan.order_plan_id not in set(batch_decision.accepted_order_plan_ids):
-            before_blocked = order_plan.model_copy(deep=True)
-            order_plan.blocked_reason = "batch_risk_rejected"
-            self.repositories.order_plans.update(order_plan)
-            self.audit.emit(
-                user_id=policy.user_id,
-                entity_type="order_plan",
-                entity_id=order_plan.order_plan_id,
-                action="batch_risk_rejected",
-                before_state=before_blocked,
-                after_state=batch_decision,
-                source="execution_service",
-            )
-            raise RiskCheckRequired(f"batch risk check failed: {batch_decision.failed_checks}")
-
-        return self._submit_to_broker(policy=policy, order_plan=order_plan)
+        return self._submission_service().submit_order_plan(order_plan_id)
 
     def pause_guarded_autopilot(self, *, policy_id: str, reason: str = "user_paused") -> dict[str, object]:
         policy = self.repositories.policies.require(policy_id)
@@ -1057,6 +567,26 @@ class HarnessService:
 
     def run_guarded_autopilot_once(self, *, policy_id: str) -> dict[str, object]:
         policy = self.repositories.policies.require(policy_id)
+        start_failure = self._record_guarded_run_start(policy)
+        if start_failure is not None:
+            return start_failure
+
+        signals = self._signals_for_guarded_run()
+        snapshot = fixture_portfolio_snapshot()
+        plan = self.create_portfolio_plan(policy_id=policy.policy_id, signals=signals, snapshot=snapshot)
+        proposals = self.generate_order_proposals(portfolio_plan_id=plan.plan_id, snapshot=snapshot)
+        strategy = self.load_strategy()
+        result = self._execute_guarded_proposals(
+            policy=policy,
+            strategy=strategy,
+            snapshot=snapshot,
+            proposals=proposals,
+        )
+        if not proposals and not result["blocked"]:
+            result["blocked"].append({"reason": self.last_blocked_reason or "no_proposals"})
+        return result
+
+    def _record_guarded_run_start(self, policy: UserPolicy) -> dict[str, object] | None:
         try:
             self.audit.emit(
                 user_id=policy.user_id,
@@ -1071,73 +601,99 @@ class HarnessService:
             self.last_blocked_reason = "audit_log_unwritable"
             self.repositories.policies.update(policy)
             return {"submitted": [], "blocked": [{"reason": "audit_log_unwritable"}]}
+        return None
 
+    def _signals_for_guarded_run(self) -> list[Signal]:
         signals = self.repositories.signals.list()
         if not signals:
             signals = self.run_signals()
-        snapshot = fixture_portfolio_snapshot()
-        plan = self.create_portfolio_plan(policy_id=policy.policy_id, signals=signals, snapshot=snapshot)
-        proposals = self.generate_order_proposals(portfolio_plan_id=plan.plan_id, snapshot=snapshot)
-        strategy = self.load_strategy()
+        return signals
+
+    def _execute_guarded_proposals(
+        self,
+        *,
+        policy: UserPolicy,
+        strategy,
+        snapshot: PortfolioSnapshot,
+        proposals: list[OrderPlan],
+    ) -> dict[str, object]:
         submitted: list[dict[str, object]] = []
         blocked: list[dict[str, object]] = []
 
         for proposal in proposals:
-            state = self._guardrail_state(policy=policy, strategy_id=strategy.strategy_id, exclude_order_plan_id=proposal.order_plan_id)
-            result = authorize_level4(
-                order_plan=proposal,
-                policy=policy,
-                strategy=strategy,
-                snapshot=snapshot,
-                state=state,
-                seen_idempotency_keys=self._seen_idempotency_keys(exclude_order_plan_id=proposal.order_plan_id, submitted_only=True),
-            )
+            result = self._authorize_guarded_proposal(policy=policy, strategy=strategy, snapshot=snapshot, proposal=proposal)
             if not result.authorized:
-                reason = result.first_failed_check or "autopilot_order_blocked"
-                proposal.blocked_reason = reason
-                self.repositories.order_plans.update(proposal)
-                self.last_blocked_reason = reason
-                self.audit.emit(
-                    user_id=policy.user_id,
-                    entity_type="order_plan",
-                    entity_id=proposal.order_plan_id,
-                    action="autopilot_order_blocked",
-                    after_state={"reason": reason, "checks": result.model_dump(mode="json")},
-                    source="autopilot_service",
-                )
-                blocked.append({"order_plan_id": proposal.order_plan_id, "reason": reason})
+                self._record_guarded_block(policy=policy, proposal=proposal, result=result, blocked=blocked)
                 continue
+            submitted.append(self._submit_guarded_proposal(policy=policy, proposal=proposal))
 
-            proposal.approved_by = f"policy_authority_v{policy.version}"
-            transition_order_plan(
-                order_plan=proposal,
-                new_status=OrderStatus.user_approved,
-                audit=self.audit,
-                user_id=policy.user_id,
-                source="autopilot_service",
-                action="autopilot_order_authorized",
-            )
-            self.repositories.order_plans.update(proposal)
-            order_plan, broker_order, fills = self.submit_order_plan(proposal.order_plan_id)
-            self.audit.emit(
-                user_id=policy.user_id,
-                entity_type="order_plan",
-                entity_id=order_plan.order_plan_id,
-                action="autopilot_order_submitted",
-                after_state=order_plan,
-                source="autopilot_service",
-            )
-            submitted.append(
-                {
-                    "order_plan_id": order_plan.order_plan_id,
-                    "broker_order_id": broker_order.broker_order_id,
-                    "fills": len(fills),
-                }
-            )
-
-        if not proposals and not blocked:
-            blocked.append({"reason": self.last_blocked_reason or "no_proposals"})
         return {"submitted": submitted, "blocked": blocked, "live_trading_enabled": False}
+
+    def _authorize_guarded_proposal(
+        self,
+        *,
+        policy: UserPolicy,
+        strategy,
+        snapshot: PortfolioSnapshot,
+        proposal: OrderPlan,
+    ):
+        state = self._guardrail_state(policy=policy, strategy_id=strategy.strategy_id, exclude_order_plan_id=proposal.order_plan_id)
+        return authorize_level4(
+            order_plan=proposal,
+            policy=policy,
+            strategy=strategy,
+            snapshot=snapshot,
+            state=state,
+            seen_idempotency_keys=self._seen_idempotency_keys(exclude_order_plan_id=proposal.order_plan_id, submitted_only=True),
+        )
+
+    def _record_guarded_block(
+        self,
+        *,
+        policy: UserPolicy,
+        proposal: OrderPlan,
+        result,
+        blocked: list[dict[str, object]],
+    ) -> None:
+        reason = result.first_failed_check or "autopilot_order_blocked"
+        proposal.blocked_reason = reason
+        self.repositories.order_plans.update(proposal)
+        self.last_blocked_reason = reason
+        self.audit.emit(
+            user_id=policy.user_id,
+            entity_type="order_plan",
+            entity_id=proposal.order_plan_id,
+            action="autopilot_order_blocked",
+            after_state={"reason": reason, "checks": result.model_dump(mode="json")},
+            source="autopilot_service",
+        )
+        blocked.append({"order_plan_id": proposal.order_plan_id, "reason": reason})
+
+    def _submit_guarded_proposal(self, *, policy: UserPolicy, proposal: OrderPlan) -> dict[str, object]:
+        proposal.approved_by = f"policy_authority_v{policy.version}"
+        transition_order_plan(
+            order_plan=proposal,
+            new_status=OrderStatus.user_approved,
+            audit=self.audit,
+            user_id=policy.user_id,
+            source="autopilot_service",
+            action="autopilot_order_authorized",
+        )
+        self.repositories.order_plans.update(proposal)
+        order_plan, broker_order, fills = self.submit_order_plan(proposal.order_plan_id)
+        self.audit.emit(
+            user_id=policy.user_id,
+            entity_type="order_plan",
+            entity_id=order_plan.order_plan_id,
+            action="autopilot_order_submitted",
+            after_state=order_plan,
+            source="autopilot_service",
+        )
+        return {
+            "order_plan_id": order_plan.order_plan_id,
+            "broker_order_id": broker_order.broker_order_id,
+            "fills": len(fills),
+        }
 
     def create_daily_report(self, *, policy_id: str) -> OperationReport:
         policy = self.repositories.policies.require(policy_id)

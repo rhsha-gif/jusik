@@ -6,6 +6,8 @@ from datetime import date, datetime, timedelta
 from enum import Enum
 from typing import Any, Literal, Protocol, runtime_checkable
 
+from quantpilot.packages.core.normalization import optional_symbol_key, symbol_key
+
 
 IssueSeverity = Literal["info", "warning", "error"]
 
@@ -167,6 +169,12 @@ class HistoricalDataQualityReport:
         }
 
 
+@dataclass(frozen=True)
+class _QualityScan:
+    dates_by_symbol: dict[str, list[date]]
+    issues: list[HistoricalDataQualityIssue]
+
+
 def evaluate_historical_data_quality(
     rows: Sequence[Mapping[str, Any]],
     *,
@@ -190,62 +198,153 @@ def evaluate_historical_data_quality(
     expected_sessions = calendar.trading_sessions(start_date, end_date)
     expected_latest_session = _expected_latest_session(calendar, start_date, end_date)
     issues = [_quality_issue_from_any(issue) for issue in provider_issues]
+    scan = _scan_rows(
+        rows,
+        request_symbols=request_symbols,
+        start_date=start_date,
+        end_date=end_date,
+        issues=issues,
+    )
+    _append_monotonic_issues(scan.dates_by_symbol, scan.issues)
+    if missing_bar_policy.block_missing_bars:
+        _append_missing_bar_issues(
+            dates_by_symbol=scan.dates_by_symbol,
+            expected_sessions=expected_sessions,
+            issues=scan.issues,
+        )
+    if freshness_policy.block_stale_latest_bar and expected_latest_session is not None:
+        _append_freshness_issues(
+            dates_by_symbol=scan.dates_by_symbol,
+            expected_latest_session=expected_latest_session,
+            calendar=calendar,
+            issues=scan.issues,
+        )
 
+    return HistoricalDataQualityReport(
+        provider_name=provider_name,
+        market=market,
+        calendar_name=calendar.name,
+        symbols=request_symbols,
+        start_date=start_date,
+        end_date=end_date,
+        expected_session_count=len(expected_sessions),
+        expected_latest_session=expected_latest_session,
+        observed_session_count_by_symbol=_observed_counts(scan.dates_by_symbol, calendar),
+        bar_count=len(rows),
+        issues=tuple(scan.issues),
+    )
+
+
+def _scan_rows(
+    rows: Sequence[Mapping[str, Any]],
+    *,
+    request_symbols: tuple[str, ...],
+    start_date: date,
+    end_date: date,
+    issues: list[HistoricalDataQualityIssue],
+) -> _QualityScan:
     seen: set[tuple[str, date]] = set()
     dates_by_symbol: dict[str, list[date]] = {symbol: [] for symbol in request_symbols}
 
     for index, row in enumerate(rows, start=1):
-        symbol = _row_symbol(row)
-        session = _row_date(row)
-        if symbol is None:
-            issues.append(
-                _blocking_issue(
-                    "symbol_mismatch",
-                    f"row {index} is missing symbol/ticker",
-                    details={"row_index": index},
-                )
-            )
-            continue
-        if symbol not in request_symbols:
-            issues.append(
-                _blocking_issue(
-                    "symbol_mismatch",
-                    f"row {index} has unexpected symbol {symbol}",
-                    symbol=symbol,
-                    session_date=session,
-                    details={"expected_symbols": list(request_symbols), "row_index": index},
-                )
-            )
-        if session is None:
-            issues.append(
-                _blocking_issue(
-                    "invalid_session_date",
-                    f"row {index} is missing or has an invalid session date",
-                    symbol=symbol,
-                    details={"row_index": index},
-                )
-            )
-            continue
-        if session < start_date or session > end_date:
-            continue
+        _scan_row(
+            row,
+            row_index=index,
+            request_symbols=request_symbols,
+            start_date=start_date,
+            end_date=end_date,
+            seen=seen,
+            dates_by_symbol=dates_by_symbol,
+            issues=issues,
+        )
+    return _QualityScan(dates_by_symbol=dates_by_symbol, issues=issues)
 
-        key = (symbol, session)
-        if key in seen:
-            issues.append(
-                _blocking_issue(
-                    "duplicate_bar",
-                    f"duplicate bar for {symbol} on {session.isoformat()}",
-                    symbol=symbol,
-                    session_date=session,
-                    details={"row_index": index},
-                )
+
+def _scan_row(
+    row: Mapping[str, Any],
+    *,
+    row_index: int,
+    request_symbols: tuple[str, ...],
+    start_date: date,
+    end_date: date,
+    seen: set[tuple[str, date]],
+    dates_by_symbol: dict[str, list[date]],
+    issues: list[HistoricalDataQualityIssue],
+) -> None:
+    symbol = _row_symbol(row)
+    session = _row_date(row)
+    if symbol is None:
+        issues.append(
+            _blocking_issue(
+                "symbol_mismatch",
+                f"row {row_index} is missing symbol/ticker",
+                details={"row_index": row_index},
             )
-        seen.add(key)
-        if symbol in dates_by_symbol:
-            dates_by_symbol[symbol].append(session)
+        )
+        return
+    if symbol not in request_symbols:
+        issues.append(
+            _blocking_issue(
+                "symbol_mismatch",
+                f"row {row_index} has unexpected symbol {symbol}",
+                symbol=symbol,
+                session_date=session,
+                details={"expected_symbols": list(request_symbols), "row_index": row_index},
+            )
+        )
+    if session is None:
+        issues.append(
+            _blocking_issue(
+                "invalid_session_date",
+                f"row {row_index} is missing or has an invalid session date",
+                symbol=symbol,
+                details={"row_index": row_index},
+            )
+        )
+        return
+    if session < start_date or session > end_date:
+        return
 
-        issues.extend(_validate_ohlcv(row, symbol=symbol, session=session, row_index=index))
+    _record_seen_bar(
+        symbol=symbol,
+        session=session,
+        row_index=row_index,
+        seen=seen,
+        dates_by_symbol=dates_by_symbol,
+        issues=issues,
+    )
+    issues.extend(_validate_ohlcv(row, symbol=symbol, session=session, row_index=row_index))
 
+
+def _record_seen_bar(
+    *,
+    symbol: str,
+    session: date,
+    row_index: int,
+    seen: set[tuple[str, date]],
+    dates_by_symbol: dict[str, list[date]],
+    issues: list[HistoricalDataQualityIssue],
+) -> None:
+    key = (symbol, session)
+    if key in seen:
+        issues.append(
+            _blocking_issue(
+                "duplicate_bar",
+                f"duplicate bar for {symbol} on {session.isoformat()}",
+                symbol=symbol,
+                session_date=session,
+                details={"row_index": row_index},
+            )
+        )
+    seen.add(key)
+    if symbol in dates_by_symbol:
+        dates_by_symbol[symbol].append(session)
+
+
+def _append_monotonic_issues(
+    dates_by_symbol: dict[str, list[date]],
+    issues: list[HistoricalDataQualityIssue],
+) -> None:
     for symbol, sessions in dates_by_symbol.items():
         if _is_non_monotonic(sessions):
             issues.append(
@@ -257,54 +356,60 @@ def evaluate_historical_data_quality(
                 )
             )
 
-    if missing_bar_policy.block_missing_bars:
-        for symbol, sessions in dates_by_symbol.items():
-            observed = set(sessions)
-            for expected in expected_sessions:
-                if expected not in observed:
-                    issues.append(
-                        _blocking_issue(
-                            "missing_bar",
-                            f"missing bar for {symbol} on trading session {expected.isoformat()}",
-                            symbol=symbol,
-                            session_date=expected,
-                        )
-                    )
 
-    if freshness_policy.block_stale_latest_bar and expected_latest_session is not None:
-        for symbol, sessions in dates_by_symbol.items():
-            trading_sessions = sorted(session for session in sessions if calendar.is_trading_session(session))
-            if trading_sessions and trading_sessions[-1] < expected_latest_session:
+def _append_missing_bar_issues(
+    *,
+    dates_by_symbol: dict[str, list[date]],
+    expected_sessions: Sequence[date],
+    issues: list[HistoricalDataQualityIssue],
+) -> None:
+    for symbol, sessions in dates_by_symbol.items():
+        observed = set(sessions)
+        for expected in expected_sessions:
+            if expected not in observed:
                 issues.append(
                     _blocking_issue(
-                        "stale_latest_bar",
-                        (
-                            f"latest bar for {symbol} is {trading_sessions[-1].isoformat()}, "
-                            f"before expected latest session {expected_latest_session.isoformat()}"
-                        ),
+                        "missing_bar",
+                        f"missing bar for {symbol} on trading session {expected.isoformat()}",
                         symbol=symbol,
-                        session_date=expected_latest_session,
-                        details={"latest_bar": trading_sessions[-1].isoformat()},
+                        session_date=expected,
                     )
                 )
 
-    observed_counts = {
+
+def _append_freshness_issues(
+    *,
+    dates_by_symbol: dict[str, list[date]],
+    expected_latest_session: date,
+    calendar: ExchangeCalendar,
+    issues: list[HistoricalDataQualityIssue],
+) -> None:
+    for symbol, sessions in dates_by_symbol.items():
+        trading_sessions = sorted(session for session in sessions if calendar.is_trading_session(session))
+        if trading_sessions and trading_sessions[-1] < expected_latest_session:
+            latest = trading_sessions[-1]
+            issues.append(
+                _blocking_issue(
+                    "stale_latest_bar",
+                    (
+                        f"latest bar for {symbol} is {latest.isoformat()}, "
+                        f"before expected latest session {expected_latest_session.isoformat()}"
+                    ),
+                    symbol=symbol,
+                    session_date=expected_latest_session,
+                    details={"latest_bar": latest.isoformat()},
+                )
+            )
+
+
+def _observed_counts(
+    dates_by_symbol: dict[str, list[date]],
+    calendar: ExchangeCalendar,
+) -> dict[str, int]:
+    return {
         symbol: len({session for session in sessions if calendar.is_trading_session(session)})
         for symbol, sessions in dates_by_symbol.items()
     }
-    return HistoricalDataQualityReport(
-        provider_name=provider_name,
-        market=market,
-        calendar_name=calendar.name,
-        symbols=request_symbols,
-        start_date=start_date,
-        end_date=end_date,
-        expected_session_count=len(expected_sessions),
-        expected_latest_session=expected_latest_session,
-        observed_session_count_by_symbol=observed_counts,
-        bar_count=len(rows),
-        issues=tuple(issues),
-    )
 
 
 def _validate_ohlcv(
@@ -314,10 +419,22 @@ def _validate_ohlcv(
     session: date,
     row_index: int,
 ) -> list[HistoricalDataQualityIssue]:
-    issues: list[HistoricalDataQualityIssue] = []
+    return [
+        *_validate_ohlc(row, symbol=symbol, session=session, row_index=row_index),
+        *_validate_volume(row, symbol=symbol, session=session, row_index=row_index),
+    ]
+
+
+def _validate_ohlc(
+    row: Mapping[str, Any],
+    *,
+    symbol: str,
+    session: date,
+    row_index: int,
+) -> list[HistoricalDataQualityIssue]:
     prices = {field_name: _number(row.get(field_name)) for field_name in ("open", "high", "low", "close")}
     if any(value is None for value in prices.values()):
-        issues.append(
+        return [
             _blocking_issue(
                 "invalid_ohlc",
                 "OHLC fields must be present and numeric",
@@ -325,49 +442,76 @@ def _validate_ohlcv(
                 session_date=session,
                 details={"row_index": row_index},
             )
+        ]
+    return _validate_ohlc_range(
+        open_price=prices["open"],
+        high_price=prices["high"],
+        low_price=prices["low"],
+        close_price=prices["close"],
+        symbol=symbol,
+        session=session,
+        row_index=row_index,
+    )
+
+
+def _validate_ohlc_range(
+    *,
+    open_price: float | None,
+    high_price: float | None,
+    low_price: float | None,
+    close_price: float | None,
+    symbol: str,
+    session: date,
+    row_index: int,
+) -> list[HistoricalDataQualityIssue]:
+    assert open_price is not None
+    assert high_price is not None
+    assert low_price is not None
+    assert close_price is not None
+    issues: list[HistoricalDataQualityIssue] = []
+    if min(open_price, high_price, low_price, close_price) <= 0:
+        issues.append(
+            _blocking_issue(
+                "invalid_ohlc",
+                "OHLC prices must be positive",
+                symbol=symbol,
+                session_date=session,
+                details={"row_index": row_index},
+            )
         )
-    else:
-        open_price = prices["open"]
-        high_price = prices["high"]
-        low_price = prices["low"]
-        close_price = prices["close"]
-        assert open_price is not None
-        assert high_price is not None
-        assert low_price is not None
-        assert close_price is not None
-        if min(open_price, high_price, low_price, close_price) <= 0:
-            issues.append(
-                _blocking_issue(
-                    "invalid_ohlc",
-                    "OHLC prices must be positive",
-                    symbol=symbol,
-                    session_date=session,
-                    details={"row_index": row_index},
-                )
+    if high_price < low_price:
+        issues.append(
+            _blocking_issue(
+                "invalid_ohlc",
+                f"high {high_price} is below low {low_price}",
+                symbol=symbol,
+                session_date=session,
+                details={"row_index": row_index},
             )
-        if high_price < low_price:
-            issues.append(
-                _blocking_issue(
-                    "invalid_ohlc",
-                    f"high {high_price} is below low {low_price}",
-                    symbol=symbol,
-                    session_date=session,
-                    details={"row_index": row_index},
-                )
+        )
+    if open_price < low_price or open_price > high_price or close_price < low_price or close_price > high_price:
+        issues.append(
+            _blocking_issue(
+                "invalid_ohlc",
+                "open and close must fall within low/high range",
+                symbol=symbol,
+                session_date=session,
+                details={"row_index": row_index},
             )
-        if open_price < low_price or open_price > high_price or close_price < low_price or close_price > high_price:
-            issues.append(
-                _blocking_issue(
-                    "invalid_ohlc",
-                    "open and close must fall within low/high range",
-                    symbol=symbol,
-                    session_date=session,
-                    details={"row_index": row_index},
-                )
-            )
+        )
+    return issues
+
+
+def _validate_volume(
+    row: Mapping[str, Any],
+    *,
+    symbol: str,
+    session: date,
+    row_index: int,
+) -> list[HistoricalDataQualityIssue]:
     volume = _number(row.get("volume"))
     if volume is None or volume <= 0:
-        issues.append(
+        return [
             _blocking_issue(
                 "invalid_volume",
                 "volume must be positive",
@@ -375,8 +519,8 @@ def _validate_ohlcv(
                 session_date=session,
                 details={"row_index": row_index},
             )
-        )
-    return issues
+        ]
+    return []
 
 
 def _expected_latest_session(calendar: ExchangeCalendar, start_date: date, end_date: date) -> date | None:
@@ -422,17 +566,14 @@ def _blocking_issue(
 
 
 def _normalize_symbol(value: str) -> str:
-    cleaned = str(value).strip().upper()
+    cleaned = symbol_key(value)
     if not cleaned:
         raise ValueError("symbols must not contain empty values")
     return cleaned
 
 
 def _optional_symbol(value: Any) -> str | None:
-    if value is None:
-        return None
-    cleaned = str(value).strip().upper()
-    return cleaned or None
+    return optional_symbol_key(value)
 
 
 def _row_symbol(row: Mapping[str, Any]) -> str | None:

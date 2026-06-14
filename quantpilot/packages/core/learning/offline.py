@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from collections import defaultdict
 from datetime import datetime
-from typing import Any, Iterable, Mapping, Sequence
+from typing import Any, Iterable, Mapping, Sequence, cast
 
 from quantpilot.packages.core.learning.datasets import CalibrationDatasetBuilder
 from quantpilot.packages.core.learning.promotion import PromotionCandidateBuilder
@@ -16,6 +16,7 @@ from quantpilot.packages.core.learning.types import (
     SignalOutcomeLog,
 )
 from quantpilot.packages.core.ledger.types import LedgerEntry, LedgerEventType
+from quantpilot.packages.core.normalization import first_not_none, symbol_key, unique_text
 from quantpilot.packages.core.reports.metrics_types import PaperTrialMetrics
 from quantpilot.packages.core.schemas import Signal, SignalAction
 from quantpilot.packages.core.signals.types import CalibratedSignal, CalibratedSignalSet
@@ -314,32 +315,19 @@ class SignalOutcomeLogger:
         return self._unique(reasons)
 
     def _safe_sources(self, entries: Sequence[LedgerEntry]) -> list[LearningSource]:
-        return sorted({entry.source for entry in entries})  # type: ignore[return-value]
+        return [cast(LearningSource, source) for source in sorted({entry.source for entry in entries})]
 
     def _safe_data_modes(self, entries: Sequence[LedgerEntry]) -> list[LearningDataMode]:
-        return sorted({entry.data_mode for entry in entries})  # type: ignore[return-value]
+        return [cast(LearningDataMode, data_mode) for data_mode in sorted({entry.data_mode for entry in entries})]
 
     def _symbol(self, value: str) -> str:
-        return value.strip().upper()
+        return symbol_key(value)
 
     def _first_not_none(self, values: Iterable[str | None]) -> str | None:
-        for value in values:
-            if value is not None:
-                return value
-        return None
+        return first_not_none(values)
 
     def _unique(self, values: Iterable[str | None]) -> list[str]:
-        seen: set[str] = set()
-        result: list[str] = []
-        for value in values:
-            if value is None:
-                continue
-            normalized = str(value).strip()
-            if not normalized or normalized in seen:
-                continue
-            seen.add(normalized)
-            result.append(normalized)
-        return result
+        return unique_text(values)
 
 
 def build_offline_learning_report(

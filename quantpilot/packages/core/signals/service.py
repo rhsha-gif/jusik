@@ -24,6 +24,7 @@ from quantpilot.packages.core.schemas import (
     UserPolicy,
     utc_now,
 )
+from quantpilot.packages.core.signals.calibration import calibrate_signal_set
 from quantpilot.packages.core.technical.indicators import calculate_technical_indicators, fixture_price_history
 from quantpilot.packages.core.universe.builder import build_candidate_universe
 
@@ -389,16 +390,26 @@ def generate_provider_bound_signals(
             qualities=[],
             symbol_count=len(requested_symbols),
         )
+        blocked_signals = _blocked_signals(
+            recipe,
+            requested_symbols,
+            policy=policy,
+            reason=_provider_failure_reason(provider_status, quality),
+            reason_codes=quality.reason_codes,
+        )
         return SignalSet(
-            signals=_blocked_signals(
-                recipe,
-                requested_symbols,
-                policy=policy,
-                reason=_provider_failure_reason(provider_status, quality),
-                reason_codes=quality.reason_codes,
-            ),
+            signals=blocked_signals,
             provider_status=provider_status,
             data_quality=quality,
+            calibrated_signal_set=calibrate_signal_set(
+                signals=blocked_signals,
+                bars=[],
+                provider_status=provider_status,
+                market_data_quality=quality,
+                policy=policy,
+                securities=securities,
+                horizon=horizon,
+            ),
         )
 
     bars = ohlcv.bars
@@ -425,21 +436,41 @@ def generate_provider_bound_signals(
         symbol_count=len(signal_symbols),
     )
     if not quality.usable:
+        blocked_signals = _blocked_signals(
+            recipe,
+            signal_symbols,
+            policy=policy,
+            reason=_provider_failure_reason(provider_status, quality),
+            reason_codes=quality.reason_codes,
+        )
         return SignalSet(
-            signals=_blocked_signals(
-                recipe,
-                signal_symbols,
-                policy=policy,
-                reason=_provider_failure_reason(provider_status, quality),
-                reason_codes=quality.reason_codes,
-            ),
+            signals=blocked_signals,
             provider_status=provider_status,
             data_quality=quality,
+            calibrated_signal_set=calibrate_signal_set(
+                signals=blocked_signals,
+                bars=bars,
+                provider_status=provider_status,
+                market_data_quality=quality,
+                policy=policy,
+                securities=securities,
+                horizon=horizon,
+            ),
         )
 
     signals = generate_signals(recipe, bars, policy=policy, securities=securities)
+    calibrated = calibrate_signal_set(
+        signals=signals,
+        bars=bars,
+        provider_status=provider_status,
+        market_data_quality=quality.model_copy(update={"symbol_count": len(signals)}),
+        policy=policy,
+        securities=securities,
+        horizon=horizon,
+    )
     return SignalSet(
         signals=signals,
         provider_status=provider_status,
         data_quality=quality.model_copy(update={"symbol_count": len(signals)}),
+        calibrated_signal_set=calibrated,
     )

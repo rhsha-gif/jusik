@@ -6,6 +6,7 @@ from typing import Any, Literal
 from pydantic import Field
 
 from quantpilot.packages.core.schemas import DataMode, HarnessModel, Signal, utc_now
+from quantpilot.packages.core.signals.types import CalibratedSignalSet
 
 
 ProviderState = Literal["available", "unavailable", "stale"]
@@ -61,5 +62,6 @@ class SignalSet(HarnessModel):
     signals: list[Signal]
     provider_status: dict[str, ProviderStatus]
     data_quality: MarketDataQuality
+    calibrated_signal_set: CalibratedSignalSet | None = None
     order_submission_enabled: bool = False
     source: str = "provider_bound_signal_engine"

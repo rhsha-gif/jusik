@@ -1,23 +1,39 @@
 from __future__ import annotations
 
-import json
 from datetime import date, timedelta
 from pathlib import Path
 from typing import Any
 
-from quantpilot.packages.core.schemas import CandidateUniverseItem, Signal, SignalAction, StrategyRecipe, TechnicalIndicatorSnapshot, UserPolicy
+from quantpilot.packages.core.marketdata.fixture_provider import (
+    default_ohlcv_fixture_path as _default_ohlcv_fixture_path,
+    load_fixture_ohlcv as _load_fixture_ohlcv,
+)
+from quantpilot.packages.core.marketdata.providers import OHLCVProvider, QuoteProvider
+from quantpilot.packages.core.marketdata.types import (
+    MarketDataQuality,
+    ProviderStatus,
+    QuoteSnapshot,
+    SignalSet,
+)
+from quantpilot.packages.core.schemas import (
+    CandidateUniverseItem,
+    Signal,
+    SignalAction,
+    StrategyRecipe,
+    TechnicalIndicatorSnapshot,
+    UserPolicy,
+    utc_now,
+)
 from quantpilot.packages.core.technical.indicators import calculate_technical_indicators, fixture_price_history
 from quantpilot.packages.core.universe.builder import build_candidate_universe
 
 
 def default_ohlcv_fixture_path() -> Path:
-    return Path(__file__).resolve().parents[3] / "tests" / "fixtures" / "ohlcv.json"
+    return _default_ohlcv_fixture_path()
 
 
 def load_fixture_ohlcv(path: Path | None = None) -> list[dict[str, Any]]:
-    fixture_path = path or default_ohlcv_fixture_path()
-    with fixture_path.open("r", encoding="utf-8") as handle:
-        return json.load(handle)
+    return _load_fixture_ohlcv(path)
 
 
 def classify_fixture_bar(bar: dict[str, Any]) -> tuple[SignalAction, float, str]:
@@ -206,3 +222,224 @@ def generate_signals(
             )
         )
     return signals
+
+
+def _symbol_key(value: Any) -> str:
+    return str(value).strip().upper()
+
+
+def _bar_symbols(bars: list[dict[str, Any]]) -> list[str]:
+    symbols = sorted(
+        {
+            _symbol_key(bar.get("symbol", bar.get("ticker", "")))
+            for bar in bars
+            if _symbol_key(bar.get("symbol", bar.get("ticker", "")))
+        }
+    )
+    return symbols
+
+
+def _security_symbols(securities: list[dict[str, Any]] | None) -> list[str]:
+    if securities is None:
+        return []
+    return sorted(
+        {
+            _symbol_key(security.get("ticker", security.get("symbol", "")))
+            for security in securities
+            if _symbol_key(security.get("ticker", security.get("symbol", "")))
+        }
+    )
+
+
+def _issue_codes_for_status(channel: str, status: ProviderStatus) -> list[str]:
+    if status.state == "unavailable":
+        return ["provider_unavailable", f"{channel}_provider_unavailable"]
+    if status.state == "stale":
+        return ["provider_stale", f"{channel}_provider_stale"]
+    return []
+
+
+def _unique_codes(codes: list[str]) -> list[str]:
+    return list(dict.fromkeys(codes))
+
+
+def _combined_quality(
+    *,
+    provider_status: dict[str, ProviderStatus],
+    qualities: list[MarketDataQuality],
+    symbol_count: int,
+) -> MarketDataQuality:
+    usable = True
+    degraded = False
+    reason_codes: list[str] = []
+    data_mode = qualities[0].data_mode if qualities else None
+
+    for channel, status in provider_status.items():
+        status_codes = _issue_codes_for_status(channel, status)
+        if status_codes:
+            usable = False
+            degraded = True
+            reason_codes.extend(status_codes)
+        if data_mode is None:
+            data_mode = status.data_mode
+
+    for quality in qualities:
+        if not quality.usable:
+            usable = False
+        if quality.degraded:
+            degraded = True
+        reason_codes.extend(quality.reason_codes)
+        data_mode = quality.data_mode
+
+    return MarketDataQuality(
+        usable=usable,
+        degraded=degraded,
+        reason_codes=_unique_codes(reason_codes),
+        symbol_count=symbol_count,
+        data_mode=data_mode or provider_status.get("ohlcv", ProviderStatus(provider_name="unknown")).data_mode,
+    )
+
+
+def _blocked_signal(
+    recipe: StrategyRecipe,
+    symbol: str,
+    *,
+    policy: UserPolicy | None,
+    signal_date: date,
+    reason: str,
+    reason_codes: list[str],
+) -> Signal:
+    return Signal(
+        strategy_id=recipe.strategy_id,
+        recipe_version=recipe.version,
+        symbol=symbol,
+        ticker=symbol,
+        signal_date=signal_date,
+        action=SignalAction.blocked,
+        strength=0.0,
+        technical_score=0.0,
+        quant_score=0.0,
+        target_weight_hint=0.0,
+        stop_price_hint=None,
+        take_profit_hint=None,
+        valid_until=signal_date + fixture_signal_validity(),
+        policy_version=policy.version if policy else None,
+        reason_codes=_unique_codes(["provider_fail_closed", *reason_codes]),
+        reason=reason,
+        source="provider_bound_signal_engine",
+    )
+
+
+def _blocked_signals(
+    recipe: StrategyRecipe,
+    symbols: list[str],
+    *,
+    policy: UserPolicy | None,
+    reason: str,
+    reason_codes: list[str],
+) -> list[Signal]:
+    signal_date = load_signal_date() if symbols else utc_now().date()
+    return [
+        _blocked_signal(
+            recipe,
+            symbol,
+            policy=policy,
+            signal_date=signal_date,
+            reason=reason,
+            reason_codes=reason_codes,
+        )
+        for symbol in symbols
+    ]
+
+
+def _provider_failure_reason(statuses: dict[str, ProviderStatus], quality: MarketDataQuality) -> str:
+    for channel, status in statuses.items():
+        if status.state != "available":
+            detail = f": {status.reason}" if status.reason else ""
+            return f"{channel} provider {status.state}{detail}"
+    if quality.reason_codes:
+        return f"market data quality fail-closed: {', '.join(quality.reason_codes)}"
+    return "market data provider fail-closed"
+
+
+def generate_provider_bound_signals(
+    recipe: StrategyRecipe,
+    ohlcv_provider: OHLCVProvider,
+    *,
+    quote_provider: QuoteProvider | None = None,
+    policy: UserPolicy | None = None,
+    securities: list[dict[str, Any]] | None = None,
+    horizon: str | None = None,
+) -> SignalSet:
+    requested_symbols = _security_symbols(securities)
+    provider_status: dict[str, ProviderStatus] = {}
+    qualities: list[MarketDataQuality] = []
+
+    try:
+        ohlcv = ohlcv_provider.get_ohlcv(requested_symbols or None, horizon=horizon)
+    except Exception as exc:
+        status = ProviderStatus(
+            provider_name=type(ohlcv_provider).__name__,
+            state="unavailable",
+            reason=str(exc),
+        )
+        provider_status["ohlcv"] = status
+        quality = _combined_quality(
+            provider_status=provider_status,
+            qualities=[],
+            symbol_count=len(requested_symbols),
+        )
+        return SignalSet(
+            signals=_blocked_signals(
+                recipe,
+                requested_symbols,
+                policy=policy,
+                reason=_provider_failure_reason(provider_status, quality),
+                reason_codes=quality.reason_codes,
+            ),
+            provider_status=provider_status,
+            data_quality=quality,
+        )
+
+    bars = ohlcv.bars
+    provider_status["ohlcv"] = ohlcv.provider_status
+    qualities.append(ohlcv.data_quality)
+    signal_symbols = _bar_symbols(bars) or requested_symbols
+
+    if quote_provider is not None:
+        try:
+            quote_snapshot: QuoteSnapshot = quote_provider.get_quotes(signal_symbols)
+        except Exception as exc:
+            provider_status["quote"] = ProviderStatus(
+                provider_name=type(quote_provider).__name__,
+                state="unavailable",
+                reason=str(exc),
+            )
+        else:
+            provider_status["quote"] = quote_snapshot.provider_status
+            qualities.append(quote_snapshot.data_quality)
+
+    quality = _combined_quality(
+        provider_status=provider_status,
+        qualities=qualities,
+        symbol_count=len(signal_symbols),
+    )
+    if not quality.usable:
+        return SignalSet(
+            signals=_blocked_signals(
+                recipe,
+                signal_symbols,
+                policy=policy,
+                reason=_provider_failure_reason(provider_status, quality),
+                reason_codes=quality.reason_codes,
+            ),
+            provider_status=provider_status,
+            data_quality=quality,
+        )
+
+    signals = generate_signals(recipe, bars, policy=policy, securities=securities)
+    return SignalSet(
+        signals=signals,
+        provider_status=provider_status,
+        data_quality=quality.model_copy(update={"symbol_count": len(signals)}),
+    )

@@ -3,7 +3,14 @@ from __future__ import annotations
 from datetime import date
 from hashlib import sha256
 
+from quantpilot.packages.core.portfolio.optimizer import DeterministicPortfolioOptimizer
+from quantpilot.packages.core.portfolio.optimizer_types import (
+    ExpectedReturnRiskProxy,
+    OptimizationConstraints,
+    OptimizationInput,
+)
 from quantpilot.packages.core.schemas import (
+    DataMode,
     OrderIntent,
     OrderType,
     PortfolioPlan,
@@ -15,6 +22,9 @@ from quantpilot.packages.core.schemas import (
     SignalAction,
     UserPolicy,
 )
+
+
+DEFAULT_REBALANCE_BAND = 0.001
 
 
 def fixture_portfolio_snapshot(*, monthly_loss_ratio: float = 0.0) -> PortfolioSnapshot:
@@ -64,6 +74,111 @@ def _quote_for_symbol(snapshot: PortfolioSnapshot, symbol: str, quotes: dict[str
     return 100.0
 
 
+def _symbol(value: str) -> str:
+    return value.strip().upper()
+
+
+def _cash_target_from_targets(
+    *,
+    snapshot: PortfolioSnapshot,
+    target_weights: dict[str, float],
+) -> float:
+    planned_symbols = {_symbol(symbol) for symbol in target_weights}
+    other_weight = sum(
+        position.market_value / snapshot.equity
+        for position in snapshot.positions
+        if _symbol(position.symbol) not in planned_symbols
+    )
+    invested_target = other_weight + sum(target_weights.values())
+    return round(max(0.0, min(1.0, 1.0 - invested_target)), 6)
+
+
+def _volatility_proxy_from_signal(signal: Signal) -> float:
+    scores = [score for score in (signal.technical_score, signal.quant_score) if score is not None]
+    quality_score = sum(scores) / len(scores) if scores else signal.strength * 100
+    return round(max(0.05, min(1.0, (100.0 - quality_score) / 100.0)), 6)
+
+
+def _expected_return_proxy_from_signal(signal: Signal) -> float:
+    if signal.action in {SignalAction.blocked, SignalAction.exit}:
+        return -signal.strength
+    if signal.action == SignalAction.trim:
+        return signal.strength * 0.25
+    if signal.action == SignalAction.buy_wait:
+        return 0.0
+    return signal.strength
+
+
+def _uncalibrated_proxy_from_signal(signal: Signal) -> ExpectedReturnRiskProxy:
+    return ExpectedReturnRiskProxy(
+        symbol=signal.symbol,
+        expected_return=_expected_return_proxy_from_signal(signal),
+        volatility=_volatility_proxy_from_signal(signal),
+        expected_return_source="uncalibrated_signal_strength",
+        volatility_source="uncalibrated_signal_quality_gap",
+        calibrated=False,
+        data_mode=DataMode.fixture,
+        metadata={
+            "signal_id": signal.signal_id,
+            "action": signal.action.value,
+            "source": signal.source,
+        },
+    )
+
+
+def constraints_from_policy(
+    *,
+    policy: UserPolicy,
+    snapshot: PortfolioSnapshot,
+    rebalance_band: float = DEFAULT_REBALANCE_BAND,
+) -> OptimizationConstraints:
+    return OptimizationConstraints(
+        max_position_weight=policy.max_position_weight,
+        max_sector_weight=policy.max_sector_weight,
+        min_cash_weight=policy.min_cash_weight,
+        max_turnover_weight=round(min(2.0, policy.max_daily_turnover / snapshot.equity), 6),
+        rebalance_band=rebalance_band,
+        max_order_weight=None,
+    )
+
+
+def build_optimization_input(
+    *,
+    policy: UserPolicy,
+    signals: list[Signal],
+    snapshot: PortfolioSnapshot,
+    expected_return_risk_proxies: dict[str, ExpectedReturnRiskProxy] | None = None,
+    sector_metadata: dict[str, str] | None = None,
+    optimizer_constraints: OptimizationConstraints | None = None,
+    rebalance_band: float = DEFAULT_REBALANCE_BAND,
+) -> OptimizationInput:
+    snapshot_sectors = {_symbol(position.symbol): position.sector for position in snapshot.positions}
+    proxies = expected_return_risk_proxies or {
+        _symbol(signal.symbol): _uncalibrated_proxy_from_signal(signal)
+        for signal in signals
+    }
+    return OptimizationInput(
+        signals=signals,
+        proxies=proxies,
+        sector_metadata={**snapshot_sectors, **(sector_metadata or {})},
+        snapshot=snapshot,
+        constraints=optimizer_constraints or constraints_from_policy(
+            policy=policy,
+            snapshot=snapshot,
+            rebalance_band=rebalance_band,
+        ),
+        risk_budget={
+            "max_daily_turnover": policy.max_daily_turnover,
+            "single_order_cash_limit": policy.single_order_cash_limit,
+        },
+        data_mode=DataMode.fixture,
+        proxy_metadata={
+            "calibrated": False,
+            "source": "planner_adapter_uncalibrated_signal_proxy",
+        },
+    )
+
+
 def _initial_target(policy: UserPolicy, signal: Signal, current_weight: float) -> float:
     if signal.action in {SignalAction.blocked, SignalAction.exit, SignalAction.buy_wait}:
         return 0.0
@@ -82,15 +197,34 @@ def build_portfolio_plan(
     signals: list[Signal],
     snapshot: PortfolioSnapshot,
     quotes: dict[str, float] | None = None,
+    expected_return_risk_proxies: dict[str, ExpectedReturnRiskProxy] | None = None,
+    sector_metadata: dict[str, str] | None = None,
+    optimizer_constraints: OptimizationConstraints | None = None,
+    rebalance_band: float = DEFAULT_REBALANCE_BAND,
 ) -> PortfolioPlan:
+    optimization_input = build_optimization_input(
+        policy=policy,
+        signals=signals,
+        snapshot=snapshot,
+        expected_return_risk_proxies=expected_return_risk_proxies,
+        sector_metadata=sector_metadata,
+        optimizer_constraints=optimizer_constraints,
+        rebalance_band=rebalance_band,
+    )
+    optimization_result = DeterministicPortfolioOptimizer().optimize(optimization_input)
+    optimized_targets = {
+        target.symbol: target.target_weight
+        for target in optimization_result.target_weights
+    }
     target_weights: dict[str, float] = {}
     order_intents: list[OrderIntent] = []
-    current_weights = {position.symbol: _current_weight(snapshot, position.symbol) for position in snapshot.positions}
+    current_weights = {_symbol(position.symbol): _current_weight(snapshot, position.symbol) for position in snapshot.positions}
     available_to_spend = max(0.0, snapshot.cash - policy.min_cash_weight * snapshot.equity)
 
     for signal in signals:
-        current = current_weights.get(signal.symbol, 0.0)
-        target = _initial_target(policy, signal, current)
+        symbol = _symbol(signal.symbol)
+        current = current_weights.get(symbol, 0.0)
+        target = optimized_targets.get(symbol, _initial_target(policy, signal, current))
         price = _quote_for_symbol(snapshot, signal.symbol, quotes)
         delta_notional = (target - current) * snapshot.equity
 
@@ -114,7 +248,7 @@ def build_portfolio_plan(
                     )
                 )
         elif delta_notional < -1:
-            notional = min(abs(delta_notional), policy.single_order_cash_limit)
+            notional = min(abs(delta_notional), policy.single_order_cash_limit, current * snapshot.equity)
             if notional > 1:
                 target = current - notional / snapshot.equity
                 order_intents.append(
@@ -130,10 +264,14 @@ def build_portfolio_plan(
                     )
                 )
 
-        target_weights[signal.symbol] = round(max(0.0, min(target, policy.max_position_weight)), 6)
+        if optimization_result.status == "fail_closed":
+            target_weights[signal.symbol] = round(max(0.0, target), 6)
+        else:
+            target_weights[signal.symbol] = round(max(0.0, min(target, policy.max_position_weight)), 6)
 
-    invested_target = sum(target_weights.values())
-    cash_target_weight = max(policy.min_cash_weight, round(max(0.0, 1 - invested_target), 6))
+    cash_target_weight = _cash_target_from_targets(snapshot=snapshot, target_weights=target_weights)
+    if optimization_result.status != "fail_closed":
+        cash_target_weight = max(policy.min_cash_weight, cash_target_weight)
     return PortfolioPlan(
         policy_id=policy.policy_id,
         policy_version=policy.version,

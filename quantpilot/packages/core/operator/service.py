@@ -14,6 +14,8 @@ from quantpilot.packages.core.execution.state_machine import (
     transition_order_plan,
 )
 from quantpilot.packages.core.harness_service import HarnessService
+from quantpilot.packages.core.marketdata.providers import BarOHLCVProvider, BarQuoteProvider, OHLCVProvider, QuoteProvider
+from quantpilot.packages.core.marketdata.types import SignalSet
 from quantpilot.packages.core.operator.schemas import (
     OperatorDecision,
     OperatorReport,
@@ -33,7 +35,7 @@ from quantpilot.packages.core.schemas import (
     new_id,
     utc_now,
 )
-from quantpilot.packages.core.signals.service import generate_signals, load_fixture_ohlcv
+from quantpilot.packages.core.signals.service import generate_provider_bound_signals
 from quantpilot.packages.core.strategies.loader import load_strategy_recipe
 from quantpilot.packages.core.strategies.registry import (
     StrategyRegistry,
@@ -75,9 +77,20 @@ class OperatorService:
         self,
         harness: HarnessService | None = None,
         registry: StrategyRegistry | None = None,
+        *,
+        ohlcv_provider: OHLCVProvider | None = None,
+        quote_provider: QuoteProvider | None = None,
     ) -> None:
         self.harness = harness or HarnessService()
         self.registry = registry or default_strategy_registry()
+        self.ohlcv_provider = ohlcv_provider or BarOHLCVProvider(
+            self.harness.market_data_provider,
+            provider_name="operator_ohlcv",
+        )
+        self.quote_provider = quote_provider or BarQuoteProvider(
+            self.harness.market_data_provider,
+            provider_name="operator_quote",
+        )
         self.fallbacks = FallbackManager()
         self.version_guard = PolicyVersionGuard()
         self.policy_versioning = PolicyVersioningService(self.harness.repositories, self.harness.audit)
@@ -309,7 +322,13 @@ class OperatorService:
         if snapshot.monthly_loss_ratio <= policy.monthly_loss_stop_all_autotrading:
             return blocked_by("monthly_loss_stop_engaged", selection=selection)
 
-        signals = self._record_signals(recipe, policy)
+        signal_set = self._record_signal_set(recipe, policy)
+        signals = signal_set.signals
+        if not signal_set.data_quality.usable:
+            reason = signal_set.data_quality.reason_codes[0] if signal_set.data_quality.reason_codes else "signal_provider_unavailable"
+            decide("noop", reason, strategy_id=registry_entry.strategy_id)
+            return finish("completed", selection=selection, order_plan_ids=[])
+
         plan = self.harness.create_portfolio_plan(policy_id=policy.policy_id, signals=signals, snapshot=snapshot)
         proposals = self.harness.generate_order_proposals(portfolio_plan_id=plan.plan_id, snapshot=snapshot)
 
@@ -358,10 +377,14 @@ class OperatorService:
         self.repositories.strategies.add(recipe)
         return recipe
 
-    def _record_signals(self, recipe: StrategyRecipe, policy: UserPolicy) -> list[Signal]:
-        bars = load_fixture_ohlcv()
-        signals = generate_signals(recipe, bars, policy=policy)
-        for signal in signals:
+    def _record_signal_set(self, recipe: StrategyRecipe, policy: UserPolicy) -> SignalSet:
+        signal_set = generate_provider_bound_signals(
+            recipe,
+            self.ohlcv_provider,
+            quote_provider=self.quote_provider,
+            policy=policy,
+        )
+        for signal in signal_set.signals:
             self.repositories.signals.add(signal)
             self.audit.emit(
                 user_id=policy.user_id,
@@ -371,7 +394,10 @@ class OperatorService:
                 after_state=signal,
                 source="operator_service",
             )
-        return signals
+        return signal_set
+
+    def _record_signals(self, recipe: StrategyRecipe, policy: UserPolicy) -> list[Signal]:
+        return self._record_signal_set(recipe, policy).signals
 
     def _submit_proposals(
         self,

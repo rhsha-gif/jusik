@@ -11,3 +11,7 @@ build/
 *.egg-info/
 
 .pytest_tmp/
+
+# Local browser/preview test artifacts
+.playwright-mcp/
+*baseline*.png

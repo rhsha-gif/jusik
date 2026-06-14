@@ -2,6 +2,7 @@ from __future__ import annotations
 
 from typing import Any
 
+from quantpilot.packages.core.learning.offline import build_offline_learning_report, unavailable_offline_learning_report
 from quantpilot.packages.core.ledger.types import LedgerEntry
 from quantpilot.packages.core.portfolio.planner import fixture_portfolio_snapshot
 from quantpilot.packages.core.reports.attribution import AttributionReportBuilder
@@ -147,6 +148,29 @@ def build_operation_report(
         for flag in attribution_operation_report.review_flags
     ]
     summary["attribution_operation_report"] = attribution_operation_report.model_dump(mode="json")
+    try:
+        offline_learning_report = build_offline_learning_report(
+            signals=repositories.signals.list(),
+            ledger_entries=ledger_entries,
+            paper_metrics=paper_metrics,
+            validation_metadata={
+                "validation_source": "operation_report",
+                "attribution_status": attribution_operation_report.status,
+            },
+        )
+    except Exception as exc:
+        offline_learning_report = unavailable_offline_learning_report(
+            reason=f"offline_learning_error:{exc.__class__.__name__}",
+        )
+    offline_learning_payload = offline_learning_report.model_dump(mode="json")
+    summary["offline_learning_report"] = offline_learning_payload
+    summary["calibration_dataset"] = offline_learning_report.calibration_dataset.model_dump(mode="json")
+    summary["promotion_candidate"] = (
+        offline_learning_report.promotion_candidate.model_dump(mode="json")
+        if offline_learning_report.promotion_candidate is not None
+        else None
+    )
+    summary["machine_payload"]["offline_learning_report"] = offline_learning_payload
     return OperationReport(
         user_id=user_id,
         policy_id=policy.policy_id,

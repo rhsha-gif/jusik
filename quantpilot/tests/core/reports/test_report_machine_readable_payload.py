@@ -31,6 +31,8 @@ def test_report_machine_payload_is_json_serializable() -> None:
     assert payload["schema_version"] == "quantpilot.attribution_operation_report.v1"
     assert payload["status"] == "available"
     assert payload["attribution_report"]["live_trading_enabled"] is False
+    assert payload["offline_learning_report"]["live_auto_update"] is False
+    assert payload["offline_learning_report"]["promotion_candidate"]["status"] == "pending_review"
     assert operation_report["machine_payload"]["schema_version"] == payload["schema_version"]
     assert operation_report["markdown"].startswith("# Operation Report")
     json.dumps(payload)
@@ -55,4 +57,6 @@ def test_legacy_simple_report_fields_remain_present_with_rich_payload() -> None:
     assert report.summary["filled_notional"] == 0
     assert "paper_trial_metrics" in report.summary
     assert "machine_payload" in report.summary
+    assert report.summary["offline_learning_report"]["status"] == "unavailable"
+    assert report.summary["offline_learning_report"]["promotion_candidate"] is None
     assert report.live_trading_enabled is False

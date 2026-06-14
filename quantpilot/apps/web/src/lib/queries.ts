@@ -5,6 +5,10 @@ import type {
   HealthResponse,
   Level12Request,
   Level12RunResponse,
+  OperatorReportEnvelope,
+  OperatorRunRequest,
+  OperatorRunResult,
+  OperatorStatusResponse,
   ParsePolicyRequest,
   PolicyPreviewResponse,
   SignalBoardResponse,
@@ -86,5 +90,40 @@ export function useLevel12Run() {
   return useMutation({
     mutationFn: (body: Level12Request) =>
       apiFetch<Level12RunResponse>("/api/level-1-2/run", { method: "POST", body }),
+  });
+}
+
+export const OPERATOR_STATUS_KEY = ["operator", "status"] as const;
+export const OPERATOR_REPORT_LATEST_KEY = ["operator", "report", "latest"] as const;
+
+export function useOperatorStatus() {
+  return useQuery({
+    queryKey: OPERATOR_STATUS_KEY,
+    queryFn: ({ signal }) =>
+      apiFetch<OperatorStatusResponse>("/api/operator/status", { signal }),
+    retry: 1,
+    staleTime: 10_000,
+  });
+}
+
+export function useLatestOperatorReport() {
+  return useQuery({
+    queryKey: OPERATOR_REPORT_LATEST_KEY,
+    queryFn: ({ signal }) =>
+      apiFetch<OperatorReportEnvelope>("/api/operator/reports/latest", { signal }),
+    retry: 1,
+    staleTime: 10_000,
+  });
+}
+
+export function useOperatorRunOnce() {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: (body: OperatorRunRequest) =>
+      apiFetch<OperatorRunResult>("/api/operator/run-once", { method: "POST", body }),
+    onSuccess: () => {
+      void queryClient.invalidateQueries({ queryKey: OPERATOR_STATUS_KEY });
+      void queryClient.invalidateQueries({ queryKey: OPERATOR_REPORT_LATEST_KEY });
+    },
   });
 }

@@ -92,6 +92,7 @@ export function ResearchPage() {
   return (
     <>
       <PageHeader
+        eyebrow="Research"
         title="리서치"
         description="정책 기반 후보 유니버스와 fixture 기반 애널리스트 리포트를 생성합니다. 모든 값은 모의 데이터이며 실제 시세가 아닙니다."
       />
@@ -269,7 +270,7 @@ function AnalystReportCard({ report }: { report: AnalystReport }) {
           <ReportList title="투자 논거" items={report.investment_thesis} />
           <ReportList title="촉매" items={report.catalysts} />
         </div>
-        <div className="grid gap-3 rounded-xl border border-hairline bg-surface-solid p-4 text-[13px] md:grid-cols-3">
+        <div className="grid gap-3 rounded-xl border border-hairline bg-surface-raised p-4 text-[13px] shadow-sm md:grid-cols-3">
           <div>
             <p className="text-[11.5px] font-medium text-muted">밸류에이션</p>
             <p className="mt-1 leading-relaxed">{report.valuation_view}</p>

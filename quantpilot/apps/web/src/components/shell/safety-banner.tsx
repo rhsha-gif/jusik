@@ -35,10 +35,12 @@ export function SafetyBanner({ dataMode = "fixture" }: SafetyBannerProps) {
     <div
       role="note"
       aria-label="안전 모드 안내"
-      className="flex flex-wrap items-center gap-x-3 gap-y-1.5 border-b border-hairline bg-safe-soft/60 px-6 py-2"
+      className="flex flex-wrap items-center gap-x-3 gap-y-1.5 border-b border-hairline bg-gradient-to-r from-safe-soft/80 via-safe-soft/30 to-transparent px-5 py-2 lg:px-6"
     >
-      <span className="inline-flex items-center gap-1.5 text-[12.5px] font-medium text-safe">
-        <ShieldCheck className="size-3.5" />
+      <span className="inline-flex items-center gap-1.5 text-[12.5px] font-semibold text-safe">
+        <span className="flex size-5 items-center justify-center rounded-md bg-safe-soft text-safe">
+          <ShieldCheck className="size-3.5" />
+        </span>
         모의 브로커 활성 (Mock Broker)
       </span>
       <span className="hidden text-[12px] text-muted sm:inline">

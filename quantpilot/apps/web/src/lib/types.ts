@@ -197,3 +197,110 @@ export interface Level12RunResponse {
   daily_report: OperationReport;
   order_submission_enabled: boolean;
 }
+
+/* ---------------------------------------------------------------------------
+ * Level 5 Operator (fully-automated operator harness).
+ *
+ * Level 5 is NOT live trading. Runs default to `dry_run`; `mock_submit` and
+ * `paper_submit` only ever touch the mock/paper broker. These aliases mirror
+ * quantpilot/packages/core/operator/schemas.py verbatim so the operator page
+ * and its JSON viewers stay faithful to the backend contract.
+ * ------------------------------------------------------------------------- */
+
+export type OperatorRunMode = "dry_run" | "mock_submit" | "paper_submit";
+
+export type OperatorRunStatus = "completed" | "blocked" | "fallback" | "failed";
+
+export type OperatorDecisionAction = "submit" | "block" | "fallback" | "noop";
+
+export interface OperatorRunRequest {
+  user_id: string;
+  policy_id: string;
+  requested_policy_version: number;
+  run_mode: OperatorRunMode;
+  requested_at: string;
+  idempotency_key: string;
+}
+
+export interface FallbackDecision {
+  from_level: 5;
+  /** 4=guarded autopilot, 3=proposals, 2=suggestions, 0=no-op. */
+  to_level: 4 | 3 | 2 | 0;
+  reason_code: string;
+  detail: string;
+  order_submission_enabled: boolean;
+}
+
+export interface StrategySelectionDecision {
+  selected_strategy_id: string | null;
+  selected_version: string | null;
+  eligible_strategy_ids: string[];
+  /** Maps strategy_id -> rejection reason. */
+  rejected: Record<string, string>;
+  reason: string;
+}
+
+export interface OperatorDecision {
+  decision_id: string;
+  run_id: string;
+  policy_id: string;
+  policy_version: number;
+  strategy_id: string | null;
+  order_plan_id: string | null;
+  action: OperatorDecisionAction;
+  reason: string;
+  risk_check_id: string | null;
+  created_at: string;
+}
+
+export interface OperatorReport {
+  report_id: string;
+  run_id: string;
+  user_id: string;
+  policy_id: string;
+  policy_version: number;
+  started_at: string;
+  completed_at: string;
+  status: OperatorRunStatus;
+  strategy_selection: StrategySelectionDecision;
+  decisions: OperatorDecision[];
+  fallback: FallbackDecision | null;
+  order_plan_ids: string[];
+  broker_order_ids: string[];
+  risk_check_ids: string[];
+  safety_flags: Record<string, boolean | string>;
+  live_trading_enabled: boolean;
+  audit_event_count: number;
+}
+
+export interface OperatorRunResult {
+  run_id: string;
+  status: OperatorRunStatus;
+  submitted_order_plan_ids: string[];
+  blocked_order_plan_ids: string[];
+  fallback: FallbackDecision | null;
+  report: OperatorReport;
+}
+
+/** Registry entry as returned inline by GET /api/operator/status. */
+export interface OperatorRegistryEntry {
+  strategy_id: string;
+  version: string;
+  status: string;
+  allowed_execution_levels: string[];
+  disabled_reason: string | null;
+}
+
+/** GET /api/operator/status returns dict[str, object] on the backend. */
+export interface OperatorStatusResponse {
+  live_trading_enabled: boolean;
+  feature_flags: Record<string, boolean | string>;
+  registry: OperatorRegistryEntry[];
+  runs: number;
+}
+
+/** GET /api/operator/reports/latest returns dict[str, object]. */
+export interface OperatorReportEnvelope {
+  report: OperatorReport | null;
+  text: string;
+}

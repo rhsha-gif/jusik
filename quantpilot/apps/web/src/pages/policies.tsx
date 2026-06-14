@@ -60,6 +60,7 @@ export function PoliciesPage() {
   return (
     <>
       <PageHeader
+        eyebrow="Policy Studio"
         title="정책 스튜디오"
         description="자연어 정책 텍스트를 구조화된 정책으로 파싱하고, 미리보기로 검증한 뒤 확정합니다. 확정은 로컬 프리하니스에만 적용됩니다."
       />

@@ -34,6 +34,7 @@ export function RunPage() {
   return (
     <>
       <PageHeader
+        eyebrow="Level 1-2"
         title="Level 1-2 실행"
         description="유니버스 → 지표 → 신호 → 리밸런스 제안 → 일일 리포트까지 모의 파이프라인 전체를 실행합니다. 주문 제출은 비활성화되어 있습니다."
         actions={
@@ -92,7 +93,7 @@ function PreflightItem({
   label: string;
 }) {
   return (
-    <li className="flex items-center gap-2.5 rounded-xl border border-hairline bg-surface-solid px-3.5 py-3 text-[13px]">
+    <li className="flex items-center gap-2.5 rounded-xl border border-hairline bg-surface-raised px-3.5 py-3 text-[13px] shadow-sm">
       {pending ? (
         <CircleDashed className="size-4 shrink-0 animate-spin text-muted" />
       ) : ok ? (
@@ -250,9 +251,11 @@ function RunResult({ result }: { result: Level12RunResponse }) {
 
 function RunStat({ label, value }: { label: string; value: number }) {
   return (
-    <div className="rounded-xl border border-hairline bg-surface-solid px-4 py-3">
-      <p className="text-[12px] text-muted">{label}</p>
-      <p className="mt-0.5 text-[22px] font-semibold tabular-nums">{value}</p>
+    <div className="rounded-xl border border-hairline bg-surface-raised px-4 py-3 shadow-sm">
+      <p className="text-[11.5px] font-medium uppercase tracking-wide text-faint">{label}</p>
+      <p className="mt-1 text-[24px] font-semibold leading-none tabular-nums tracking-tight">
+        {value}
+      </p>
     </div>
   );
 }

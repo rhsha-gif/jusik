@@ -2,9 +2,10 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 from datetime import datetime
-from typing import Sequence
+from typing import Literal, Sequence
 
-from quantpilot.packages.core.risk.gatekeeper import allowed_execution_modes, market_orders_enabled
+from quantpilot.packages.core.execution.safety_flags import market_orders_enabled
+from quantpilot.packages.core.risk.gatekeeper import allowed_execution_modes
 from quantpilot.packages.core.risk.types import BatchPortfolioExposure, BatchRiskConfig, BatchRiskDecision, BatchRiskInput
 from quantpilot.packages.core.schemas import (
     BrokerMode,
@@ -17,6 +18,9 @@ from quantpilot.packages.core.schemas import (
     UserPolicy,
     utc_now,
 )
+
+
+BatchRiskMode = Literal["full_batch", "partial_batch", "rejected"]
 
 
 @dataclass(frozen=True)
@@ -255,7 +259,7 @@ def _decision_reasons(evaluation: _BatchEvaluation) -> list[str]:
 def _build_decision(
     *,
     policy: UserPolicy,
-    mode: str,
+    mode: BatchRiskMode,
     accepted: Sequence[_Candidate],
     rejected: Sequence[_Candidate],
     evaluation: _BatchEvaluation,
@@ -263,7 +267,7 @@ def _build_decision(
 ) -> BatchRiskDecision:
     return BatchRiskDecision(
         passed=mode != "rejected",
-        mode=mode,  # type: ignore[arg-type]
+        mode=mode,
         policy_version=policy.version,
         accepted_intent_ids=[candidate.intent.intent_id for candidate in accepted],
         rejected_intent_ids=[candidate.intent.intent_id for candidate in rejected],

@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from fastapi import APIRouter, Depends
 
-from quantpilot.packages.core.execution.state_machine import (
+from quantpilot.packages.core.execution.safety_flags import (
     fully_automated_operator_flag_enabled,
     live_trading_flag_enabled,
     operator_kill_switch_engaged,

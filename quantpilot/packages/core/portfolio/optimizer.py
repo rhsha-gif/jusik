@@ -7,6 +7,7 @@ from quantpilot.packages.core.portfolio.optimizer_types import (
     ExpectedReturnRiskProxy,
     OptimizationInput,
     OptimizationResult,
+    OptimizationStatus,
     TargetWeight,
 )
 from quantpilot.packages.core.schemas import PortfolioSnapshot, Signal, SignalAction
@@ -157,7 +158,7 @@ class DeterministicPortfolioOptimizer:
             return self._fail_closed(request, ["constraints_infeasible", *violations])
 
         turnover = self._turnover(candidates)
-        status = "optimized" if turnover > _EPSILON else "no_trade"
+        status: OptimizationStatus = "optimized" if turnover > _EPSILON else "no_trade"
         reason_codes = ["constraints_satisfied"] if status == "optimized" else ["no_target_weight_changes"]
         return self._result(request, candidates, status=status, reason_codes=reason_codes)
 
@@ -310,7 +311,7 @@ class DeterministicPortfolioOptimizer:
         request: OptimizationInput,
         candidates: list[_Candidate],
         *,
-        status: str,
+        status: OptimizationStatus,
         reason_codes: list[str],
     ) -> OptimizationResult:
         invested = self._invested_weight(request, candidates)
@@ -332,7 +333,7 @@ class DeterministicPortfolioOptimizer:
             constraint for candidate in candidates for constraint in candidate.constrained_by
         )
         return OptimizationResult(
-            status=status,  # type: ignore[arg-type]
+            status=status,
             target_weights=target_weights,
             cash_target_weight=_weight(1.0 - invested),
             turnover_weight=round(self._turnover(candidates), 6),

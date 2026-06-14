@@ -1,8 +1,11 @@
 from __future__ import annotations
 
-import os
 from datetime import datetime, timezone
 
+from quantpilot.packages.core.execution.safety_flags import (
+    fully_automated_operator_flag_enabled,
+    market_orders_enabled,
+)
 from quantpilot.packages.core.schemas import (
     BrokerMode,
     ExecutionMode,
@@ -22,18 +25,12 @@ PRE_HARNESS_EXECUTION_MODES = {
 }
 
 
-def market_orders_enabled() -> bool:
-    return os.getenv("MARKET_ORDERS_ENABLED", "false").lower() == "true"
-
-
 def allowed_execution_modes(policy: UserPolicy | None = None) -> set[ExecutionMode]:
     # fully_automated is only a valid execution mode while the Level 5 feature flag is
     # explicitly enabled (env or explicit policy field); with default flags the allowed
     # set is identical to pre-harness.
     modes = set(PRE_HARNESS_EXECUTION_MODES)
-    env_enabled = os.getenv("FULLY_AUTOMATED_OPERATOR_ENABLED", "false").lower() == "true"
-    policy_enabled = policy is not None and policy.fully_automated_operator_enabled
-    if env_enabled or policy_enabled:
+    if fully_automated_operator_flag_enabled(policy):
         modes.add(ExecutionMode.fully_automated)
     return modes
 

@@ -10,6 +10,7 @@ from quantpilot.packages.core.signals.multifactor import build_multi_factor_scor
 from quantpilot.packages.core.signals.types import (
     CalibratedSignal,
     CalibratedSignalSet,
+    CalibrationStatus,
     CalibrationGuardResult,
     EnsembleVote,
     ExpectedReturnRiskProxy,
@@ -174,6 +175,7 @@ def apply_calibration_guard(
     if signal.action == SignalAction.buy_ready and confidence < 0.45:
         reason_codes.append("confidence_below_buy_ready_threshold")
 
+    status: CalibrationStatus
     if "signal_expired" in reason_codes:
         status = "expired"
     elif not market_data_quality.usable or "provider_unavailable" in reason_codes:
@@ -188,7 +190,7 @@ def apply_calibration_guard(
     action_allowed = status == "available"
     return CalibrationGuardResult(
         passed=action_allowed,
-        status=status,  # type: ignore[arg-type]
+        status=status,
         action_allowed=action_allowed,
         reason_codes=_unique_codes(reason_codes),
     )

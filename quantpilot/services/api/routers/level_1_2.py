@@ -49,8 +49,8 @@ def analyst_reports(
     request: Level12Request,
     service: HarnessService = Depends(get_harness_service),
 ) -> dict[str, object]:
-    result = service.run_level_1_2(policy_id=_policy_id_for_request(request, service))
-    return {"policy_id": result["policy"].policy_id, "analyst_reports": result["analyst_reports"]}  # type: ignore[union-attr]
+    result = service.run_level_1_2_result(policy_id=_policy_id_for_request(request, service))
+    return {"policy_id": result.policy.policy_id, "analyst_reports": result.analyst_reports}
 
 
 @router.post("/signals/board")
@@ -58,8 +58,8 @@ def signal_board(
     request: Level12Request,
     service: HarnessService = Depends(get_harness_service),
 ) -> dict[str, object]:
-    result = service.run_level_1_2(policy_id=_policy_id_for_request(request, service))
-    return {"policy_id": result["policy"].policy_id, "signals": result["signals"]}  # type: ignore[union-attr]
+    result = service.run_level_1_2_result(policy_id=_policy_id_for_request(request, service))
+    return {"policy_id": result.policy.policy_id, "signals": result.signals}
 
 
 @router.post("/portfolio/rebalance-suggestions")
@@ -67,8 +67,8 @@ def rebalance_suggestions(
     request: Level12Request,
     service: HarnessService = Depends(get_harness_service),
 ) -> dict[str, object]:
-    result = service.run_level_1_2(policy_id=_policy_id_for_request(request, service))
-    return {"policy_id": result["policy"].policy_id, "rebalance": result["rebalance"]}  # type: ignore[union-attr]
+    result = service.run_level_1_2_result(policy_id=_policy_id_for_request(request, service))
+    return {"policy_id": result.policy.policy_id, "rebalance": result.rebalance}
 
 
 @router.post("/reports/research-signal-daily")
@@ -76,5 +76,5 @@ def research_signal_daily_report(
     request: Level12Request,
     service: HarnessService = Depends(get_harness_service),
 ) -> dict[str, object]:
-    result = service.run_level_1_2(policy_id=_policy_id_for_request(request, service))
-    return {"policy_id": result["policy"].policy_id, "daily_report": result["daily_report"]}  # type: ignore[union-attr]
+    result = service.run_level_1_2_result(policy_id=_policy_id_for_request(request, service))
+    return {"policy_id": result.policy.policy_id, "daily_report": result.daily_report}

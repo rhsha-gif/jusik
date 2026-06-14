@@ -399,8 +399,8 @@ def _build_warnings(
 def _load_price_history(
     source: MarketDataProvider | list[dict[str, Any]] | dict[str, list[dict[str, Any]]],
 ) -> list[dict[str, Any]]:
-    if hasattr(source, "get_price_history"):
-        return source.get_price_history()  # type: ignore[union-attr]
+    if isinstance(source, MarketDataProvider):
+        return source.get_price_history()
     if isinstance(source, list):
         return [dict(row) for row in source]
     if isinstance(source, dict):

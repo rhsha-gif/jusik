@@ -1,15 +1,23 @@
 from __future__ import annotations
 
-from datetime import timedelta
+from dataclasses import dataclass
+from datetime import datetime, timedelta
 
 from quantpilot.packages.brokers.mock_broker import MockBroker
 from quantpilot.packages.brokers.paper_broker import PaperBroker
 from quantpilot.packages.core.execution.state_machine import ApprovalRequired, RiskCheckRequired, authorize_level4, transition_order_plan
+from quantpilot.packages.core.execution.order_context import (
+    SubmitBatchContext,
+    build_guardrail_state,
+    build_submit_batch_context,
+    collect_seen_idempotency_keys,
+    orders_for_submit_batch,
+    quotes_for_intents,
+)
 from quantpilot.packages.core.policy.parser import DEFAULT_POLICY_TEXT, parse_policy_text
-from quantpilot.packages.core.analyst.reports import generate_analyst_report
+from quantpilot.packages.core.level12.service import Level12RunResult, Level12Service
 from quantpilot.packages.core.portfolio.planner import (
     build_portfolio_plan,
-    build_rebalance_suggestion_report,
     current_weight,
     fixture_portfolio_snapshot,
     proposal_idempotency_key,
@@ -17,7 +25,7 @@ from quantpilot.packages.core.portfolio.planner import (
 from quantpilot.packages.core.reports.service import build_operation_report
 from quantpilot.packages.core.risk.batch import run_batch_risk_gate
 from quantpilot.packages.core.risk.gatekeeper import run_risk_check
-from quantpilot.packages.core.risk.types import BatchRiskConfig
+from quantpilot.packages.core.risk.types import BatchRiskConfig, BatchRiskDecision
 from quantpilot.packages.core.schemas import (
     BrokerMode,
     BrokerOrder,
@@ -31,6 +39,7 @@ from quantpilot.packages.core.schemas import (
     PortfolioPlan,
     PortfolioSnapshot,
     ProposalExplanation,
+    RiskCheck,
     Signal,
     StrategyRecipe,
     UserPolicy,
@@ -46,10 +55,16 @@ from quantpilot.packages.core.data.providers import (
 )
 from quantpilot.packages.core.signals.service import generate_signals
 from quantpilot.packages.core.strategies.loader import load_default_strategy
-from quantpilot.packages.core.technical.indicators import calculate_technical_indicators
-from quantpilot.packages.core.universe.builder import build_candidate_universe
 from quantpilot.packages.db.audit import AuditRecorder
 from quantpilot.packages.db.repositories import RepositoryRegistry
+
+
+@dataclass(frozen=True)
+class _ProposalCandidate:
+    order_plan: OrderPlan
+    signal: Signal | None
+    strategy_id: str
+    strategy_version: str
 
 
 class HarnessService:
@@ -133,98 +148,20 @@ class HarnessService:
             )
         return signals
 
+    def _level12_service(self) -> Level12Service:
+        return Level12Service(
+            repositories=self.repositories,
+            audit=self.audit,
+            security_provider=self.security_provider,
+            market_data_provider=self.market_data_provider,
+            load_strategy=self.load_strategy,
+        )
+
+    def run_level_1_2_result(self, *, policy_id: str) -> Level12RunResult:
+        return self._level12_service().run(policy_id=policy_id)
+
     def run_level_1_2(self, *, policy_id: str) -> dict[str, object]:
-        policy = self.repositories.policies.require(policy_id)
-        recipe = self.load_strategy()
-        securities = self.security_provider.get_securities()
-        universe = build_candidate_universe(policy, securities)
-        bars = self.market_data_provider.get_bars()
-        signals = generate_signals(recipe, bars, policy=policy, securities=securities)
-        price_history = self.market_data_provider.get_price_history()
-        indicators = {
-            candidate.ticker: calculate_technical_indicators(
-                price_history,
-                ticker=candidate.ticker,
-                signal_date=signals[0].signal_date,
-            )
-            for candidate in universe
-        }
-        signals_by_ticker = {signal.symbol: signal for signal in signals}
-        analyst_reports = [
-            generate_analyst_report(
-                candidate=candidate,
-                indicator=indicators[candidate.ticker],
-                signal=signals_by_ticker.get(candidate.ticker),
-            )
-            for candidate in universe
-        ]
-
-        for signal in signals:
-            self.repositories.signals.add(signal)
-            self.audit.emit(
-                user_id=policy.user_id,
-                entity_type="signal",
-                entity_id=signal.signal_id,
-                action="level_2_signal_generated",
-                after_state=signal,
-                source="level_1_2_signal_engine",
-            )
-
-        rebalance_report = build_rebalance_suggestion_report(
-            policy=policy,
-            signals=signals,
-            snapshot=fixture_portfolio_snapshot(),
-            quotes={bar["symbol"]: float(bar["close"]) for bar in bars},
-        )
-        self.repositories.portfolio_plans.add(rebalance_report.portfolio_plan)
-        self.audit.emit(
-            user_id=policy.user_id,
-            entity_type="portfolio_plan",
-            entity_id=rebalance_report.portfolio_plan.plan_id,
-            action="level_2_rebalance_suggestion_created",
-            after_state=rebalance_report.portfolio_plan,
-            source="level_1_2_rebalance_engine",
-        )
-
-        operation_report = OperationReport(
-            user_id=policy.user_id,
-            policy_id=policy.policy_id,
-            summary={
-                "level": "1-2",
-                "candidate_count": len(universe),
-                "analyst_report_count": len(analyst_reports),
-                "signal_count": len(signals),
-                "rebalance_suggestion_count": len(rebalance_report.suggestions),
-                "supported_actions": [action.value for action in sorted({signal.action for signal in signals}, key=lambda item: item.value)],
-                "order_submission_enabled": False,
-                "broker": policy.broker.value,
-                "execution_mode": policy.execution_mode.value,
-            },
-            order_plan_ids=[],
-            fill_ids=[],
-            audit_event_count=len(self.repositories.audit_logs.list()),
-            live_trading_enabled=False,
-        )
-        self.repositories.operation_reports.add(operation_report)
-        self.audit.emit(
-            user_id=policy.user_id,
-            entity_type="operation_report",
-            entity_id=operation_report.report_id,
-            action="level_1_2_daily_report_generated",
-            after_state=operation_report,
-            source="level_1_2_report_service",
-        )
-
-        return {
-            "policy": policy,
-            "strategy": recipe,
-            "universe": universe,
-            "analyst_reports": analyst_reports,
-            "signals": signals,
-            "rebalance": rebalance_report,
-            "daily_report": operation_report,
-            "order_submission_enabled": False,
-        }
+        return self.run_level_1_2_result(policy_id=policy_id).as_dict()
 
     def create_portfolio_plan(
         self,
@@ -346,23 +283,12 @@ class HarnessService:
         exclude_order_plan_ids: set[str] | None = None,
         submitted_only: bool = False,
     ) -> set[str]:
-        excluded = set(exclude_order_plan_ids or set())
-        if exclude_order_plan_id is not None:
-            excluded.add(exclude_order_plan_id)
-        submitted_states = {
-            OrderStatus.submitted,
-            OrderStatus.accepted,
-            OrderStatus.partially_filled,
-            OrderStatus.filled,
-        }
-        keys: set[str] = set()
-        for order in self.repositories.order_plans.list():
-            if order.order_plan_id in excluded:
-                continue
-            if submitted_only and order.status not in submitted_states:
-                continue
-            keys.add(order.idempotency_key)
-        return keys
+        return collect_seen_idempotency_keys(
+            self.repositories.order_plans.list(),
+            exclude_order_plan_id=exclude_order_plan_id,
+            exclude_order_plan_ids=exclude_order_plan_ids,
+            submitted_only=submitted_only,
+        )
 
     def _guardrail_state(
         self,
@@ -372,40 +298,14 @@ class HarnessService:
         exclude_order_plan_id: str | None = None,
         exclude_order_plan_ids: set[str] | None = None,
     ) -> GuardrailState:
-        excluded = set(exclude_order_plan_ids or set())
-        if exclude_order_plan_id is not None:
-            excluded.add(exclude_order_plan_id)
-        submitted_states = {
-            OrderStatus.submitted,
-            OrderStatus.accepted,
-            OrderStatus.partially_filled,
-            OrderStatus.filled,
-        }
-        unfilled_states = {
-            OrderStatus.proposed,
-            OrderStatus.user_approved,
-            OrderStatus.submitted,
-            OrderStatus.accepted,
-            OrderStatus.partially_filled,
-        }
-        submitted_orders = [
-            order
-            for order in self.repositories.order_plans.list()
-            if order.policy_id == policy.policy_id and order.status in submitted_states and order.order_plan_id not in excluded
-        ]
-        unfilled_order_keys = [
-            f"{order.explanation.strategy_id if order.explanation else strategy_id}:{order.intent.symbol}:{order.intent.side}"
-            for order in self.repositories.order_plans.list()
-            if order.policy_id == policy.policy_id and order.status in unfilled_states and order.order_plan_id not in excluded
-        ]
-        return GuardrailState(
-            daily_order_count=len(submitted_orders),
-            daily_turnover_used=round(sum(order.intent.notional for order in submitted_orders), 2),
-            kill_switch_engaged=policy.kill_switch_engaged,
+        return build_guardrail_state(
+            order_plans=self.repositories.order_plans.list(),
+            policy=policy,
+            strategy_id=strategy_id,
             autopilot_paused=self.autopilot_paused,
             last_blocked_reason=self.last_blocked_reason,
-            unfilled_order_keys=unfilled_order_keys,
-            submitted_idempotency_keys=[order.idempotency_key for order in submitted_orders],
+            exclude_order_plan_id=exclude_order_plan_id,
+            exclude_order_plan_ids=exclude_order_plan_ids,
         )
 
     def _signal_by_symbol(self) -> dict[str, Signal]:
@@ -416,11 +316,54 @@ class HarnessService:
         return strategy
 
     def _quotes_for_intents(self, intents: list[OrderIntent]) -> dict[str, float]:
-        return {
-            intent.symbol: float(intent.limit_price)
-            for intent in intents
-            if intent.limit_price is not None
-        }
+        return quotes_for_intents(intents)
+
+    def _proposal_explanation(
+        self,
+        *,
+        policy: UserPolicy,
+        order_plan: OrderPlan,
+        signal: Signal | None,
+        strategy_id: str,
+        strategy_version: str,
+        snapshot: PortfolioSnapshot,
+        risk_check: RiskCheck,
+        now: datetime,
+    ) -> ProposalExplanation:
+        intent = order_plan.intent
+        current = current_weight(snapshot, intent.symbol)
+        quote_age = (now - intent.quote_time).total_seconds()
+        warnings = []
+        if quote_age > policy.stale_quote_max_age_seconds:
+            warnings.append("stale_quote_warning")
+        return ProposalExplanation(
+            symbol=intent.symbol,
+            action=intent.side,
+            quantity=intent.quantity,
+            target_weight_delta=round(intent.target_weight - current, 6),
+            reference_price=float(intent.limit_price or 0),
+            estimated_cash_impact=round(intent.notional if intent.side == "buy" else -intent.notional, 2),
+            strategy_id=strategy_id,
+            strategy_version=strategy_version,
+            signal_reason=signal.reason if signal else intent.reason,
+            reason_codes=signal.reason_codes if signal else [],
+            current_weight=round(current, 6),
+            target_weight=intent.target_weight,
+            weight_delta=round(intent.target_weight - current, 6),
+            quote_price=float(intent.limit_price or 0),
+            quote_age_seconds=round(max(0.0, quote_age), 3),
+            limit_price=intent.limit_price,
+            estimated_notional=intent.notional,
+            stop_price_hint=signal.stop_price_hint if signal else None,
+            take_profit_hint=signal.take_profit_hint if signal else None,
+            risk_checks_passed=risk_check.passed_checks,
+            risk_checks_failed=risk_check.failed_checks,
+            risk_check_id=risk_check.risk_check_id,
+            risk_check_expires_at=risk_check.expires_at,
+            idempotency_key=order_plan.idempotency_key,
+            policy_version=policy.version,
+            warnings=warnings,
+        )
 
     def generate_order_proposals(
         self,
@@ -464,7 +407,8 @@ class HarnessService:
             )
             return []
 
-        candidate_records: list[tuple[OrderPlan, Signal | None, str, str]] = []
+        existing_seen_keys = self._seen_idempotency_keys()
+        candidate_records: list[_ProposalCandidate] = []
         for intent in ordered_intents:
             signal = signals_by_symbol.get(intent.symbol)
             strategy_id = signal.strategy_id if signal else strategy.strategy_id
@@ -478,7 +422,7 @@ class HarnessService:
                 side=intent.side,
                 trading_date=trading_date,
             )
-            if key in self._seen_idempotency_keys():
+            if key in existing_seen_keys:
                 self.audit.emit(
                     user_id=policy.user_id,
                     entity_type="portfolio_plan",
@@ -497,23 +441,31 @@ class HarnessService:
                 auto_order_reference_price=intent.limit_price,
                 expires_at=now + timedelta(minutes=policy.order_expiry_minutes),
             )
-            candidate_records.append((order_plan, signal, strategy_id, strategy_version))
+            candidate_records.append(
+                _ProposalCandidate(
+                    order_plan=order_plan,
+                    signal=signal,
+                    strategy_id=strategy_id,
+                    strategy_version=strategy_version,
+                )
+            )
 
         if not candidate_records:
             return []
 
+        candidate_orders = [candidate.order_plan for candidate in candidate_records]
         batch_decision = run_batch_risk_gate(
             policy=policy,
             portfolio_plan=portfolio_plan,
             snapshot=portfolio_snapshot,
-            quotes=self._quotes_for_intents([record[0].intent for record in candidate_records]),
-            order_plans=[record[0] for record in candidate_records],
+            quotes=self._quotes_for_intents([order.intent for order in candidate_orders]),
+            order_plans=candidate_orders,
             config=BatchRiskConfig(
                 partial_allow=partial_allow,
                 quote_max_age_seconds=policy.human_review_quote_max_age_seconds,
             ),
             guardrail_state=self._guardrail_state(policy=policy, strategy_id=strategy.strategy_id),
-            seen_idempotency_keys=self._seen_idempotency_keys(),
+            seen_idempotency_keys=existing_seen_keys,
             now=now,
         )
         if not batch_decision.passed:
@@ -537,7 +489,12 @@ class HarnessService:
             )
 
         accepted_order_ids = set(batch_decision.accepted_order_plan_ids)
-        for order_plan, signal, strategy_id, strategy_version in candidate_records:
+        seen_keys = set(existing_seen_keys)
+        for candidate in candidate_records:
+            order_plan = candidate.order_plan
+            signal = candidate.signal
+            strategy_id = candidate.strategy_id
+            strategy_version = candidate.strategy_version
             if order_plan.order_plan_id not in accepted_order_ids:
                 self.audit.emit(
                     user_id=policy.user_id,
@@ -558,7 +515,7 @@ class HarnessService:
                 policy=policy,
                 order_plan=order_plan,
                 snapshot=portfolio_snapshot,
-                seen_idempotency_keys=self._seen_idempotency_keys(),
+                seen_idempotency_keys=seen_keys,
                 guardrail_state=state,
                 quote_max_age_seconds=policy.human_review_quote_max_age_seconds,
                 strategy_id=strategy_id,
@@ -569,45 +526,22 @@ class HarnessService:
                     entity_type="order_plan",
                     entity_id=order_plan.order_plan_id,
                     action="proposal_blocked",
-                    after_state={"failed_checks": risk_check.failed_checks, "idempotency_key": key},
+                    after_state={"failed_checks": risk_check.failed_checks, "idempotency_key": order_plan.idempotency_key},
                     source="level3_proposal_service",
                 )
                 continue
 
-            current = current_weight(portfolio_snapshot, intent.symbol)
-            quote_age = (now - intent.quote_time).total_seconds()
-            warnings = []
-            if quote_age > policy.stale_quote_max_age_seconds:
-                warnings.append("stale_quote_warning")
             order_plan.risk_check_id = risk_check.risk_check_id
             order_plan.risk_check_expires_at = risk_check.expires_at
-            order_plan.explanation = ProposalExplanation(
-                symbol=intent.symbol,
-                action=intent.side,
-                quantity=intent.quantity,
-                target_weight_delta=round(intent.target_weight - current, 6),
-                reference_price=float(intent.limit_price or 0),
-                estimated_cash_impact=round(intent.notional if intent.side == "buy" else -intent.notional, 2),
+            order_plan.explanation = self._proposal_explanation(
+                policy=policy,
+                order_plan=order_plan,
+                signal=signal,
                 strategy_id=strategy_id,
                 strategy_version=strategy_version,
-                signal_reason=signal.reason if signal else intent.reason,
-                reason_codes=signal.reason_codes if signal else [],
-                current_weight=round(current, 6),
-                target_weight=intent.target_weight,
-                weight_delta=round(intent.target_weight - current, 6),
-                quote_price=float(intent.limit_price or 0),
-                quote_age_seconds=round(max(0.0, quote_age), 3),
-                limit_price=intent.limit_price,
-                estimated_notional=intent.notional,
-                stop_price_hint=signal.stop_price_hint if signal else None,
-                take_profit_hint=signal.take_profit_hint if signal else None,
-                risk_checks_passed=risk_check.passed_checks,
-                risk_checks_failed=risk_check.failed_checks,
-                risk_check_id=risk_check.risk_check_id,
-                risk_check_expires_at=risk_check.expires_at,
-                idempotency_key=key,
-                policy_version=policy.version,
-                warnings=warnings,
+                snapshot=portfolio_snapshot,
+                risk_check=risk_check,
+                now=now,
             )
             self.repositories.order_plans.add(order_plan)
             transition_order_plan(
@@ -627,6 +561,7 @@ class HarnessService:
                 action="proposal_created",
             )
             created.append(self.repositories.order_plans.update(order_plan))
+            seen_keys.add(order_plan.idempotency_key)
         return created
 
     def apply_risk_check(self, order_plan_id: str, *, snapshot: PortfolioSnapshot | None = None):
@@ -802,27 +737,23 @@ class HarnessService:
         raise RuntimeError("live broker mode is disabled in the pre-harness")
 
     def _orders_for_submit_batch(self, order_plan: OrderPlan) -> list[OrderPlan]:
-        batch_statuses = {
-            OrderStatus.proposed,
-            OrderStatus.user_approved,
-            OrderStatus.submitted,
-            OrderStatus.accepted,
-            OrderStatus.partially_filled,
-            OrderStatus.filled,
-        }
-        batch: list[OrderPlan] = []
-        current_seen = False
-        for existing in self.repositories.order_plans.list():
-            if existing.policy_id != order_plan.policy_id or existing.status not in batch_statuses:
-                continue
-            if existing.order_plan_id == order_plan.order_plan_id:
-                batch.append(order_plan)
-                current_seen = True
-            else:
-                batch.append(existing)
-        if not current_seen:
-            batch.append(order_plan)
-        return batch
+        return orders_for_submit_batch(self.repositories.order_plans.list(), order_plan)
+
+    def _submit_batch_context(
+        self,
+        *,
+        policy: UserPolicy,
+        order_plan: OrderPlan,
+        strategy_id: str,
+    ) -> SubmitBatchContext:
+        return build_submit_batch_context(
+            order_plans=self.repositories.order_plans.list(),
+            order_plan=order_plan,
+            policy=policy,
+            strategy_id=strategy_id,
+            autopilot_paused=self.autopilot_paused,
+            last_blocked_reason=self.last_blocked_reason,
+        )
 
     def _portfolio_plan_for_order_batch(self, *, policy: UserPolicy, order_plans: list[OrderPlan]) -> PortfolioPlan:
         return PortfolioPlan(
@@ -833,84 +764,52 @@ class HarnessService:
             order_intents=[order.intent for order in order_plans],
         )
 
-    def submit_order_plan(self, order_plan_id: str) -> tuple[OrderPlan, BrokerOrder, list[Fill]]:
-        order_plan = self.repositories.order_plans.require(order_plan_id)
-        policy = self.repositories.policies.require(order_plan.policy_id)
+    def _strategy_id_for_order(self, order_plan: OrderPlan) -> str:
+        return order_plan.explanation.strategy_id if order_plan.explanation else "unknown_strategy"
 
-        if order_plan.risk_check_id is None or order_plan.status == OrderStatus.draft:
-            raise RiskCheckRequired("risk_checked is required before submission")
-        if order_plan.risk_check_expires_at is not None and order_plan.risk_check_expires_at <= utc_now():
-            transition_order_plan(
-                order_plan=order_plan,
-                new_status=OrderStatus.expired,
-                audit=self.audit,
-                user_id=policy.user_id,
-                source="execution_service",
-                action="risk_check_expired",
-            )
-            self.repositories.order_plans.update(order_plan)
-            raise RiskCheckRequired("fresh risk check is required before submission")
-        if policy.execution_mode.value == "approval_required" and order_plan.status != OrderStatus.user_approved:
-            raise ApprovalRequired("explicit user approval is required before submission")
-
-        strategy_id = order_plan.explanation.strategy_id if order_plan.explanation else "unknown_strategy"
-        fresh_risk = run_risk_check(
+    def _fresh_submission_risk_check(
+        self,
+        *,
+        policy: UserPolicy,
+        order_plan: OrderPlan,
+        snapshot: PortfolioSnapshot,
+        strategy_id: str,
+    ):
+        return run_risk_check(
             policy=policy,
             order_plan=order_plan,
-            snapshot=fixture_portfolio_snapshot(),
+            snapshot=snapshot,
             seen_idempotency_keys=self._seen_idempotency_keys(exclude_order_plan_id=order_plan.order_plan_id, submitted_only=True),
             guardrail_state=self._guardrail_state(policy=policy, strategy_id=strategy_id, exclude_order_plan_id=order_plan.order_plan_id),
             quote_max_age_seconds=policy.stale_quote_max_age_seconds,
             strategy_id=strategy_id,
         )
-        if not fresh_risk.passed:
-            self.audit.emit(
-                user_id=policy.user_id,
-                entity_type="order_plan",
-                entity_id=order_plan.order_plan_id,
-                action="risk_check_failed",
-                before_state=order_plan,
-                after_state={"failed_checks": fresh_risk.failed_checks},
-                source="execution_service",
-            )
-            raise RiskCheckRequired(f"fresh risk check failed: {fresh_risk.failed_checks}")
-        order_plan.risk_check_id = fresh_risk.risk_check_id
-        order_plan.risk_check_expires_at = fresh_risk.expires_at
 
-        batch_orders = self._orders_for_submit_batch(order_plan)
-        batch_order_ids = {order.order_plan_id for order in batch_orders}
-        batch_decision = run_batch_risk_gate(
+    def _submit_batch_risk_decision(
+        self,
+        *,
+        policy: UserPolicy,
+        order_plan: OrderPlan,
+        snapshot: PortfolioSnapshot,
+        strategy_id: str,
+    ) -> BatchRiskDecision:
+        context = self._submit_batch_context(
             policy=policy,
-            portfolio_plan=self._portfolio_plan_for_order_batch(policy=policy, order_plans=batch_orders),
-            snapshot=fixture_portfolio_snapshot(),
-            quotes=self._quotes_for_intents([order.intent for order in batch_orders]),
-            order_plans=batch_orders,
-            config=BatchRiskConfig(quote_max_age_seconds=policy.stale_quote_max_age_seconds),
-            guardrail_state=self._guardrail_state(
-                policy=policy,
-                strategy_id=strategy_id,
-                exclude_order_plan_ids=batch_order_ids,
-            ),
-            seen_idempotency_keys=self._seen_idempotency_keys(
-                exclude_order_plan_ids=batch_order_ids,
-                submitted_only=True,
-            ),
+            order_plan=order_plan,
+            strategy_id=strategy_id,
         )
-        if not batch_decision.passed or order_plan.order_plan_id not in set(batch_decision.accepted_order_plan_ids):
-            before_blocked = order_plan.model_copy(deep=True)
-            order_plan.blocked_reason = "batch_risk_rejected"
-            self.repositories.order_plans.update(order_plan)
-            self.audit.emit(
-                user_id=policy.user_id,
-                entity_type="order_plan",
-                entity_id=order_plan.order_plan_id,
-                action="batch_risk_rejected",
-                before_state=before_blocked,
-                after_state=batch_decision,
-                source="execution_service",
-            )
-            raise RiskCheckRequired(f"batch risk check failed: {batch_decision.failed_checks}")
+        return run_batch_risk_gate(
+            policy=policy,
+            portfolio_plan=self._portfolio_plan_for_order_batch(policy=policy, order_plans=context.batch_orders),
+            snapshot=snapshot,
+            quotes=context.quotes,
+            order_plans=context.batch_orders,
+            config=BatchRiskConfig(quote_max_age_seconds=policy.stale_quote_max_age_seconds),
+            guardrail_state=context.guardrail_state,
+            seen_idempotency_keys=context.seen_idempotency_keys,
+        )
 
+    def _submit_to_broker(self, *, policy: UserPolicy, order_plan: OrderPlan) -> tuple[OrderPlan, BrokerOrder, list[Fill]]:
         broker = self._broker_for_policy(policy)
         transition_order_plan(
             order_plan=order_plan,
@@ -955,6 +854,71 @@ class HarnessService:
         )
         self.repositories.order_plans.update(order_plan)
         return order_plan, broker_order, fills
+
+    def submit_order_plan(self, order_plan_id: str) -> tuple[OrderPlan, BrokerOrder, list[Fill]]:
+        order_plan = self.repositories.order_plans.require(order_plan_id)
+        policy = self.repositories.policies.require(order_plan.policy_id)
+
+        if order_plan.risk_check_id is None or order_plan.status == OrderStatus.draft:
+            raise RiskCheckRequired("risk_checked is required before submission")
+        if order_plan.risk_check_expires_at is not None and order_plan.risk_check_expires_at <= utc_now():
+            transition_order_plan(
+                order_plan=order_plan,
+                new_status=OrderStatus.expired,
+                audit=self.audit,
+                user_id=policy.user_id,
+                source="execution_service",
+                action="risk_check_expired",
+            )
+            self.repositories.order_plans.update(order_plan)
+            raise RiskCheckRequired("fresh risk check is required before submission")
+        if policy.execution_mode.value == "approval_required" and order_plan.status != OrderStatus.user_approved:
+            raise ApprovalRequired("explicit user approval is required before submission")
+
+        strategy_id = self._strategy_id_for_order(order_plan)
+        snapshot = fixture_portfolio_snapshot()
+        fresh_risk = self._fresh_submission_risk_check(
+            policy=policy,
+            order_plan=order_plan,
+            snapshot=snapshot,
+            strategy_id=strategy_id,
+        )
+        if not fresh_risk.passed:
+            self.audit.emit(
+                user_id=policy.user_id,
+                entity_type="order_plan",
+                entity_id=order_plan.order_plan_id,
+                action="risk_check_failed",
+                before_state=order_plan,
+                after_state={"failed_checks": fresh_risk.failed_checks},
+                source="execution_service",
+            )
+            raise RiskCheckRequired(f"fresh risk check failed: {fresh_risk.failed_checks}")
+        order_plan.risk_check_id = fresh_risk.risk_check_id
+        order_plan.risk_check_expires_at = fresh_risk.expires_at
+
+        batch_decision = self._submit_batch_risk_decision(
+            policy=policy,
+            order_plan=order_plan,
+            snapshot=snapshot,
+            strategy_id=strategy_id,
+        )
+        if not batch_decision.passed or order_plan.order_plan_id not in set(batch_decision.accepted_order_plan_ids):
+            before_blocked = order_plan.model_copy(deep=True)
+            order_plan.blocked_reason = "batch_risk_rejected"
+            self.repositories.order_plans.update(order_plan)
+            self.audit.emit(
+                user_id=policy.user_id,
+                entity_type="order_plan",
+                entity_id=order_plan.order_plan_id,
+                action="batch_risk_rejected",
+                before_state=before_blocked,
+                after_state=batch_decision,
+                source="execution_service",
+            )
+            raise RiskCheckRequired(f"batch risk check failed: {batch_decision.failed_checks}")
+
+        return self._submit_to_broker(policy=policy, order_plan=order_plan)
 
     def pause_guarded_autopilot(self, *, policy_id: str, reason: str = "user_paused") -> dict[str, object]:
         policy = self.repositories.policies.require(policy_id)
@@ -1060,10 +1024,11 @@ class HarnessService:
             self.repositories.policies.update(policy)
             return {"submitted": [], "blocked": [{"reason": "audit_log_unwritable"}]}
 
-        if not self.repositories.signals.list():
-            self.run_signals()
+        signals = self.repositories.signals.list()
+        if not signals:
+            signals = self.run_signals()
         snapshot = fixture_portfolio_snapshot()
-        plan = self.create_portfolio_plan(policy_id=policy.policy_id, signals=self.repositories.signals.list(), snapshot=snapshot)
+        plan = self.create_portfolio_plan(policy_id=policy.policy_id, signals=signals, snapshot=snapshot)
         proposals = self.generate_order_proposals(portfolio_plan_id=plan.plan_id, snapshot=snapshot)
         strategy = self.load_strategy()
         submitted: list[dict[str, object]] = []

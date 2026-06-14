@@ -13,6 +13,7 @@ from quantpilot.packages.core.signals.service import classify_level2_action, gen
 from quantpilot.packages.core.strategies.loader import load_default_strategy
 from quantpilot.packages.core.technical.indicators import calculate_technical_indicators
 from quantpilot.packages.core.universe.builder import build_candidate_universe
+from quantpilot.services.api.dependencies import get_harness_service
 from quantpilot.services.api.main import app
 
 
@@ -160,7 +161,60 @@ def test_level_1_2_research_flow_cannot_submit_broker_orders() -> None:
 
     result = service.run_level_1_2(policy_id=policy.policy_id)
 
+    assert set(result) == {
+        "policy",
+        "strategy",
+        "universe",
+        "analyst_reports",
+        "signals",
+        "rebalance",
+        "daily_report",
+        "order_submission_enabled",
+    }
     assert result["order_submission_enabled"] is False
     assert service.repositories.order_plans.list() == []
     assert service.repositories.broker_orders.list() == []
     assert service.repositories.fills.list() == []
+
+
+def test_level_1_2_typed_result_matches_wrapper_shape() -> None:
+    service = HarnessService()
+    policy = service.parse_policy("fixture")
+
+    result = service.run_level_1_2_result(policy_id=policy.policy_id)
+
+    assert result.policy.policy_id == policy.policy_id
+    assert result.order_submission_enabled is False
+    assert set(result.as_dict()) == {
+        "policy",
+        "strategy",
+        "universe",
+        "analyst_reports",
+        "signals",
+        "rebalance",
+        "daily_report",
+        "order_submission_enabled",
+    }
+
+
+def test_level_1_2_route_helpers_preserve_payload_shapes() -> None:
+    service = HarnessService()
+    policy = service.parse_policy("fixture")
+    app.dependency_overrides[get_harness_service] = lambda: service
+    client = TestClient(app)
+
+    try:
+        cases = [
+            ("/api/research/analyst", "analyst_reports"),
+            ("/api/signals/board", "signals"),
+            ("/api/portfolio/rebalance-suggestions", "rebalance"),
+            ("/api/reports/research-signal-daily", "daily_report"),
+        ]
+        for path, payload_key in cases:
+            response = client.post(path, json={"policy_id": policy.policy_id})
+            body = response.json()
+            assert response.status_code == 200
+            assert body["policy_id"] == policy.policy_id
+            assert payload_key in body
+    finally:
+        app.dependency_overrides.clear()

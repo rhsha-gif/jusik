@@ -1,16 +1,21 @@
 from __future__ import annotations
 
+from dataclasses import dataclass, field
 from datetime import datetime
+from typing import Literal
 
 from quantpilot.packages.core.execution.fallback_manager import FallbackDecision, FallbackManager
+from quantpilot.packages.core.execution.safety_flags import (
+    fully_automated_operator_flag_enabled,
+    guarded_autopilot_flag_enabled,
+    live_trading_flag_enabled,
+    market_orders_enabled,
+    operator_kill_switch_engaged,
+)
 from quantpilot.packages.core.execution.state_machine import (
     ApprovalRequired,
     RiskCheckRequired,
     authorize_level5,
-    fully_automated_operator_flag_enabled,
-    guarded_autopilot_flag_enabled,
-    live_trading_flag_enabled,
-    operator_kill_switch_engaged,
     transition_order_plan,
 )
 from quantpilot.packages.core.harness_service import HarnessService
@@ -21,14 +26,15 @@ from quantpilot.packages.core.operator.schemas import (
     OperatorReport,
     OperatorRunRequest,
     OperatorRunResult,
+    OperatorRunStatus,
 )
 from quantpilot.packages.core.policy.versioning import PolicyVersionGuard, PolicyVersioningService
-from quantpilot.packages.core.risk.gatekeeper import market_orders_enabled
 from quantpilot.packages.core.schemas import (
     BrokerMode,
     ExecutionMode,
     OrderPlan,
     OrderStatus,
+    PortfolioSnapshot,
     Signal,
     StrategyRecipe,
     UserPolicy,
@@ -39,6 +45,7 @@ from quantpilot.packages.core.signals.service import generate_provider_bound_sig
 from quantpilot.packages.core.strategies.loader import load_strategy_recipe
 from quantpilot.packages.core.strategies.registry import (
     StrategyRegistry,
+    StrategyRegistryEntry,
     StrategySelectionDecision,
     default_strategy_registry,
 )
@@ -70,6 +77,123 @@ def _empty_selection(reason: str) -> StrategySelectionDecision:
         rejected={},
         reason=reason,
     )
+
+
+OperatorDecisionAction = Literal["submit", "block", "fallback", "noop"]
+
+
+@dataclass
+class _OperatorRunContext:
+    service: OperatorService
+    request: OperatorRunRequest
+    run_id: str
+    started_at: datetime
+    policy: UserPolicy | None
+    decisions: list[OperatorDecision] = field(default_factory=list)
+
+    @property
+    def policy_version(self) -> int:
+        return self.policy.version if self.policy else self.request.requested_policy_version
+
+    def decide(
+        self,
+        action: OperatorDecisionAction,
+        reason: str,
+        *,
+        strategy_id: str | None = None,
+        order_plan_id: str | None = None,
+        risk_check_id: str | None = None,
+    ) -> OperatorDecision:
+        decision = OperatorDecision(
+            run_id=self.run_id,
+            policy_id=self.request.policy_id,
+            policy_version=self.policy_version,
+            strategy_id=strategy_id,
+            order_plan_id=order_plan_id,
+            action=action,
+            reason=reason,
+            risk_check_id=risk_check_id,
+        )
+        self.decisions.append(decision)
+        return decision
+
+    def finish(
+        self,
+        status: OperatorRunStatus,
+        *,
+        fallback: FallbackDecision | None = None,
+        selection: StrategySelectionDecision | None = None,
+        submitted: list[str] | None = None,
+        blocked: list[str] | None = None,
+        order_plan_ids: list[str] | None = None,
+        broker_order_ids: list[str] | None = None,
+        risk_check_ids: list[str] | None = None,
+    ) -> OperatorRunResult:
+        if fallback is not None:
+            self.service.audit.emit(
+                user_id=self.request.user_id,
+                entity_type="operator_run",
+                entity_id=self.run_id,
+                action="operator_fallback_engaged",
+                after_state=fallback,
+                source="operator_service",
+            )
+        report = OperatorReport(
+            run_id=self.run_id,
+            user_id=self.request.user_id,
+            policy_id=self.request.policy_id,
+            policy_version=self.policy_version,
+            started_at=self.started_at,
+            completed_at=utc_now(),
+            status=status,
+            strategy_selection=selection or _empty_selection("strategy_selection_not_reached"),
+            decisions=self.decisions,
+            fallback=fallback,
+            order_plan_ids=order_plan_ids or [],
+            broker_order_ids=broker_order_ids or [],
+            risk_check_ids=risk_check_ids or [],
+            safety_flags=self.service._safety_flags(self.policy, self.request),
+            live_trading_enabled=False,
+            audit_event_count=len(self.service.repositories.audit_logs.list()),
+        )
+        self.service.reports.append(report)
+        self.service.audit.emit(
+            user_id=self.request.user_id,
+            entity_type="operator_report",
+            entity_id=report.report_id,
+            action="operator_report_generated",
+            after_state=report,
+            source="operator_service",
+        )
+        self.service.audit.emit(
+            user_id=self.request.user_id,
+            entity_type="operator_run",
+            entity_id=self.run_id,
+            action="operator_run_completed" if status == "completed" else "operator_run_blocked",
+            after_state={"status": status, "fallback": fallback.reason_code if fallback else None},
+            source="operator_service",
+        )
+        result = OperatorRunResult(
+            run_id=self.run_id,
+            status=status,
+            submitted_order_plan_ids=submitted or [],
+            blocked_order_plan_ids=blocked or [],
+            fallback=fallback,
+            report=report,
+        )
+        self.service._runs_by_key[self.request.idempotency_key] = result
+        return result
+
+    def blocked_by(
+        self,
+        reason_code: str,
+        *,
+        selection: StrategySelectionDecision | None = None,
+    ) -> OperatorRunResult:
+        fallback = self.service.fallbacks.for_reason(reason_code)
+        self.decide("fallback" if fallback.to_level > 0 else "block", reason_code)
+        status: OperatorRunStatus = "fallback" if fallback.to_level > 0 else "blocked"
+        return self.finish(status, fallback=fallback, selection=selection)
 
 
 class OperatorService:
@@ -139,8 +263,14 @@ class OperatorService:
 
         run_id = new_id("oprun")
         started_at = now or utc_now()
-        decisions: list[OperatorDecision] = []
         policy = self.repositories.policies.get(request.policy_id)
+        context = _OperatorRunContext(
+            service=self,
+            request=request,
+            run_id=run_id,
+            started_at=started_at,
+            policy=policy,
+        )
 
         self.audit.emit(
             user_id=request.user_id,
@@ -151,124 +281,31 @@ class OperatorService:
             source="operator_service",
         )
 
-        def decide(
-            action: str,
-            reason: str,
-            *,
-            strategy_id: str | None = None,
-            order_plan_id: str | None = None,
-            risk_check_id: str | None = None,
-        ) -> OperatorDecision:
-            decision = OperatorDecision(
-                run_id=run_id,
-                policy_id=request.policy_id,
-                policy_version=policy.version if policy else request.requested_policy_version,
-                strategy_id=strategy_id,
-                order_plan_id=order_plan_id,
-                action=action,  # type: ignore[arg-type]
-                reason=reason,
-                risk_check_id=risk_check_id,
-            )
-            decisions.append(decision)
-            return decision
-
-        def finish(
-            status: str,
-            *,
-            fallback: FallbackDecision | None = None,
-            selection: StrategySelectionDecision | None = None,
-            submitted: list[str] | None = None,
-            blocked: list[str] | None = None,
-            order_plan_ids: list[str] | None = None,
-            broker_order_ids: list[str] | None = None,
-            risk_check_ids: list[str] | None = None,
-        ) -> OperatorRunResult:
-            if fallback is not None:
-                self.audit.emit(
-                    user_id=request.user_id,
-                    entity_type="operator_run",
-                    entity_id=run_id,
-                    action="operator_fallback_engaged",
-                    after_state=fallback,
-                    source="operator_service",
-                )
-            report = OperatorReport(
-                run_id=run_id,
-                user_id=request.user_id,
-                policy_id=request.policy_id,
-                policy_version=policy.version if policy else request.requested_policy_version,
-                started_at=started_at,
-                completed_at=utc_now(),
-                status=status,  # type: ignore[arg-type]
-                strategy_selection=selection or _empty_selection("strategy_selection_not_reached"),
-                decisions=decisions,
-                fallback=fallback,
-                order_plan_ids=order_plan_ids or [],
-                broker_order_ids=broker_order_ids or [],
-                risk_check_ids=risk_check_ids or [],
-                safety_flags=self._safety_flags(policy, request),
-                live_trading_enabled=False,
-                audit_event_count=len(self.repositories.audit_logs.list()),
-            )
-            self.reports.append(report)
-            self.audit.emit(
-                user_id=request.user_id,
-                entity_type="operator_report",
-                entity_id=report.report_id,
-                action="operator_report_generated",
-                after_state=report,
-                source="operator_service",
-            )
-            self.audit.emit(
-                user_id=request.user_id,
-                entity_type="operator_run",
-                entity_id=run_id,
-                action="operator_run_completed" if status == "completed" else "operator_run_blocked",
-                after_state={"status": status, "fallback": fallback.reason_code if fallback else None},
-                source="operator_service",
-            )
-            result = OperatorRunResult(
-                run_id=run_id,
-                status=status,  # type: ignore[arg-type]
-                submitted_order_plan_ids=submitted or [],
-                blocked_order_plan_ids=blocked or [],
-                fallback=fallback,
-                report=report,
-            )
-            self._runs_by_key[request.idempotency_key] = result
-            return result
-
-        def blocked_by(reason_code: str, *, selection: StrategySelectionDecision | None = None) -> OperatorRunResult:
-            fallback = self.fallbacks.for_reason(reason_code)
-            decide("fallback" if fallback.to_level > 0 else "block", reason_code)
-            status = "fallback" if fallback.to_level > 0 else "blocked"
-            return finish(status, fallback=fallback, selection=selection)
-
         # Gate 1: Level 5 feature flag (env or explicit policy field).
         if not fully_automated_operator_flag_enabled(policy):
-            return blocked_by("level5_flag_disabled")
+            return context.blocked_by("level5_flag_disabled")
 
         # Gate 2: an active policy must exist.
         if policy is None:
-            return blocked_by("policy_not_found")
+            return context.blocked_by("policy_not_found")
 
         # Gate 3: live trading must remain disabled; the operator refuses to run otherwise.
         if live_trading_flag_enabled():
-            return blocked_by("live_trading_flag_engaged")
+            return context.blocked_by("live_trading_flag_engaged")
 
         # Gate 4: kill switches (policy-level and operator-level env switch).
         if policy.kill_switch_engaged:
-            return blocked_by("kill_switch_engaged")
+            return context.blocked_by("kill_switch_engaged")
         if operator_kill_switch_engaged():
-            return blocked_by("operator_kill_switch_engaged")
+            return context.blocked_by("operator_kill_switch_engaged")
 
         # Gate 5: only mock or paper brokers are reachable from the operator.
         if policy.broker not in {BrokerMode.mock, BrokerMode.paper}:
-            return blocked_by("broker_mode_unsafe")
+            return context.blocked_by("broker_mode_unsafe")
         if request.run_mode == "mock_submit" and policy.broker != BrokerMode.mock:
-            return blocked_by("run_mode_broker_mismatch")
+            return context.blocked_by("run_mode_broker_mismatch")
         if request.run_mode == "paper_submit" and policy.broker != BrokerMode.paper:
-            return blocked_by("run_mode_broker_mismatch")
+            return context.blocked_by("run_mode_broker_mismatch")
 
         # Gate 6: the run must bind to the current policy version.
         review = self.version_guard.require_current_version(
@@ -285,11 +322,11 @@ class OperatorService:
                 after_state=review,
                 source="operator_service",
             )
-            return blocked_by("policy_review_required")
+            return context.blocked_by("policy_review_required")
 
         # Gate 7: the policy must be explicitly promoted to Level 5.
         if policy.authority_level != 5 or policy.execution_mode != ExecutionMode.fully_automated:
-            return blocked_by("policy_not_promoted")
+            return context.blocked_by("policy_not_promoted")
 
         # Step: deterministic strategy selection from the approved registry.
         selection = self.registry.select_for_level5(policy_version=policy.version)
@@ -305,14 +342,14 @@ class OperatorService:
             # Spec: fall back to Level 4 when a guarded-ready strategy exists,
             # otherwise degrade all the way to Level 2 suggestions.
             if self.registry.level4_available():
-                return blocked_by("no_level5_strategy_eligible", selection=selection)
-            return blocked_by("no_approved_strategy_available", selection=selection)
+                return context.blocked_by("no_level5_strategy_eligible", selection=selection)
+            return context.blocked_by("no_approved_strategy_available", selection=selection)
         registry_entry = self.registry.require(selection.selected_strategy_id)
-        decide("noop", "strategy_selected", strategy_id=registry_entry.strategy_id)
+        context.decide("noop", "strategy_selected", strategy_id=registry_entry.strategy_id)
 
         recipe = self._load_recipe(registry_entry.strategy_id)
         if recipe is None:
-            return blocked_by("no_level5_strategy_eligible", selection=selection)
+            return context.blocked_by("no_level5_strategy_eligible", selection=selection)
 
         # Step: sync portfolio snapshot from the mock/paper broker and build the plan.
         broker = self.harness._broker_for_policy(policy)
@@ -320,34 +357,34 @@ class OperatorService:
 
         # Gate 8: monthly loss stop halts all automatic trading before any planning.
         if snapshot.monthly_loss_ratio <= policy.monthly_loss_stop_all_autotrading:
-            return blocked_by("monthly_loss_stop_engaged", selection=selection)
+            return context.blocked_by("monthly_loss_stop_engaged", selection=selection)
 
         signal_set = self._record_signal_set(recipe, policy)
         signals = signal_set.signals
         if not signal_set.data_quality.usable:
             reason = signal_set.data_quality.reason_codes[0] if signal_set.data_quality.reason_codes else "signal_provider_unavailable"
-            decide("noop", reason, strategy_id=registry_entry.strategy_id)
-            return finish("completed", selection=selection, order_plan_ids=[])
+            context.decide("noop", reason, strategy_id=registry_entry.strategy_id)
+            return context.finish("completed", selection=selection, order_plan_ids=[])
 
         plan = self.harness.create_portfolio_plan(policy_id=policy.policy_id, signals=signals, snapshot=snapshot)
         proposals = self.harness.generate_order_proposals(portfolio_plan_id=plan.plan_id, snapshot=snapshot)
 
         if not proposals:
             if not plan.order_intents:
-                decide("noop", "no_order_intents", strategy_id=registry_entry.strategy_id)
-                return finish("completed", selection=selection, order_plan_ids=[])
-            return blocked_by("risk_check_failed", selection=selection)
+                context.decide("noop", "no_order_intents", strategy_id=registry_entry.strategy_id)
+                return context.finish("completed", selection=selection, order_plan_ids=[])
+            return context.blocked_by("risk_check_failed", selection=selection)
 
         if request.run_mode == "dry_run":
             for proposal in proposals:
-                decide(
+                context.decide(
                     "noop",
                     "dry_run_no_submission",
                     strategy_id=registry_entry.strategy_id,
                     order_plan_id=proposal.order_plan_id,
                     risk_check_id=proposal.risk_check_id,
                 )
-            return finish(
+            return context.finish(
                 "completed",
                 selection=selection,
                 order_plan_ids=[proposal.order_plan_id for proposal in proposals],
@@ -362,8 +399,7 @@ class OperatorService:
             proposals=proposals,
             selection=selection,
             now=now,
-            decide=decide,
-            finish=finish,
+            context=context,
         )
 
     def _load_recipe(self, strategy_id: str) -> StrategyRecipe | None:
@@ -403,14 +439,13 @@ class OperatorService:
         self,
         *,
         policy: UserPolicy,
-        registry_entry,
+        registry_entry: StrategyRegistryEntry,
         recipe: StrategyRecipe,
-        snapshot,
+        snapshot: PortfolioSnapshot,
         proposals: list[OrderPlan],
         selection: StrategySelectionDecision,
         now: datetime | None,
-        decide,
-        finish,
+        context: _OperatorRunContext,
     ) -> OperatorRunResult:
         # Authorization must use the wall clock at decision time: proposals are created
         # after the run starts, so reusing the run start time would make every quote
@@ -453,7 +488,7 @@ class OperatorService:
                     after_state={"reason": reason, "checks": result.model_dump(mode="json")},
                     source="operator_service",
                 )
-                decide("block", reason, strategy_id=registry_entry.strategy_id, order_plan_id=proposal.order_plan_id)
+                context.decide("block", reason, strategy_id=registry_entry.strategy_id, order_plan_id=proposal.order_plan_id)
                 blocked.append(proposal.order_plan_id)
                 if fallback is None and reason in CHECK_TO_FALLBACK_REASON:
                     fallback = self.fallbacks.for_reason(CHECK_TO_FALLBACK_REASON[reason])
@@ -472,14 +507,14 @@ class OperatorService:
             try:
                 order_plan, broker_order, fills = self.harness.submit_order_plan(proposal.order_plan_id)
             except (RiskCheckRequired, ApprovalRequired) as exc:
-                decide("block", str(exc), strategy_id=registry_entry.strategy_id, order_plan_id=proposal.order_plan_id)
+                context.decide("block", str(exc), strategy_id=registry_entry.strategy_id, order_plan_id=proposal.order_plan_id)
                 blocked.append(proposal.order_plan_id)
                 if fallback is None:
                     fallback = self.fallbacks.for_reason("risk_check_failed")
                 continue
             except Exception as exc:
                 fallback = self._handle_broker_failure(policy=policy, proposal=proposal, error=exc)
-                decide("fallback", "broker_failure", strategy_id=registry_entry.strategy_id, order_plan_id=proposal.order_plan_id)
+                context.decide("fallback", "broker_failure", strategy_id=registry_entry.strategy_id, order_plan_id=proposal.order_plan_id)
                 blocked.append(proposal.order_plan_id)
                 break
 
@@ -495,7 +530,7 @@ class OperatorService:
                 after_state={"broker_order_id": broker_order.broker_order_id, "fills": len(fills)},
                 source="operator_service",
             )
-            decide(
+            context.decide(
                 "submit",
                 "operator_order_submitted",
                 strategy_id=registry_entry.strategy_id,
@@ -504,12 +539,12 @@ class OperatorService:
             )
 
         if submitted:
-            status = "completed"
+            status: OperatorRunStatus = "completed"
         elif fallback is not None:
             status = "fallback" if fallback.to_level > 0 else "blocked"
         else:
             status = "blocked"
-        return finish(
+        return context.finish(
             status,
             fallback=fallback,
             selection=selection,

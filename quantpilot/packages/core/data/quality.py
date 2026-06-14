@@ -10,6 +10,15 @@ from typing import Any, Literal, Protocol, runtime_checkable
 IssueSeverity = Literal["info", "warning", "error"]
 
 
+def _issue_severity(value: object) -> IssueSeverity:
+    severity = str(value)
+    if severity == "info":
+        return "info"
+    if severity == "error":
+        return "error"
+    return "warning"
+
+
 class TradingSessionStatus(str, Enum):
     trading_session = "trading_session"
     weekend = "weekend"
@@ -381,13 +390,11 @@ def _quality_issue_from_any(issue: HistoricalDataQualityIssue | Mapping[str, Any
     if isinstance(issue, HistoricalDataQualityIssue):
         return issue
     raw = dict(issue)
-    severity = str(raw.get("severity", "warning"))
-    if severity not in {"info", "warning", "error"}:
-        severity = "warning"
+    severity = _issue_severity(raw.get("severity", "warning"))
     return HistoricalDataQualityIssue(
         code=str(raw.get("code", "provider_quality_issue")),
         message=str(raw.get("message", "provider reported a quality issue")),
-        severity=severity,  # type: ignore[arg-type]
+        severity=severity,
         symbol=_optional_symbol(raw.get("symbol")),
         session_date=raw.get("session_date"),
         blocking=bool(raw.get("blocking", severity == "error")),

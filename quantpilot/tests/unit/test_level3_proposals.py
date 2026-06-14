@@ -7,7 +7,7 @@ import pytest
 from quantpilot.packages.core.execution.state_machine import ApprovalRequired, RiskCheckRequired
 from quantpilot.packages.core.harness_service import HarnessService
 from quantpilot.packages.core.portfolio.planner import fixture_portfolio_snapshot, proposal_idempotency_key
-from quantpilot.packages.core.schemas import OrderStatus, UserPolicy, utc_now
+from quantpilot.packages.core.schemas import OrderStatus, RiskCheck, UserPolicy, utc_now
 
 
 def _service_with_plan(policy: UserPolicy | None = None) -> tuple[HarnessService, str]:
@@ -65,6 +65,38 @@ def test_failed_risk_check_prevents_proposal_creation() -> None:
     assert any(event.action == "proposal_blocked" for event in service.repositories.audit_logs.list())
 
 
+def test_proposal_risk_failure_audit_records_each_candidate_key(monkeypatch: pytest.MonkeyPatch) -> None:
+    service, plan_id = _service_with_plan()
+    seen_order_keys: list[str] = []
+
+    def fail_risk_check(**kwargs: object) -> RiskCheck:
+        order_plan = kwargs["order_plan"]
+        assert hasattr(order_plan, "idempotency_key")
+        seen_order_keys.append(order_plan.idempotency_key)
+        return RiskCheck(
+            order_plan_id=order_plan.order_plan_id,
+            passed=False,
+            failed_checks=["forced_failure"],
+            policy_version=order_plan.policy_version,
+            idempotency_key=order_plan.idempotency_key,
+        )
+
+    monkeypatch.setattr("quantpilot.packages.core.harness_service.run_risk_check", fail_risk_check)
+
+    proposals = service.generate_order_proposals(portfolio_plan_id=plan_id)
+
+    blocked_events = [
+        event
+        for event in service.repositories.audit_logs.list()
+        if event.action == "proposal_blocked"
+        and isinstance(event.after_state, dict)
+        and event.after_state.get("failed_checks") == ["forced_failure"]
+    ]
+    assert proposals == []
+    assert len(blocked_events) == len(seen_order_keys)
+    assert [event.after_state["idempotency_key"] for event in blocked_events] == seen_order_keys
+
+
 def test_level3_proposal_has_explanation_and_requires_user_approval() -> None:
     service, plan_id = _service_with_plan()
 
@@ -78,6 +110,7 @@ def test_level3_proposal_has_explanation_and_requires_user_approval() -> None:
     assert proposal.explanation is not None
     assert proposal.explanation.symbol == proposal.intent.symbol
     assert proposal.explanation.risk_check_id == proposal.risk_check_id
+    assert all(item.explanation is not None and item.explanation.idempotency_key == item.idempotency_key for item in proposals)
     with pytest.raises(ApprovalRequired):
         service.submit_order_plan(proposal.order_plan_id)
 

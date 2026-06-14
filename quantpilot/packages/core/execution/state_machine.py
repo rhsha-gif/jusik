@@ -1,9 +1,15 @@
 from __future__ import annotations
 
-import os
 from datetime import datetime, time
 from zoneinfo import ZoneInfo
 
+from quantpilot.packages.core.execution.safety_flags import (
+    fully_automated_operator_flag_enabled,
+    guarded_autopilot_flag_enabled,
+    live_trading_flag_enabled,
+    market_orders_enabled,
+    operator_kill_switch_engaged,
+)
 from quantpilot.packages.core.risk.gatekeeper import run_risk_check
 from quantpilot.packages.core.strategies.registry import StrategyRegistryEntry
 from quantpilot.packages.core.schemas import (
@@ -92,27 +98,29 @@ def is_krx_auto_order_window(now: datetime | None = None) -> bool:
     return open_minutes <= minutes < close_minutes
 
 
-def guarded_autopilot_flag_enabled(policy: UserPolicy) -> bool:
-    env_enabled = os.getenv("GUARDED_AUTOPILOT_ENABLED", "false").lower() == "true"
-    return policy.guarded_autopilot_enabled or env_enabled
+class _AuthorityRecorder:
+    def __init__(self, *, policy_version: int) -> None:
+        self.policy_version = policy_version
+        self.steps: list[AuthorityCheckStep] = []
 
+    def record(self, check_name: str, passed: bool, detail: str) -> AuthorityCheckResult | None:
+        self.steps.append(AuthorityCheckStep(check_name=check_name, passed=passed, detail=detail))
+        if not passed:
+            return AuthorityCheckResult(
+                authorized=False,
+                policy_version=self.policy_version,
+                steps=self.steps,
+                first_failed_check=check_name,
+            )
+        return None
 
-def fully_automated_operator_flag_enabled(policy: UserPolicy | None = None) -> bool:
-    env_enabled = os.getenv("FULLY_AUTOMATED_OPERATOR_ENABLED", "false").lower() == "true"
-    policy_enabled = policy.fully_automated_operator_enabled if policy is not None else False
-    return policy_enabled or env_enabled
-
-
-def operator_kill_switch_engaged() -> bool:
-    return os.getenv("OPERATOR_KILL_SWITCH", "false").lower() == "true"
-
-
-def live_trading_flag_enabled() -> bool:
-    return os.getenv("LIVE_TRADING_ENABLED", "false").lower() == "true"
-
-
-def _market_orders_enabled() -> bool:
-    return os.getenv("MARKET_ORDERS_ENABLED", "false").lower() == "true"
+    def authorized(self) -> AuthorityCheckResult:
+        return AuthorityCheckResult(
+            authorized=True,
+            policy_version=self.policy_version,
+            steps=self.steps,
+            first_failed_check=None,
+        )
 
 
 def authorize_level4(
@@ -128,18 +136,8 @@ def authorize_level4(
     current_time = now or utc_now()
     guardrail_state = state or GuardrailState()
     seen = seen_idempotency_keys or set()
-    steps: list[AuthorityCheckStep] = []
-
-    def record(check_name: str, passed: bool, detail: str) -> AuthorityCheckResult | None:
-        steps.append(AuthorityCheckStep(check_name=check_name, passed=passed, detail=detail))
-        if not passed:
-            return AuthorityCheckResult(
-                authorized=False,
-                policy_version=policy.version,
-                steps=steps,
-                first_failed_check=check_name,
-            )
-        return None
+    recorder = _AuthorityRecorder(policy_version=policy.version)
+    record = recorder.record
 
     if result := record("guarded_autopilot_enabled", guarded_autopilot_flag_enabled(policy), "guarded autopilot flag must be enabled"):
         return result
@@ -175,7 +173,7 @@ def authorize_level4(
         return result
 
     order_type_allowed = order_plan.intent.order_type in policy.allowed_order_types
-    if order_plan.intent.order_type == OrderType.market and not _market_orders_enabled():
+    if order_plan.intent.order_type == OrderType.market and not market_orders_enabled():
         order_type_allowed = False
     if result := record("order_type_allowed", order_type_allowed, "market orders require MARKET_ORDERS_ENABLED=true"):
         return result
@@ -206,12 +204,7 @@ def authorize_level4(
     if result := record("fresh_risk_check_passed", risk_check.passed, ",".join(risk_check.failed_checks) or "risk check passed"):
         return result
 
-    return AuthorityCheckResult(
-        authorized=True,
-        policy_version=policy.version,
-        steps=steps,
-        first_failed_check=None,
-    )
+    return recorder.authorized()
 
 
 def authorize_level5(
@@ -228,18 +221,8 @@ def authorize_level5(
     current_time = now or utc_now()
     guardrail_state = state or GuardrailState()
     seen = seen_idempotency_keys or set()
-    steps: list[AuthorityCheckStep] = []
-
-    def record(check_name: str, passed: bool, detail: str) -> AuthorityCheckResult | None:
-        steps.append(AuthorityCheckStep(check_name=check_name, passed=passed, detail=detail))
-        if not passed:
-            return AuthorityCheckResult(
-                authorized=False,
-                policy_version=policy.version,
-                steps=steps,
-                first_failed_check=check_name,
-            )
-        return None
+    recorder = _AuthorityRecorder(policy_version=policy.version)
+    record = recorder.record
 
     if result := record("fully_automated_operator_enabled", fully_automated_operator_flag_enabled(policy), "Level 5 operator flag must be enabled"):
         return result
@@ -287,7 +270,7 @@ def authorize_level5(
         return result
 
     order_type_allowed = order_plan.intent.order_type in policy.allowed_order_types
-    if order_plan.intent.order_type == OrderType.market and not _market_orders_enabled():
+    if order_plan.intent.order_type == OrderType.market and not market_orders_enabled():
         order_type_allowed = False
     if result := record("order_type_allowed", order_type_allowed, "market orders require MARKET_ORDERS_ENABLED=true"):
         return result
@@ -318,12 +301,7 @@ def authorize_level5(
     if result := record("fresh_risk_check_passed", risk_check.passed, ",".join(risk_check.failed_checks) or "risk check passed"):
         return result
 
-    return AuthorityCheckResult(
-        authorized=True,
-        policy_version=policy.version,
-        steps=steps,
-        first_failed_check=None,
-    )
+    return recorder.authorized()
 
 
 def transition_order_plan(

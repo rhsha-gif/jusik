@@ -1,8 +1,11 @@
 from __future__ import annotations
 
-from typing import Protocol
+from typing import Literal, Protocol
 
 from quantpilot.packages.core.schemas import AnalystReport, CandidateUniverseItem, Signal, TechnicalIndicatorSnapshot
+
+
+AnalystRating = Literal["positive", "neutral", "caution", "blocked"]
 
 
 class AnalystReportAdapter(Protocol):
@@ -15,7 +18,7 @@ class AnalystReportAdapter(Protocol):
     ) -> AnalystReport: ...
 
 
-def _rating(candidate: CandidateUniverseItem, indicator: TechnicalIndicatorSnapshot) -> str:
+def _rating(candidate: CandidateUniverseItem, indicator: TechnicalIndicatorSnapshot) -> AnalystRating:
     if candidate.block_reason:
         return "blocked"
     if indicator.technical_score >= 70 and candidate.theme_match:
@@ -51,7 +54,7 @@ def generate_analyst_report(
 
     return AnalystReport(
         ticker=candidate.ticker,
-        rating=rating,  # type: ignore[arg-type]
+        rating=rating,
         confidence=round(min(confidence, 1.0), 2),
         summary=(
             f"{candidate.name} is a fixture-backed research candidate in {candidate.sector}."

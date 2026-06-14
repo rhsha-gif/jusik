@@ -2,6 +2,7 @@ from __future__ import annotations
 
 from datetime import date
 from hashlib import sha256
+from typing import Literal
 
 from quantpilot.packages.core.portfolio.optimizer import DeterministicPortfolioOptimizer
 from quantpilot.packages.core.portfolio.optimizer_types import (
@@ -25,6 +26,7 @@ from quantpilot.packages.core.schemas import (
 
 
 DEFAULT_REBALANCE_BAND = 0.001
+SuggestedAction = Literal["buy", "sell", "hold", "blocked"]
 
 
 def fixture_portfolio_snapshot(*, monthly_loss_ratio: float = 0.0) -> PortfolioSnapshot:
@@ -298,7 +300,7 @@ def build_rebalance_suggestion_report(
         current = current_weights.get(symbol, 0.0)
         signal = signals_by_symbol.get(symbol)
         if signal is not None and signal.action == SignalAction.blocked:
-            suggested_action = "blocked"
+            suggested_action: SuggestedAction = "blocked"
             risk_reason = "blocked_by_signal_reason_codes"
         elif target > current + 0.001:
             suggested_action = "buy"
@@ -318,7 +320,7 @@ def build_rebalance_suggestion_report(
                 target_weight_suggestion=round(target, 6),
                 cash_target=suggestion_plan.cash_target_weight,
                 risk_reason=risk_reason,
-                suggested_action=suggested_action,  # type: ignore[arg-type]
+                suggested_action=suggested_action,
             )
         )
 

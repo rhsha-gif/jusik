@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from datetime import timedelta
+from typing import TypedDict
 
 from quantpilot.packages.brokers.mock_broker import MockBroker
 from quantpilot.packages.brokers.paper_broker import PaperBroker
@@ -14,11 +15,14 @@ from quantpilot.packages.core.portfolio.planner import (
     fixture_portfolio_snapshot,
     proposal_idempotency_key,
 )
+from quantpilot.packages.core.portfolio.snapshot import mark_snapshot_staleness, runtime_snapshot_block_reason
 from quantpilot.packages.core.reports.service import build_operation_report
 from quantpilot.packages.core.risk.gatekeeper import run_risk_check
 from quantpilot.packages.core.schemas import (
+    AnalystReport,
     BrokerMode,
     BrokerOrder,
+    CandidateUniverseItem,
     ExecutionMode,
     Fill,
     GuardrailState,
@@ -29,6 +33,7 @@ from quantpilot.packages.core.schemas import (
     PortfolioPlan,
     PortfolioSnapshot,
     ProposalExplanation,
+    RebalanceSuggestionReport,
     Signal,
     StrategyRecipe,
     UserPolicy,
@@ -42,12 +47,31 @@ from quantpilot.packages.core.data.providers import (
     SecurityProvider,
     build_providers_from_env,
 )
+from quantpilot.packages.core.data.mode import resolve_data_mode
 from quantpilot.packages.core.signals.service import generate_signals
 from quantpilot.packages.core.strategies.loader import load_default_strategy
 from quantpilot.packages.core.technical.indicators import calculate_technical_indicators
-from quantpilot.packages.core.universe.builder import build_candidate_universe
+from quantpilot.packages.core.universe.builder import build_candidate_universe, build_focus_summary
 from quantpilot.packages.db.audit import AuditRecorder
 from quantpilot.packages.db.repositories import RepositoryRegistry
+
+
+class Level12RunResult(TypedDict):
+    policy: UserPolicy
+    strategy: StrategyRecipe
+    universe: list[CandidateUniverseItem]
+    analyst_reports: list[AnalystReport]
+    signals: list[Signal]
+    rebalance: RebalanceSuggestionReport
+    daily_report: OperationReport
+    focus: dict[str, object]
+    order_submission_enabled: bool
+
+
+class PortfolioSnapshotUnavailable(RiskCheckRequired):
+    def __init__(self, reason: str) -> None:
+        self.reason = reason
+        super().__init__(f"runtime portfolio snapshot unavailable: {reason}")
 
 
 class HarnessService:
@@ -131,11 +155,12 @@ class HarnessService:
             )
         return signals
 
-    def run_level_1_2(self, *, policy_id: str) -> dict[str, object]:
+    def run_level_1_2(self, *, policy_id: str) -> Level12RunResult:
         policy = self.repositories.policies.require(policy_id)
         recipe = self.load_strategy()
         securities = self.security_provider.get_securities()
         universe = build_candidate_universe(policy, securities)
+        focus_summary = build_focus_summary(policy, securities)
         bars = self.market_data_provider.get_bars()
         signals = generate_signals(recipe, bars, policy=policy, securities=securities)
         price_history = self.market_data_provider.get_price_history()
@@ -197,6 +222,8 @@ class HarnessService:
                 "order_submission_enabled": False,
                 "broker": policy.broker.value,
                 "execution_mode": policy.execution_mode.value,
+                "focus": focus_summary,
+                "missing_preferred_symbols": focus_summary["missing_preferred_symbols"],
             },
             order_plan_ids=[],
             fill_ids=[],
@@ -221,7 +248,95 @@ class HarnessService:
             "signals": signals,
             "rebalance": rebalance_report,
             "daily_report": operation_report,
+            "focus": focus_summary,
             "order_submission_enabled": False,
+        }
+
+    def run_investment_intent(
+        self,
+        *,
+        text: str = DEFAULT_POLICY_TEXT,
+        user_id: str = "fixture-user",
+        create_order_proposals: bool = True,
+    ) -> dict[str, object]:
+        """Run the safe intent-to-proposal workflow without broker submission."""
+
+        policy = self.parse_policy(text, user_id=user_id)
+        level_result = self.run_level_1_2(policy_id=policy.policy_id)
+        universe = list(level_result["universe"])
+        focus_summary = level_result["focus"]
+        investable_tickers = {
+            candidate.ticker for candidate in universe if candidate.block_reason is None
+        }
+        intent_signals = [
+            signal for signal in level_result["signals"] if signal.symbol in investable_tickers
+        ]
+
+        snapshot = fixture_portfolio_snapshot()
+        portfolio_plan = self.create_portfolio_plan(
+            policy_id=policy.policy_id,
+            signals=intent_signals,
+            snapshot=snapshot,
+        )
+        bars = self.market_data_provider.get_bars()
+        intent_rebalance_report = build_rebalance_suggestion_report(
+            policy=policy,
+            signals=intent_signals,
+            snapshot=snapshot,
+            quotes={bar["symbol"]: float(bar["close"]) for bar in bars},
+        )
+        order_proposals: list[OrderPlan] = []
+        if create_order_proposals:
+            order_proposals = self.generate_order_proposals(
+                portfolio_plan_id=portfolio_plan.plan_id,
+                snapshot=snapshot,
+            )
+
+        operation_report = self.create_daily_report(policy_id=policy.policy_id)
+        risk_checked_order_plan_ids = [
+            order.order_plan_id for order in order_proposals if order.risk_check_id is not None
+        ]
+        data_mode = resolve_data_mode().value
+
+        return {
+            "intent": {"text": text, "user_id": user_id, "data_mode": data_mode},
+            "capability_assessment": {
+                "can_parse_user_intent": True,
+                "can_generate_candidate_analysis": True,
+                "can_generate_trade_signals": True,
+                "can_generate_target_weights": True,
+                "can_generate_rebalance_plan": True,
+                "can_run_pre_trade_risk_checks": True,
+                "can_submit_mock_or_paper_orders": True,
+                "live_trading_supported": False,
+                "live_trading_enabled": False,
+            },
+            "policy": policy,
+            "focus": focus_summary,
+            "diagnostics": {
+                "missing_preferred_symbols": focus_summary["missing_preferred_symbols"],
+                "data_mode": data_mode,
+            },
+            "candidate_analysis": {
+                "universe": universe,
+                "analyst_reports": level_result["analyst_reports"],
+            },
+            "signals": intent_signals,
+            "target_weights": portfolio_plan.target_weights,
+            "rebalance": intent_rebalance_report,
+            "portfolio_plan": portfolio_plan,
+            "order_proposals": order_proposals,
+            "operation_report": operation_report,
+            "safety": {
+                "order_submission_enabled": False,
+                "broker_order_count": len(self.repositories.broker_orders.list()),
+                "fill_count": len(self.repositories.fills.list()),
+                "risk_checked_order_plan_ids": risk_checked_order_plan_ids,
+                "live_trading_enabled": False,
+                "broker": policy.broker.value,
+                "execution_mode": policy.execution_mode.value,
+                "data_mode": data_mode,
+            },
         }
 
     def create_portfolio_plan(
@@ -680,7 +795,48 @@ class HarnessService:
             return MockBroker()
         raise RuntimeError("live broker mode is disabled in the pre-harness")
 
-    def submit_order_plan(self, order_plan_id: str) -> tuple[OrderPlan, BrokerOrder, list[Fill]]:
+    def _runtime_portfolio_snapshot(self, policy: UserPolicy) -> PortfolioSnapshot:
+        broker = self._broker_for_policy(policy)
+        snapshot = broker.get_positions(policy.user_id)
+        return self._require_runtime_snapshot(policy=policy, snapshot=snapshot)
+
+    def _require_runtime_snapshot(
+        self,
+        *,
+        policy: UserPolicy,
+        snapshot: PortfolioSnapshot | None,
+    ) -> PortfolioSnapshot:
+        if snapshot is not None:
+            snapshot = mark_snapshot_staleness(
+                snapshot,
+                max_age_seconds=policy.stale_quote_max_age_seconds,
+            )
+        reason = runtime_snapshot_block_reason(snapshot)
+        if reason is None:
+            return snapshot
+        self.audit.emit(
+            user_id=policy.user_id,
+            entity_type="portfolio_snapshot",
+            entity_id=snapshot.snapshot_id if snapshot is not None else "missing",
+            action="portfolio_snapshot_unavailable",
+            after_state={
+                "reason": reason,
+                "snapshot_id": snapshot.snapshot_id if snapshot is not None else None,
+                "source": snapshot.source if snapshot is not None else None,
+                "is_fixture": snapshot.is_fixture if snapshot is not None else None,
+                "is_stale": snapshot.is_stale if snapshot is not None else None,
+                "stale_reason": snapshot.stale_reason if snapshot is not None else None,
+            },
+            source="execution_service",
+        )
+        raise PortfolioSnapshotUnavailable(reason)
+
+    def submit_order_plan(
+        self,
+        order_plan_id: str,
+        *,
+        snapshot: PortfolioSnapshot | None = None,
+    ) -> tuple[OrderPlan, BrokerOrder, list[Fill]]:
         order_plan = self.repositories.order_plans.require(order_plan_id)
         policy = self.repositories.policies.require(order_plan.policy_id)
 
@@ -701,10 +857,11 @@ class HarnessService:
             raise ApprovalRequired("explicit user approval is required before submission")
 
         strategy_id = order_plan.explanation.strategy_id if order_plan.explanation else "unknown_strategy"
+        portfolio_snapshot = self._require_runtime_snapshot(policy=policy, snapshot=snapshot) if snapshot is not None else self._runtime_portfolio_snapshot(policy)
         fresh_risk = run_risk_check(
             policy=policy,
             order_plan=order_plan,
-            snapshot=fixture_portfolio_snapshot(),
+            snapshot=portfolio_snapshot,
             seen_idempotency_keys=self._seen_idempotency_keys(exclude_order_plan_id=order_plan.order_plan_id, submitted_only=True),
             guardrail_state=self._guardrail_state(policy=policy, strategy_id=strategy_id, exclude_order_plan_id=order_plan.order_plan_id),
             quote_max_age_seconds=policy.stale_quote_max_age_seconds,
@@ -875,7 +1032,11 @@ class HarnessService:
 
         if not self.repositories.signals.list():
             self.run_signals()
-        snapshot = fixture_portfolio_snapshot()
+        try:
+            snapshot = self._runtime_portfolio_snapshot(policy)
+        except RiskCheckRequired as exc:
+            self.last_blocked_reason = str(exc)
+            return {"submitted": [], "blocked": [{"reason": str(exc)}], "live_trading_enabled": False}
         plan = self.create_portfolio_plan(policy_id=policy.policy_id, signals=self.repositories.signals.list(), snapshot=snapshot)
         proposals = self.generate_order_proposals(portfolio_plan_id=plan.plan_id, snapshot=snapshot)
         strategy = self.load_strategy()
@@ -918,7 +1079,7 @@ class HarnessService:
                 action="autopilot_order_authorized",
             )
             self.repositories.order_plans.update(proposal)
-            order_plan, broker_order, fills = self.submit_order_plan(proposal.order_plan_id)
+            order_plan, broker_order, fills = self.submit_order_plan(proposal.order_plan_id, snapshot=snapshot)
             self.audit.emit(
                 user_id=policy.user_id,
                 entity_type="order_plan",
@@ -966,13 +1127,13 @@ class HarnessService:
         policy = self.parse_policy(DEFAULT_POLICY_TEXT, user_id=user_id)
         self.confirm_policy(policy.policy_id)
         signals = self.run_signals()
-        snapshot = fixture_portfolio_snapshot()
+        snapshot = self._runtime_portfolio_snapshot(policy)
         portfolio_plan = self.create_portfolio_plan(policy_id=policy.policy_id, signals=signals, snapshot=snapshot)
         orders = self.create_order_plans(portfolio_plan_id=portfolio_plan.plan_id, snapshot=snapshot)
         for order in orders:
             if order.status == OrderStatus.proposed:
                 self.approve_order_plan(order.order_plan_id)
-                self.submit_order_plan(order.order_plan_id)
+                self.submit_order_plan(order.order_plan_id, snapshot=snapshot)
         report = self.create_daily_report(policy_id=policy.policy_id)
         return {
             "policy_id": policy.policy_id,

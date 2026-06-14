@@ -38,6 +38,23 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/intent/run": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Run Intent Workflow */
+        post: operations["run_intent_workflow_api_intent_run_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/policies/preview": {
         parameters: {
             query?: never;
@@ -601,6 +618,24 @@ export interface components {
             data_mode_safe: boolean;
             /** Data Mode Error */
             data_mode_error?: string | null;
+        };
+        /** IntentRunRequest */
+        IntentRunRequest: {
+            /**
+             * Text
+             * @default KR stock moderate risk weekly rebalance, approval required, mock broker, limit orders only.
+             */
+            text: string;
+            /**
+             * User Id
+             * @default fixture-user
+             */
+            user_id: string;
+            /**
+             * Create Order Proposals
+             * @default true
+             */
+            create_order_proposals: boolean;
         };
         /** KillSwitchRequest */
         KillSwitchRequest: {
@@ -1183,6 +1218,8 @@ export interface components {
             allowed_order_types?: components["schemas"]["OrderType"][];
             /** @default mock */
             broker: components["schemas"]["BrokerMode"];
+            /** Preferred Symbols */
+            preferred_symbols?: string[];
             /** Preferred Themes */
             preferred_themes?: string[];
             /** Preferred Sectors */
@@ -1260,6 +1297,41 @@ export interface operations {
                     "application/json": {
                         [key: string]: unknown;
                     };
+                };
+            };
+        };
+    };
+    run_intent_workflow_api_intent_run_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["IntentRunRequest"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        [key: string]: unknown;
+                    };
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
                 };
             };
         };

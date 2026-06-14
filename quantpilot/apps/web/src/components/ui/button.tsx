@@ -3,16 +3,17 @@ import { cva, type VariantProps } from "class-variance-authority";
 import { cn } from "@/lib/utils";
 
 const buttonVariants = cva(
-  "inline-flex items-center justify-center gap-2 whitespace-nowrap rounded-full text-sm font-medium transition-colors disabled:pointer-events-none disabled:opacity-45 [&_svg]:size-4 [&_svg]:shrink-0 cursor-pointer",
+  "inline-flex items-center justify-center gap-2 whitespace-nowrap rounded-full text-sm font-medium cursor-pointer transition-[transform,box-shadow,background-color,opacity,border-color] duration-150 ease-out active:scale-[0.97] disabled:pointer-events-none disabled:opacity-45 disabled:active:scale-100 [&_svg]:size-4 [&_svg]:shrink-0",
   {
     variants: {
       variant: {
-        default: "bg-accent text-white hover:opacity-90 shadow-sm",
+        default:
+          "bg-[linear-gradient(180deg,color-mix(in_oklab,var(--qp-accent)_92%,white)_0%,var(--qp-accent)_100%)] text-white shadow-[0_1px_0_rgba(255,255,255,0.25)_inset,0_6px_16px_-4px_var(--qp-accent-soft),0_2px_6px_rgba(10,132,255,0.25)] hover:shadow-[0_1px_0_rgba(255,255,255,0.25)_inset,0_10px_22px_-6px_var(--qp-accent-soft),0_3px_8px_rgba(10,132,255,0.3)] hover:brightness-[1.04]",
         secondary:
-          "bg-surface-solid text-ink border border-hairline hover:bg-accent-soft",
+          "bg-surface-solid text-ink border border-hairline shadow-sm hover:border-hairline-strong hover:bg-accent-soft",
         ghost: "text-ink hover:bg-accent-soft",
-        outline: "border border-hairline text-ink hover:bg-accent-soft",
-        danger: "bg-danger-soft text-danger border border-danger/30 hover:bg-danger/20",
+        outline: "border border-hairline text-ink hover:bg-accent-soft hover:border-hairline-strong",
+        danger: "bg-danger-soft text-danger border border-danger/30 hover:bg-danger/15",
       },
       size: {
         default: "h-10 px-5",

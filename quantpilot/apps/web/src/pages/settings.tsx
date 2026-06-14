@@ -44,6 +44,7 @@ export function SettingsPage() {
   return (
     <>
       <PageHeader
+        eyebrow="Settings"
         title="설정 & 안전"
         description="로컬 UI 설정과 백엔드 연결을 관리합니다. 브로커 자격증명은 이 프리하니스의 범위 밖이며 입력란도 제공하지 않습니다."
       />
@@ -107,7 +108,7 @@ export function SettingsPage() {
                 {SAFETY_DEFAULTS.map((item) => (
                   <li
                     key={item}
-                    className="rounded-xl border border-hairline bg-surface-solid px-3.5 py-2.5 font-mono text-[12.5px]"
+                    className="rounded-xl border border-hairline bg-surface-raised px-3.5 py-2.5 font-mono text-[12.5px] shadow-sm"
                   >
                     {item}
                   </li>

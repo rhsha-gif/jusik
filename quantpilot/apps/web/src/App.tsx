@@ -1,15 +1,16 @@
-import { Component, type ReactNode } from "react";
+import { Component, lazy, Suspense, type ReactNode } from "react";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { createBrowserRouter, RouterProvider } from "react-router-dom";
 import { AppShell } from "@/components/shell/app-shell";
-import { OverviewPage } from "@/pages/overview";
-import { ResearchPage } from "@/pages/research";
-import { PoliciesPage } from "@/pages/policies";
-import { SignalsPage } from "@/pages/signals";
-import { RunPage } from "@/pages/run";
-import { JobsPage } from "@/pages/jobs";
-import { SettingsPage } from "@/pages/settings";
 import { useThemeSync } from "@/lib/theme";
+
+const OverviewPage = lazy(() => import("@/pages/overview").then((module) => ({ default: module.OverviewPage })));
+const ResearchPage = lazy(() => import("@/pages/research").then((module) => ({ default: module.ResearchPage })));
+const PoliciesPage = lazy(() => import("@/pages/policies").then((module) => ({ default: module.PoliciesPage })));
+const SignalsPage = lazy(() => import("@/pages/signals").then((module) => ({ default: module.SignalsPage })));
+const RunPage = lazy(() => import("@/pages/run").then((module) => ({ default: module.RunPage })));
+const JobsPage = lazy(() => import("@/pages/jobs").then((module) => ({ default: module.JobsPage })));
+const SettingsPage = lazy(() => import("@/pages/settings").then((module) => ({ default: module.SettingsPage })));
 
 const queryClient = new QueryClient({
   defaultOptions: {
@@ -44,18 +45,30 @@ class ErrorBoundary extends Component<{ children: ReactNode }, { error: Error | 
   }
 }
 
+function PageLoading() {
+  return (
+    <div className="flex h-full min-h-[320px] items-center justify-center text-[13px] text-muted">
+      Loading page...
+    </div>
+  );
+}
+
+function page(element: ReactNode) {
+  return <Suspense fallback={<PageLoading />}>{element}</Suspense>;
+}
+
 const router = createBrowserRouter([
   {
     path: "/",
     element: <AppShell />,
     children: [
-      { index: true, element: <OverviewPage /> },
-      { path: "research", element: <ResearchPage /> },
-      { path: "policies", element: <PoliciesPage /> },
-      { path: "signals", element: <SignalsPage /> },
-      { path: "run", element: <RunPage /> },
-      { path: "jobs", element: <JobsPage /> },
-      { path: "settings", element: <SettingsPage /> },
+      { index: true, element: page(<OverviewPage />) },
+      { path: "research", element: page(<ResearchPage />) },
+      { path: "policies", element: page(<PoliciesPage />) },
+      { path: "signals", element: page(<SignalsPage />) },
+      { path: "run", element: page(<RunPage />) },
+      { path: "jobs", element: page(<JobsPage />) },
+      { path: "settings", element: page(<SettingsPage />) },
     ],
   },
 ]);

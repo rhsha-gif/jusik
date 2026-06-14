@@ -12,7 +12,6 @@ from quantpilot.packages.core.harness_service import HarnessService
 from quantpilot.packages.core.operator.reporting import render_operator_report_text
 from quantpilot.packages.core.operator.schemas import OperatorRunRequest
 from quantpilot.packages.core.operator.service import OperatorService
-from quantpilot.packages.core.portfolio.planner import fixture_portfolio_snapshot
 from quantpilot.packages.core.schemas import BrokerMode, ExecutionMode, PortfolioSnapshot, UserPolicy, utc_now
 from quantpilot.packages.core.strategies.promotion import load_lifecycle_fixture
 from quantpilot.packages.core.strategies.registry import StrategyRegistry, StrategyRegistryEntry
@@ -264,10 +263,11 @@ def test_level5_registry_without_lifecycle_evidence_blocks_submission(operator_e
 
 
 def test_level5_monthly_loss_stop_blocks_all_automatic_trading(operator_enabled: None, monkeypatch: pytest.MonkeyPatch) -> None:
+    original_get_positions = MockBroker.get_positions
     monkeypatch.setattr(
         MockBroker,
         "get_positions",
-        lambda self, user_id: fixture_portfolio_snapshot(monthly_loss_ratio=-0.12),
+        lambda self, user_id: original_get_positions(self, user_id).model_copy(update={"monthly_loss_ratio": -0.12}),
     )
     policy = _promoted_policy()
     service = _service_with_policy(policy)
@@ -281,10 +281,11 @@ def test_level5_monthly_loss_stop_blocks_all_automatic_trading(operator_enabled:
 
 
 def test_level5_monthly_loss_pause_blocks_new_buys(operator_enabled: None, monkeypatch: pytest.MonkeyPatch) -> None:
+    original_get_positions = MockBroker.get_positions
     monkeypatch.setattr(
         MockBroker,
         "get_positions",
-        lambda self, user_id: fixture_portfolio_snapshot(monthly_loss_ratio=-0.06),
+        lambda self, user_id: original_get_positions(self, user_id).model_copy(update={"monthly_loss_ratio": -0.06}),
     )
     policy = _promoted_policy()
     service = _service_with_policy(policy)
@@ -304,6 +305,40 @@ def test_level5_stale_market_data_blocks_submission(operator_enabled: None) -> N
 
     assert result.status == "fallback"
     assert result.fallback.reason_code == "stale_market_data"
+    assert result.fallback.to_level == 3
+    assert result.submitted_order_plan_ids == []
+    assert service.repositories.broker_orders.list() == []
+
+
+def test_level5_missing_portfolio_snapshot_fails_closed(operator_enabled: None, monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setattr(MockBroker, "get_positions", lambda self, user_id: None)
+    policy = _promoted_policy()
+    service = _service_with_policy(policy)
+
+    result = service.run_once(_request(policy))
+
+    assert result.status == "blocked"
+    assert result.fallback.reason_code == "portfolio_snapshot_missing"
+    assert result.submitted_order_plan_ids == []
+    assert service.repositories.broker_orders.list() == []
+
+
+def test_level5_stale_portfolio_snapshot_fails_closed(operator_enabled: None, monkeypatch: pytest.MonkeyPatch) -> None:
+    original_get_positions = MockBroker.get_positions
+    monkeypatch.setattr(
+        MockBroker,
+        "get_positions",
+        lambda self, user_id: original_get_positions(self, user_id).model_copy(
+            update={"is_stale": True, "stale_reason": "unit_test_stale_portfolio_snapshot"}
+        ),
+    )
+    policy = _promoted_policy()
+    service = _service_with_policy(policy)
+
+    result = service.run_once(_request(policy))
+
+    assert result.status == "fallback"
+    assert result.fallback.reason_code == "stale_portfolio_snapshot"
     assert result.fallback.to_level == 3
     assert result.submitted_order_plan_ids == []
     assert service.repositories.broker_orders.list() == []

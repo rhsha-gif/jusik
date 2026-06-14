@@ -80,10 +80,56 @@ def _theme_matches(policy: UserPolicy, security: dict[str, Any]) -> bool:
     return bool(security_themes.intersection(policy.preferred_themes))
 
 
+def _symbol_matches(policy: UserPolicy, security: dict[str, Any]) -> bool:
+    if not policy.preferred_symbols:
+        return True
+    return str(security["ticker"]).upper() in policy.preferred_symbols
+
+
+def _sector_matches(policy: UserPolicy, security: dict[str, Any]) -> bool:
+    if not policy.preferred_sectors:
+        return True
+    return str(security["sector"]).lower() in policy.preferred_sectors
+
+
+def _has_focus(policy: UserPolicy) -> bool:
+    return bool(policy.preferred_symbols or policy.preferred_sectors or policy.preferred_themes)
+
+
+def _focus_matches(
+    policy: UserPolicy,
+    *,
+    symbol_match: bool,
+    sector_match: bool,
+    theme_match: bool,
+) -> bool:
+    if not _has_focus(policy):
+        return True
+    return any(
+        (
+            bool(policy.preferred_symbols and symbol_match),
+            bool(policy.preferred_sectors and sector_match),
+            bool(policy.preferred_themes and theme_match),
+        )
+    )
+
+
+def _focus_mismatch_reason(policy: UserPolicy) -> str:
+    focus_count = sum(bool(item) for item in (policy.preferred_symbols, policy.preferred_sectors, policy.preferred_themes))
+    if focus_count != 1:
+        return "focus_mismatch"
+    if policy.preferred_symbols:
+        return "symbol_mismatch"
+    if policy.preferred_sectors:
+        return "sector_mismatch"
+    return "theme_mismatch"
+
+
 def _block_reason(
     *,
     policy: UserPolicy,
     security: dict[str, Any],
+    focus_match: bool,
     theme_match: bool,
     liquidity_pass: bool,
     data_ready: bool,
@@ -97,8 +143,8 @@ def _block_reason(
         return "liquidity_below_minimum"
     if not data_ready:
         return "data_unavailable"
-    if not theme_match:
-        return "theme_mismatch"
+    if not focus_match:
+        return _focus_mismatch_reason(policy)
     return None
 
 
@@ -106,12 +152,21 @@ def build_candidate_universe(policy: UserPolicy, securities: list[dict[str, Any]
     selected = securities or FIXTURE_SECURITIES
     universe: list[CandidateUniverseItem] = []
     for security in selected:
+        symbol_match = _symbol_matches(policy, security)
+        sector_match = _sector_matches(policy, security)
         theme_match = _theme_matches(policy, security)
+        focus_match = _focus_matches(
+            policy,
+            symbol_match=symbol_match,
+            sector_match=sector_match,
+            theme_match=theme_match,
+        )
         liquidity_pass = float(security.get("avg_daily_value", 0)) >= policy.min_avg_daily_value
         data_ready = bool(security.get("data_ready", False))
         block_reason = _block_reason(
             policy=policy,
             security=security,
+            focus_match=focus_match,
             theme_match=theme_match,
             liquidity_pass=liquidity_pass,
             data_ready=data_ready,
@@ -122,7 +177,10 @@ def build_candidate_universe(policy: UserPolicy, securities: list[dict[str, Any]
                 name=str(security["name"]),
                 market=str(security["market"]),
                 sector=str(security["sector"]),
+                symbol_match=symbol_match,
+                sector_match=sector_match,
                 theme_match=theme_match,
+                focus_match=focus_match,
                 liquidity_pass=liquidity_pass,
                 data_ready=data_ready,
                 block_reason=block_reason,
@@ -130,3 +188,18 @@ def build_candidate_universe(policy: UserPolicy, securities: list[dict[str, Any]
             )
         )
     return universe
+
+
+def missing_preferred_symbols(policy: UserPolicy, securities: list[dict[str, Any]] | None = None) -> list[str]:
+    selected = securities or FIXTURE_SECURITIES
+    available = {str(security["ticker"]).upper() for security in selected}
+    return [symbol for symbol in policy.preferred_symbols if symbol not in available]
+
+
+def build_focus_summary(policy: UserPolicy, securities: list[dict[str, Any]] | None = None) -> dict[str, object]:
+    return {
+        "preferred_symbols": list(policy.preferred_symbols),
+        "preferred_sectors": list(policy.preferred_sectors),
+        "preferred_themes": list(policy.preferred_themes),
+        "missing_preferred_symbols": missing_preferred_symbols(policy, securities),
+    }

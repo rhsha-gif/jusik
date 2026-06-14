@@ -52,6 +52,24 @@ def test_korean_policy_preview_parser_extracts_direction_and_limits() -> None:
     assert {"ai", "semiconductor"}.issubset(set(policy.preferred_themes))
 
 
+def test_policy_parser_extracts_preferred_symbols_and_sectors() -> None:
+    symbol_policy = parse_policy_text("AAA moderate risk")
+    numeric_policy = parse_policy_text("005930 conservative risk")
+    sector_policy = parse_policy_text("technology sector moderate risk")
+
+    assert symbol_policy.preferred_symbols == ["AAA"]
+    assert numeric_policy.preferred_symbols == ["005930"]
+    assert numeric_policy.risk_profile == "conservative"
+    assert sector_policy.preferred_sectors == ["technology"]
+
+
+def test_policy_parser_blocklist_takes_precedence_over_preferred_symbols() -> None:
+    policy = parse_policy_text("AAA exclude moderate risk")
+
+    assert policy.blocklist == ["AAA"]
+    assert policy.preferred_symbols == []
+
+
 def test_policy_preview_api_returns_json_without_confirming_policy() -> None:
     response = TestClient(app).post(
         "/api/policies/preview",
@@ -73,6 +91,36 @@ def test_universe_builder_respects_policy_blocklist() -> None:
     assert not aaa.data_ready or aaa.block_reason == "policy_blocklist"
     assert aaa.block_reason == "policy_blocklist"
     assert aaa.analyst_required is False
+
+
+def test_universe_builder_respects_symbol_sector_theme_union_focus() -> None:
+    policy = UserPolicy(
+        preferred_symbols=["CCC"],
+        preferred_sectors=["technology"],
+        preferred_themes=["dividend"],
+    )
+    universe = build_candidate_universe(policy)
+    by_ticker = {candidate.ticker: candidate for candidate in universe}
+
+    assert by_ticker["AAA"].sector_match is True
+    assert by_ticker["AAA"].focus_match is True
+    assert by_ticker["AAA"].block_reason is None
+    assert by_ticker["CCC"].symbol_match is True
+    assert by_ticker["CCC"].theme_match is True
+    assert by_ticker["CCC"].focus_match is True
+    assert by_ticker["CCC"].block_reason is None
+    assert by_ticker["EEE"].focus_match is False
+    assert by_ticker["EEE"].block_reason == "focus_mismatch"
+
+
+def test_universe_builder_reports_specific_single_focus_mismatch_reasons() -> None:
+    symbol_only = {candidate.ticker: candidate for candidate in build_candidate_universe(UserPolicy(preferred_symbols=["AAA"]))}
+    sector_only = {candidate.ticker: candidate for candidate in build_candidate_universe(UserPolicy(preferred_sectors=["technology"]))}
+    theme_only = {candidate.ticker: candidate for candidate in build_candidate_universe(UserPolicy(preferred_themes=["ai"]))}
+
+    assert symbol_only["BBB"].block_reason == "symbol_mismatch"
+    assert sector_only["CCC"].block_reason == "sector_mismatch"
+    assert theme_only["CCC"].block_reason == "theme_mismatch"
 
 
 def test_universe_builder_liquidity_filter_blocks_thin_candidates() -> None:
@@ -164,3 +212,30 @@ def test_level_1_2_research_flow_cannot_submit_broker_orders() -> None:
     assert service.repositories.order_plans.list() == []
     assert service.repositories.broker_orders.list() == []
     assert service.repositories.fills.list() == []
+
+
+def test_intent_run_reports_missing_preferred_symbols_without_crashing() -> None:
+    response = TestClient(app).post(
+        "/api/intent/run",
+        json={"text": "ZZZ moderate risk", "create_order_proposals": False},
+    )
+
+    assert response.status_code == 200
+    body = response.json()
+    assert body["policy"]["preferred_symbols"] == ["ZZZ"]
+    assert body["focus"]["missing_preferred_symbols"] == ["ZZZ"]
+    assert body["diagnostics"]["missing_preferred_symbols"] == ["ZZZ"]
+    assert body["safety"]["live_trading_enabled"] is False
+
+
+def test_intent_run_rebalance_uses_same_focused_symbol_set() -> None:
+    response = TestClient(app).post(
+        "/api/intent/run",
+        json={"text": "AAA moderate risk", "create_order_proposals": False},
+    )
+
+    assert response.status_code == 200
+    body = response.json()
+    assert [signal["symbol"] for signal in body["signals"]] == ["AAA"]
+    assert set(body["target_weights"]) == {"AAA"}
+    assert [item["ticker"] for item in body["rebalance"]["suggestions"]] == ["AAA"]

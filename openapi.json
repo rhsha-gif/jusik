@@ -43,6 +43,46 @@
         }
       }
     },
+    "/api/intent/run": {
+      "post": {
+        "summary": "Run Intent Workflow",
+        "operationId": "run_intent_workflow_api_intent_run_post",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/IntentRunRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "additionalProperties": true,
+                  "type": "object",
+                  "title": "Response Run Intent Workflow Api Intent Run Post"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
     "/api/policies/preview": {
       "post": {
         "summary": "Preview Policy",
@@ -1289,6 +1329,27 @@
           "data_mode_safe"
         ],
         "title": "HealthResponse"
+      },
+      "IntentRunRequest": {
+        "properties": {
+          "text": {
+            "type": "string",
+            "title": "Text",
+            "default": "KR stock moderate risk weekly rebalance, approval required, mock broker, limit orders only."
+          },
+          "user_id": {
+            "type": "string",
+            "title": "User Id",
+            "default": "fixture-user"
+          },
+          "create_order_proposals": {
+            "type": "boolean",
+            "title": "Create Order Proposals",
+            "default": true
+          }
+        },
+        "type": "object",
+        "title": "IntentRunRequest"
       },
       "KillSwitchRequest": {
         "properties": {
@@ -2660,6 +2721,13 @@
           "broker": {
             "$ref": "#/components/schemas/BrokerMode",
             "default": "mock"
+          },
+          "preferred_symbols": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array",
+            "title": "Preferred Symbols"
           },
           "preferred_themes": {
             "items": {

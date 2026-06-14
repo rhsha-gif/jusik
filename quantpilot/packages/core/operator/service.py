@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from datetime import datetime
+from typing import Literal
 
 from quantpilot.packages.core.execution.fallback_manager import FallbackDecision, FallbackManager
 from quantpilot.packages.core.execution.state_machine import (
@@ -13,12 +14,13 @@ from quantpilot.packages.core.execution.state_machine import (
     operator_kill_switch_engaged,
     transition_order_plan,
 )
-from quantpilot.packages.core.harness_service import HarnessService
+from quantpilot.packages.core.harness_service import HarnessService, PortfolioSnapshotUnavailable
 from quantpilot.packages.core.operator.schemas import (
     OperatorDecision,
     OperatorReport,
     OperatorRunRequest,
     OperatorRunResult,
+    OperatorRunStatus,
 )
 from quantpilot.packages.core.policy.versioning import PolicyVersionGuard, PolicyVersioningService
 from quantpilot.packages.core.risk.gatekeeper import market_orders_enabled
@@ -27,6 +29,7 @@ from quantpilot.packages.core.schemas import (
     ExecutionMode,
     OrderPlan,
     OrderStatus,
+    PortfolioSnapshot,
     Signal,
     StrategyRecipe,
     UserPolicy,
@@ -57,7 +60,20 @@ CHECK_TO_FALLBACK_REASON = {
     "monthly_loss_stop_not_triggered": "monthly_loss_stop_engaged",
     "monthly_loss_pause_allows_order": "monthly_loss_pause_engaged",
     "fresh_risk_check_passed": "risk_check_failed",
+    "portfolio_snapshot_not_stale": "stale_portfolio_snapshot",
 }
+
+OperatorDecisionAction = Literal["submit", "block", "fallback", "noop"]
+
+
+def _snapshot_fallback_reason(reason: str) -> str:
+    if reason == "missing_portfolio_snapshot" or reason == "missing_portfolio_snapshot_source":
+        return "portfolio_snapshot_missing"
+    if reason == "fixture_portfolio_snapshot":
+        return "portfolio_snapshot_fixture"
+    if "stale" in reason or reason.startswith("portfolio_snapshot_age_seconds"):
+        return "stale_portfolio_snapshot"
+    return "broker_unhealthy"
 
 
 def _empty_selection(reason: str) -> StrategySelectionDecision:
@@ -92,8 +108,13 @@ class OperatorService:
     def audit(self):
         return self.harness.audit
 
-    def _safety_flags(self, policy: UserPolicy | None, request: OperatorRunRequest) -> dict[str, bool | str]:
-        return {
+    def _safety_flags(
+        self,
+        policy: UserPolicy | None,
+        request: OperatorRunRequest,
+        snapshot: PortfolioSnapshot | None = None,
+    ) -> dict[str, bool | str]:
+        flags: dict[str, bool | str] = {
             "LIVE_TRADING_ENABLED": live_trading_flag_enabled(),
             "GUARDED_AUTOPILOT_ENABLED": guarded_autopilot_flag_enabled(policy) if policy else False,
             "FULLY_AUTOMATED_OPERATOR_ENABLED": fully_automated_operator_flag_enabled(policy),
@@ -103,6 +124,17 @@ class OperatorService:
             "kill_switch_engaged": bool(policy.kill_switch_engaged) if policy else False,
             "run_mode": request.run_mode,
         }
+        if snapshot is not None:
+            flags.update(
+                {
+                    "portfolio_snapshot_id": snapshot.snapshot_id,
+                    "portfolio_snapshot_source": snapshot.source,
+                    "portfolio_snapshot_as_of": snapshot.as_of.isoformat(),
+                    "portfolio_snapshot_is_stale": snapshot.is_stale,
+                    "portfolio_snapshot_is_fixture": snapshot.is_fixture,
+                }
+            )
+        return flags
 
     def run_once(self, request: OperatorRunRequest, *, now: datetime | None = None) -> OperatorRunResult:
         cached = self._runs_by_key.get(request.idempotency_key)
@@ -128,6 +160,7 @@ class OperatorService:
         started_at = now or utc_now()
         decisions: list[OperatorDecision] = []
         policy = self.repositories.policies.get(request.policy_id)
+        portfolio_snapshot: PortfolioSnapshot | None = None
 
         self.audit.emit(
             user_id=request.user_id,
@@ -139,7 +172,7 @@ class OperatorService:
         )
 
         def decide(
-            action: str,
+            action: OperatorDecisionAction,
             reason: str,
             *,
             strategy_id: str | None = None,
@@ -152,7 +185,7 @@ class OperatorService:
                 policy_version=policy.version if policy else request.requested_policy_version,
                 strategy_id=strategy_id,
                 order_plan_id=order_plan_id,
-                action=action,  # type: ignore[arg-type]
+                action=action,
                 reason=reason,
                 risk_check_id=risk_check_id,
             )
@@ -160,7 +193,7 @@ class OperatorService:
             return decision
 
         def finish(
-            status: str,
+            status: OperatorRunStatus,
             *,
             fallback: FallbackDecision | None = None,
             selection: StrategySelectionDecision | None = None,
@@ -186,14 +219,14 @@ class OperatorService:
                 policy_version=policy.version if policy else request.requested_policy_version,
                 started_at=started_at,
                 completed_at=utc_now(),
-                status=status,  # type: ignore[arg-type]
+                status=status,
                 strategy_selection=selection or _empty_selection("strategy_selection_not_reached"),
                 decisions=decisions,
                 fallback=fallback,
                 order_plan_ids=order_plan_ids or [],
                 broker_order_ids=broker_order_ids or [],
                 risk_check_ids=risk_check_ids or [],
-                safety_flags=self._safety_flags(policy, request),
+                safety_flags=self._safety_flags(policy, request, portfolio_snapshot),
                 live_trading_enabled=False,
                 audit_event_count=len(self.repositories.audit_logs.list()),
             )
@@ -216,7 +249,7 @@ class OperatorService:
             )
             result = OperatorRunResult(
                 run_id=run_id,
-                status=status,  # type: ignore[arg-type]
+                status=status,
                 submitted_order_plan_ids=submitted or [],
                 blocked_order_plan_ids=blocked or [],
                 fallback=fallback,
@@ -228,7 +261,7 @@ class OperatorService:
         def blocked_by(reason_code: str, *, selection: StrategySelectionDecision | None = None) -> OperatorRunResult:
             fallback = self.fallbacks.for_reason(reason_code)
             decide("fallback" if fallback.to_level > 0 else "block", reason_code)
-            status = "fallback" if fallback.to_level > 0 else "blocked"
+            status: OperatorRunStatus = "fallback" if fallback.to_level > 0 else "blocked"
             return finish(status, fallback=fallback, selection=selection)
 
         # Gate 1: Level 5 feature flag (env or explicit policy field).
@@ -303,7 +336,14 @@ class OperatorService:
 
         # Step: sync portfolio snapshot from the mock/paper broker and build the plan.
         broker = self.harness._broker_for_policy(policy)
-        snapshot = broker.get_positions(request.user_id)
+        try:
+            snapshot = self.harness._require_runtime_snapshot(
+                policy=policy,
+                snapshot=broker.get_positions(request.user_id),
+            )
+        except PortfolioSnapshotUnavailable as exc:
+            return blocked_by(_snapshot_fallback_reason(exc.reason))
+        portfolio_snapshot = snapshot
 
         # Gate 8: monthly loss stop halts all automatic trading before any planning.
         if snapshot.monthly_loss_ratio <= policy.monthly_loss_stop_all_autotrading:
@@ -444,7 +484,13 @@ class OperatorService:
             )
             self.repositories.order_plans.update(proposal)
             try:
-                order_plan, broker_order, fills = self.harness.submit_order_plan(proposal.order_plan_id)
+                order_plan, broker_order, fills = self.harness.submit_order_plan(proposal.order_plan_id, snapshot=snapshot)
+            except PortfolioSnapshotUnavailable as exc:
+                decide("block", exc.reason, strategy_id=registry_entry.strategy_id, order_plan_id=proposal.order_plan_id)
+                blocked.append(proposal.order_plan_id)
+                if fallback is None:
+                    fallback = self.fallbacks.for_reason(_snapshot_fallback_reason(exc.reason))
+                continue
             except (RiskCheckRequired, ApprovalRequired) as exc:
                 decide("block", str(exc), strategy_id=registry_entry.strategy_id, order_plan_id=proposal.order_plan_id)
                 blocked.append(proposal.order_plan_id)

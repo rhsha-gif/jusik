@@ -3,6 +3,8 @@ import { apiFetch } from "./api";
 import type {
   AnalystResponse,
   HealthResponse,
+  IntentRunRequest,
+  IntentRunResponse,
   Level12Request,
   Level12RunResponse,
   ParsePolicyRequest,
@@ -86,5 +88,12 @@ export function useLevel12Run() {
   return useMutation({
     mutationFn: (body: Level12Request) =>
       apiFetch<Level12RunResponse>("/api/level-1-2/run", { method: "POST", body }),
+  });
+}
+
+export function useIntentRun() {
+  return useMutation({
+    mutationFn: (body: IntentRunRequest) =>
+      apiFetch<IntentRunResponse>("/api/intent/run", { method: "POST", body }),
   });
 }

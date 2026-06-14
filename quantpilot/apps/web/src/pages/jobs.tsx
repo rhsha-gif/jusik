@@ -32,6 +32,7 @@ export function JobsPage() {
   return (
     <>
       <PageHeader
+        eyebrow="Activity"
         title="작업 & 로그"
         description="이 세션에서 UI가 보낸 모든 API 요청의 기록입니다. 백엔드는 동기식으로 응답하므로 별도 작업 큐 없이 요청 단위로 기록됩니다."
         actions={
@@ -72,7 +73,7 @@ export function JobsPage() {
 
 function ActivityRow({ entry }: { entry: ActivityEntry }) {
   return (
-    <li className="rounded-card border border-hairline bg-surface p-4 shadow-card backdrop-blur-xl">
+    <li className="panel p-4">
       <div className="flex flex-wrap items-center gap-2.5">
         <Badge variant={entry.ok ? "safe" : entry.status === null ? "warn" : "danger"}>
           {entry.status === null ? "연결 실패" : `HTTP ${entry.status}`}

@@ -5,6 +5,7 @@
  * (regenerate with `npm run generate:api`). These aliases name the
  * subset of shapes the UI renders, so pages stay readable.
  */
+import type { components } from "./openapi";
 
 export interface HealthResponse {
   status: string;
@@ -51,12 +52,17 @@ export interface UserPolicy {
   execution_mode: string;
   allowed_order_types: string[];
   broker: string;
+  preferred_symbols: string[];
   preferred_themes: string[];
   preferred_sectors: string[];
   blocklist: string[];
   kill_switch_engaged: boolean;
   created_at: string;
 }
+
+export type OperatorReport = components["schemas"]["OperatorReport"];
+export type OperatorRunRequest = components["schemas"]["OperatorRunRequest"];
+export type OperatorRunResult = components["schemas"]["OperatorRunResult"];
 
 export interface PolicyPreviewResponse {
   confirmed: boolean;
@@ -67,6 +73,12 @@ export interface PolicyPreviewResponse {
 export interface ParsePolicyRequest {
   text: string;
   user_id: string;
+}
+
+export interface IntentRunRequest {
+  text: string;
+  user_id?: string;
+  create_order_proposals?: boolean;
 }
 
 export interface Level12Request {
@@ -114,7 +126,10 @@ export interface CandidateUniverseItem {
   name: string;
   market: string;
   sector: string;
+  symbol_match: boolean;
+  sector_match: boolean;
   theme_match: boolean;
+  focus_match: boolean;
   liquidity_pass: boolean;
   data_ready: boolean;
   block_reason: string | null;
@@ -165,6 +180,8 @@ export interface OperationReportSummary {
   order_submission_enabled?: boolean;
   broker?: string;
   execution_mode?: string;
+  focus?: IntentFocusSummary;
+  missing_preferred_symbols?: string[];
   [key: string]: unknown;
 }
 
@@ -186,6 +203,7 @@ export interface Level12RunResponse {
   universe: CandidateUniverseItem[];
   analyst_reports: AnalystReport[];
   signals: Signal[];
+  focus?: IntentFocusSummary;
   rebalance: {
     policy_id: string;
     policy_version: number;
@@ -196,4 +214,47 @@ export interface Level12RunResponse {
   };
   daily_report: OperationReport;
   order_submission_enabled: boolean;
+}
+
+export interface IntentFocusSummary {
+  preferred_symbols: string[];
+  preferred_sectors: string[];
+  preferred_themes: string[];
+  missing_preferred_symbols: string[];
+}
+
+export interface IntentRunResponse {
+  intent: {
+    text: string;
+    user_id: string;
+    data_mode: string;
+  };
+  capability_assessment: Record<string, boolean>;
+  policy: UserPolicy;
+  focus: IntentFocusSummary;
+  diagnostics: {
+    missing_preferred_symbols: string[];
+    data_mode: string;
+    [key: string]: unknown;
+  };
+  candidate_analysis: {
+    universe: CandidateUniverseItem[];
+    analyst_reports: AnalystReport[];
+  };
+  signals: Signal[];
+  target_weights: Record<string, number>;
+  rebalance: Level12RunResponse["rebalance"];
+  portfolio_plan: Record<string, unknown>;
+  order_proposals: Record<string, unknown>[];
+  operation_report: OperationReport;
+  safety: {
+    order_submission_enabled: boolean;
+    broker_order_count: number;
+    fill_count: number;
+    risk_checked_order_plan_ids: string[];
+    live_trading_enabled: boolean;
+    broker: string;
+    execution_mode: string;
+    data_mode: string;
+  };
 }

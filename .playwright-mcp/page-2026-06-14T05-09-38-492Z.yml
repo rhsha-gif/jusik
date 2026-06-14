@@ -1,0 +1,61 @@
+- generic [ref=e3]:
+  - complementary "주 메뉴" [ref=e4]:
+    - generic [ref=e5]:
+      - img [ref=e7]
+      - generic [ref=e10]:
+        - paragraph [ref=e11]: QuantPilot
+        - paragraph [ref=e12]: Pre-Harness
+    - navigation [ref=e13]:
+      - link "오버뷰" [ref=e14] [cursor=pointer]:
+        - /url: /
+        - img [ref=e15]
+        - text: 오버뷰
+      - link "리서치" [ref=e18] [cursor=pointer]:
+        - /url: /research
+        - img [ref=e19]
+        - text: 리서치
+      - link "정책 스튜디오" [ref=e21] [cursor=pointer]:
+        - /url: /policies
+        - img [ref=e22]
+        - text: 정책 스튜디오
+      - link "신호 보드" [ref=e25] [cursor=pointer]:
+        - /url: /signals
+        - img [ref=e26]
+        - text: 신호 보드
+      - link "Level 1-2 실행" [ref=e33] [cursor=pointer]:
+        - /url: /run
+        - img [ref=e34]
+        - text: Level 1-2 실행
+      - link "작업 & 로그" [ref=e36] [cursor=pointer]:
+        - /url: /jobs
+        - img [ref=e37]
+        - text: 작업 & 로그
+      - link "설정 & 안전" [ref=e40] [cursor=pointer]:
+        - /url: /settings
+        - img [ref=e41]
+        - text: 설정 & 안전
+    - generic [ref=e44]:
+      - paragraph [ref=e45]: API Base
+      - paragraph [ref=e46]: http://127.0.0.1:8010
+  - generic [ref=e47]:
+    - banner [ref=e48]:
+      - generic [ref=e49]:
+        - status [ref=e50]: 연결 확인 중…
+        - radiogroup "테마 설정" [ref=e52]:
+          - radio "시스템 테마" [checked] [ref=e53] [cursor=pointer]:
+            - img [ref=e54]
+          - radio "라이트 테마" [ref=e56] [cursor=pointer]:
+            - img [ref=e57]
+          - radio "다크 테마" [ref=e63] [cursor=pointer]:
+            - img [ref=e64]
+    - note "안전 모드 안내" [ref=e66]:
+      - generic [ref=e67]:
+        - img [ref=e68]
+        - text: 모의 브로커 활성 (Mock Broker)
+      - generic [ref=e71]: 이 인터페이스는 로컬 QuantPilot 프리하니스만 제어하며, 실제 증권사 주문을 내지 않습니다.
+      - generic [ref=e72]:
+        - generic [ref=e73]: 실거래 비활성
+        - generic [ref=e74]: 지정가 주문만
+        - generic [ref=e75]: Fixture 데이터
+    - main [ref=e76]:
+      - generic [ref=e78]: Loading page...

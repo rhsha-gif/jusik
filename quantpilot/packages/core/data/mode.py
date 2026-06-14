@@ -4,7 +4,9 @@ import os
 
 from quantpilot.packages.core.schemas import DataMode
 
-_UNSAFE_MODES: frozenset[DataMode] = frozenset({DataMode.live_trading})
+_UNSAFE_MODES: frozenset[DataMode] = frozenset(
+    {DataMode.live_canary, DataMode.live_scaled, DataMode.live_trading}
+)
 
 
 class DataModeConfigError(ValueError):
@@ -27,5 +29,5 @@ def resolve_data_mode(raw: str | None = None) -> DataMode:
 
 
 def is_data_mode_safe(mode: DataMode) -> bool:
-    """Return False only for live_trading; all other modes are considered safe in the pre-harness."""
+    """Return False for modes that imply real live order routing."""
     return mode not in _UNSAFE_MODES

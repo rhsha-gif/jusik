@@ -46,6 +46,7 @@ AUDIT_EVENT_ACTIONS = {
     "risk_check_passed",
     "risk_check_failed",
     "risk_check_expired",
+    "portfolio_snapshot_unavailable",
     "order_approved",
     "order_submitted",
     "broker_order_accepted",

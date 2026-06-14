@@ -61,6 +61,7 @@ export function OverviewPage() {
   return (
     <>
       <PageHeader
+        eyebrow="Operator Console"
         title="QuantPilot Operator Pre-Harness"
         description="안전한 모의 환경입니다. 실제 증권사 주문은 비활성화되어 있으며, 모든 실행은 로컬 fixture 데이터를 사용합니다."
         actions={
@@ -186,15 +187,15 @@ export function OverviewPage() {
           <Link
             key={to}
             to={to}
-            className="group flex flex-col gap-3 rounded-card border border-hairline bg-surface p-5 shadow-card backdrop-blur-xl transition-transform hover:-translate-y-0.5"
+            className="panel group flex flex-col gap-3 p-5 transition-[transform,box-shadow,border-color] duration-200 ease-out hover:-translate-y-1 hover:border-hairline-strong hover:shadow-lg"
           >
-            <span className="flex size-9 items-center justify-center rounded-xl bg-accent-soft text-accent">
+            <span className="flex size-9 items-center justify-center rounded-xl bg-gradient-to-br from-accent to-accent-2 text-white shadow-[0_4px_12px_-3px_var(--qp-accent-soft)] transition-transform duration-200 group-hover:scale-105">
               <Icon className="size-4.5" />
             </span>
             <div>
-              <h3 className="flex items-center gap-1.5 text-[15px] font-semibold">
+              <h3 className="flex items-center justify-between gap-1.5 text-[15px] font-semibold">
                 {title}
-                <ArrowRight className="size-3.5 text-muted transition-transform group-hover:translate-x-0.5" />
+                <ArrowRight className="size-4 text-faint transition-all duration-200 group-hover:translate-x-0.5 group-hover:text-accent" />
               </h3>
               <p className="mt-1 text-[12.5px] leading-relaxed text-muted">{description}</p>
             </div>
@@ -207,9 +208,11 @@ export function OverviewPage() {
 
 function SmokeStat({ label, value }: { label: string; value: number }) {
   return (
-    <div className="rounded-xl border border-hairline bg-surface-solid px-4 py-3">
-      <p className="text-[12px] text-muted">{label}</p>
-      <p className="mt-0.5 text-[22px] font-semibold tabular-nums">{value}</p>
+    <div className="rounded-xl border border-hairline bg-surface-raised px-4 py-3 shadow-sm">
+      <p className="text-[11.5px] font-medium uppercase tracking-wide text-faint">{label}</p>
+      <p className="mt-1 text-[24px] font-semibold leading-none tabular-nums tracking-tight">
+        {value}
+      </p>
     </div>
   );
 }

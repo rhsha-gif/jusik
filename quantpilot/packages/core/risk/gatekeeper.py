@@ -88,6 +88,7 @@ def run_risk_check(
     check("execution_mode_allowed", policy.execution_mode in allowed_execution_modes(policy))
     check("broker_mode_not_live", policy.broker != BrokerMode.live_disabled)
     check("risk_check_not_expired", True)
+    check("portfolio_snapshot_not_stale", not snapshot.is_stale)
 
     if intent.side == "buy":
         cash_after_order = snapshot.cash - intent.notional
@@ -139,4 +140,8 @@ def run_risk_check(
         failed_checks=failed,
         policy_version=policy.version,
         idempotency_key=order_plan.idempotency_key,
+        snapshot_id=snapshot.snapshot_id,
+        snapshot_source=snapshot.source,
+        snapshot_as_of=snapshot.as_of,
+        snapshot_is_stale=snapshot.is_stale,
     )

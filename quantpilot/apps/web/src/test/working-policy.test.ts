@@ -14,6 +14,9 @@ const FIXTURE_POLICY = {
   risk_profile: "moderate",
   execution_mode: "approval_required",
   broker: "mock",
+  preferred_symbols: ["AAA"],
+  preferred_sectors: ["technology"],
+  preferred_themes: ["ai"],
 } as UserPolicy;
 
 describe("working policy store", () => {
@@ -41,5 +44,13 @@ describe("working policy store", () => {
     setWorkingPolicy(FIXTURE_POLICY, true);
     clearWorkingPolicy();
     expect(getWorkingPolicy()).toBeNull();
+  });
+
+  it("preserves focus metadata from the parsed policy", () => {
+    setWorkingPolicy(FIXTURE_POLICY, false, { direction: "AAA technology" });
+
+    expect(getWorkingPolicy()?.symbols).toEqual(["AAA"]);
+    expect(getWorkingPolicy()?.sectors).toEqual(["technology"]);
+    expect(getWorkingPolicy()?.themes).toEqual(["ai"]);
   });
 });

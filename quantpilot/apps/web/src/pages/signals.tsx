@@ -62,6 +62,7 @@ export function SignalsPage() {
   return (
     <>
       <PageHeader
+        eyebrow="Signal Board"
         title="신호 보드"
         description="신호 엔진의 출력을 방향·강도·사유와 함께 검토합니다. 모든 신호는 fixture 데이터 기반의 모의 신호입니다."
         actions={
@@ -168,7 +169,7 @@ function SignalCard({ signal, onOpen }: { signal: Signal; onOpen: (s: Signal) =>
     <button
       type="button"
       onClick={() => onOpen(signal)}
-      className="flex cursor-pointer flex-col gap-3 rounded-card border border-hairline bg-surface p-5 text-left shadow-card backdrop-blur-xl transition-transform hover:-translate-y-0.5"
+      className="panel group flex cursor-pointer flex-col gap-3 p-5 text-left transition-[transform,box-shadow,border-color] duration-200 ease-out hover:-translate-y-0.5 hover:border-hairline-strong hover:shadow-lg"
     >
       <div className="flex items-center justify-between gap-2">
         <span className="font-mono text-[16px] font-semibold">{signal.symbol}</span>
@@ -184,7 +185,7 @@ function SignalCard({ signal, onOpen }: { signal: Signal; onOpen: (s: Signal) =>
           className="h-1.5 flex-1 overflow-hidden rounded-full bg-hairline"
         >
           <div
-            className="h-full rounded-full bg-accent"
+            className="h-full rounded-full bg-gradient-to-r from-accent to-accent-2"
             style={{ width: `${Math.round(signal.strength * 100)}%` }}
           />
         </div>
@@ -294,7 +295,7 @@ function SignalDetailDialog({
 
 function DetailStat({ label, value }: { label: string; value: string }) {
   return (
-    <div className="rounded-xl border border-hairline bg-surface-solid px-3 py-2.5">
+    <div className="rounded-xl border border-hairline bg-surface-raised px-3 py-2.5 shadow-sm">
       <CardDescription className="text-[11px]">{label}</CardDescription>
       <p className="mt-0.5 font-medium tabular-nums">{value}</p>
     </div>

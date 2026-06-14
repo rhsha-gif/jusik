@@ -1,14 +1,18 @@
 from __future__ import annotations
 
 from quantpilot.packages.brokers.base import BrokerAdapter
-from quantpilot.packages.core.portfolio.planner import fixture_portfolio_snapshot
+from quantpilot.packages.core.portfolio.snapshot_provider import (
+    PortfolioSnapshotProvider,
+    default_runtime_snapshot_provider,
+)
 from quantpilot.packages.core.schemas import BrokerMode, BrokerOrder, Fill, OrderPlan, PortfolioSnapshot
 
 
 class MockBroker(BrokerAdapter):
     mode = BrokerMode.mock.value
 
-    def __init__(self) -> None:
+    def __init__(self, snapshot_provider: PortfolioSnapshotProvider | None = None) -> None:
+        self._snapshot_provider = snapshot_provider or default_runtime_snapshot_provider(source=f"{self.mode}_broker")
         self._quotes = {
             "AAA": 105.0,
             "BBB": 102.0,
@@ -23,10 +27,10 @@ class MockBroker(BrokerAdapter):
         return {"user_id": user_id, "account_id": "mock-account", "broker_mode": self.mode}
 
     def get_cash(self, user_id: str) -> float:
-        return fixture_portfolio_snapshot().cash
+        return self.get_positions(user_id).cash
 
     def get_positions(self, user_id: str) -> PortfolioSnapshot:
-        return fixture_portfolio_snapshot()
+        return self._snapshot_provider.get_snapshot(user_id)
 
     def get_quote(self, symbol: str) -> float:
         return self._quotes.get(symbol, 100.0)

@@ -62,6 +62,9 @@ class DataMode(str, Enum):
     external_historical = "external_historical"
     realtime_market_data = "realtime_market_data"
     paper_trading = "paper_trading"
+    live_trading_candidate = "live_trading_candidate"
+    live_canary = "live_canary"
+    live_scaled = "live_scaled"
     live_trading = "live_trading"
 
 
@@ -108,6 +111,7 @@ class UserPolicy(HarnessModel):
     execution_mode: ExecutionMode = ExecutionMode.approval_required
     allowed_order_types: list[OrderType] = Field(default_factory=lambda: [OrderType.limit])
     broker: BrokerMode = BrokerMode.mock
+    preferred_symbols: list[str] = Field(default_factory=list)
     preferred_themes: list[str] = Field(default_factory=list)
     preferred_sectors: list[str] = Field(default_factory=list)
     blocklist: list[str] = Field(default_factory=list)
@@ -125,6 +129,11 @@ class UserPolicy(HarnessModel):
     @classmethod
     def normalize_lowercase_lists(cls, value: list[str]) -> list[str]:
         return sorted({item.strip().lower() for item in value if item.strip()})
+
+    @field_validator("preferred_symbols")
+    @classmethod
+    def normalize_preferred_symbols(cls, value: list[str]) -> list[str]:
+        return sorted({item.strip().upper() for item in value if item.strip()})
 
     @field_validator("blocklist")
     @classmethod
@@ -239,7 +248,10 @@ class CandidateUniverseItem(HarnessModel):
     name: str
     market: str
     sector: str
+    symbol_match: bool = True
+    sector_match: bool = True
     theme_match: bool
+    focus_match: bool = True
     liquidity_pass: bool
     data_ready: bool
     block_reason: str | None = None
@@ -316,6 +328,11 @@ class PortfolioSnapshot(HarnessModel):
     monthly_loss_ratio: float = 0.0
     captured_at: datetime = Field(default_factory=utc_now)
     source: str = "fixture_portfolio"
+    as_of: datetime = Field(default_factory=utc_now)
+    generated_at: datetime = Field(default_factory=utc_now)
+    is_fixture: bool = False
+    is_stale: bool = False
+    stale_reason: str | None = None
 
     @model_validator(mode="after")
     def cash_cannot_exceed_equity_by_large_margin(self) -> "PortfolioSnapshot":
@@ -366,6 +383,10 @@ class RiskCheck(HarnessModel):
     failed_checks: list[str] = Field(default_factory=list)
     policy_version: int
     idempotency_key: str
+    snapshot_id: str | None = None
+    snapshot_source: str | None = None
+    snapshot_as_of: datetime | None = None
+    snapshot_is_stale: bool = False
     created_at: datetime = Field(default_factory=utc_now)
     expires_at: datetime = Field(default_factory=lambda: utc_now() + timedelta(minutes=10))
 

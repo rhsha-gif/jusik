@@ -1,11 +1,18 @@
 import * as React from "react";
 import { cn } from "@/lib/utils";
 
-export function Card({ className, ...props }: React.HTMLAttributes<HTMLDivElement>) {
+interface CardProps extends React.HTMLAttributes<HTMLDivElement> {
+  /** Adds a subtle hover lift + accent border for clickable cards. */
+  interactive?: boolean;
+}
+
+export function Card({ className, interactive, ...props }: CardProps) {
   return (
     <div
       className={cn(
-        "rounded-card border border-hairline bg-surface backdrop-blur-xl shadow-card",
+        "panel",
+        interactive &&
+          "transition-[transform,box-shadow,border-color] duration-200 ease-out hover:-translate-y-0.5 hover:border-hairline-strong hover:shadow-lg",
         className,
       )}
       {...props}

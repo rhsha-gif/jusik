@@ -5,7 +5,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
 
 from quantpilot.packages.db.repositories import RepositoryError
-from quantpilot.services.api.routers import autopilot, harness, level_1_2, operator, orders, policies, portfolio, reports, signals
+from quantpilot.services.api.routers import autopilot, harness, intents, level_1_2, operator, orders, policies, portfolio, reports, signals
 
 
 app = FastAPI(title="QuantPilot Operator Pre-Harness", version="0.1.0")
@@ -42,6 +42,7 @@ async def repository_error_handler(request: Request, exc: RepositoryError) -> JS
 
 
 app.include_router(harness.router, prefix="/api")
+app.include_router(intents.router, prefix="/api")
 app.include_router(policies.router, prefix="/api")
 app.include_router(level_1_2.router, prefix="/api")
 app.include_router(signals.router, prefix="/api")

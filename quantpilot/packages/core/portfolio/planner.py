@@ -3,6 +3,11 @@ from __future__ import annotations
 from datetime import date
 from hashlib import sha256
 
+from quantpilot.packages.core.execution.lob_spread import (
+    InstrumentMicrostructure,
+    L2OrderBook,
+    limit_price_decision,
+)
 from quantpilot.packages.core.schemas import (
     OrderIntent,
     OrderType,
@@ -27,6 +32,8 @@ def fixture_portfolio_snapshot(*, monthly_loss_ratio: float = 0.0) -> PortfolioS
             PortfolioPosition(symbol="EEE", quantity=10_000, market_price=100, sector="industrial"),
         ],
         monthly_loss_ratio=monthly_loss_ratio,
+        source="fixture",
+        is_fixture=True,
     )
 
 
@@ -64,6 +71,10 @@ def _quote_for_symbol(snapshot: PortfolioSnapshot, symbol: str, quotes: dict[str
     return 100.0
 
 
+def _quantity_for_symbol(snapshot: PortfolioSnapshot, symbol: str) -> float:
+    return sum(position.quantity for position in snapshot.positions if position.symbol == symbol)
+
+
 def _initial_target(policy: UserPolicy, signal: Signal, current_weight: float) -> float:
     if signal.action in {SignalAction.blocked, SignalAction.exit, SignalAction.buy_wait}:
         return 0.0
@@ -82,6 +93,8 @@ def build_portfolio_plan(
     signals: list[Signal],
     snapshot: PortfolioSnapshot,
     quotes: dict[str, float] | None = None,
+    order_books: dict[str, L2OrderBook] | None = None,
+    instruments: dict[str, InstrumentMicrostructure] | None = None,
 ) -> PortfolioPlan:
     target_weights: dict[str, float] = {}
     order_intents: list[OrderIntent] = []
@@ -91,7 +104,7 @@ def build_portfolio_plan(
     for signal in signals:
         current = current_weights.get(signal.symbol, 0.0)
         target = _initial_target(policy, signal, current)
-        price = _quote_for_symbol(snapshot, signal.symbol, quotes)
+        fallback_price = _quote_for_symbol(snapshot, signal.symbol, quotes)
         delta_notional = (target - current) * snapshot.equity
 
         if delta_notional > 1:
@@ -99,6 +112,25 @@ def build_portfolio_plan(
             if notional <= 1:
                 target = current
             else:
+                price = fallback_price
+                if order_books and signal.symbol in order_books:
+                    if not instruments or signal.symbol not in instruments:
+                        target = current
+                        target_weights[signal.symbol] = round(max(0.0, min(target, policy.max_position_weight)), 6)
+                        continue
+                    decision = limit_price_decision(
+                        side="buy",
+                        book=order_books[signal.symbol],
+                        instrument=instruments[signal.symbol],
+                        position_qty=_quantity_for_symbol(snapshot, signal.symbol),
+                        target_position_qty=_quantity_for_symbol(snapshot, signal.symbol) + notional / fallback_price,
+                        order_unit_qty=max(1.0, notional / fallback_price),
+                    )
+                    if not decision.allowed or decision.limit_price is None:
+                        target = current
+                        target_weights[signal.symbol] = round(max(0.0, min(target, policy.max_position_weight)), 6)
+                        continue
+                    price = decision.limit_price
                 target = current + notional / snapshot.equity
                 available_to_spend -= notional
                 order_intents.append(
@@ -116,6 +148,25 @@ def build_portfolio_plan(
         elif delta_notional < -1:
             notional = min(abs(delta_notional), policy.single_order_cash_limit)
             if notional > 1:
+                price = fallback_price
+                if order_books and signal.symbol in order_books:
+                    if not instruments or signal.symbol not in instruments:
+                        target = current
+                        target_weights[signal.symbol] = round(max(0.0, min(target, policy.max_position_weight)), 6)
+                        continue
+                    decision = limit_price_decision(
+                        side="sell",
+                        book=order_books[signal.symbol],
+                        instrument=instruments[signal.symbol],
+                        position_qty=_quantity_for_symbol(snapshot, signal.symbol),
+                        target_position_qty=max(0.0, _quantity_for_symbol(snapshot, signal.symbol) - notional / fallback_price),
+                        order_unit_qty=max(1.0, notional / fallback_price),
+                    )
+                    if not decision.allowed or decision.limit_price is None:
+                        target = current
+                        target_weights[signal.symbol] = round(max(0.0, min(target, policy.max_position_weight)), 6)
+                        continue
+                    price = decision.limit_price
                 target = current - notional / snapshot.equity
                 order_intents.append(
                     OrderIntent(

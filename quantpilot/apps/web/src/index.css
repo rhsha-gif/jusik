@@ -5,49 +5,78 @@
 @custom-variant dark (&:where(.dark, .dark *));
 
 :root {
-  --qp-bg: #f5f5f7;
-  --qp-surface: rgba(255, 255, 255, 0.78);
+  --qp-bg: #f4f5f7;
+  --qp-surface: rgba(255, 255, 255, 0.72);
   --qp-surface-solid: #ffffff;
+  --qp-surface-raised: #ffffff;
   --qp-ink: #1d1d1f;
-  --qp-muted: #6e6e73;
-  --qp-hairline: rgba(0, 0, 0, 0.1);
+  --qp-muted: #6b6b73;
+  --qp-faint: #9a9aa2;
+  --qp-hairline: rgba(15, 18, 25, 0.09);
+  --qp-hairline-strong: rgba(15, 18, 25, 0.14);
   --qp-accent: #0a84ff;
-  --qp-accent-soft: rgba(10, 132, 255, 0.12);
+  --qp-accent-2: #5e5ce6;
+  --qp-accent-soft: rgba(10, 132, 255, 0.1);
   --qp-safe: #168a45;
-  --qp-safe-soft: rgba(22, 138, 69, 0.12);
+  --qp-safe-soft: rgba(22, 138, 69, 0.1);
   --qp-warn: #b76e00;
-  --qp-warn-soft: rgba(183, 110, 0, 0.12);
+  --qp-warn-soft: rgba(183, 110, 0, 0.1);
   --qp-danger: #c62828;
-  --qp-danger-soft: rgba(198, 40, 40, 0.1);
-  --qp-shadow: 0 18px 60px rgba(0, 0, 0, 0.08);
+  --qp-danger-soft: rgba(198, 40, 40, 0.09);
+
+  --qp-glow-1: rgba(10, 132, 255, 0.12);
+  --qp-glow-2: rgba(94, 92, 230, 0.09);
+
+  /* Layered elevation: inset top highlight + close + ambient shadow */
+  --qp-shadow-sm: 0 1px 2px rgba(15, 23, 42, 0.05), 0 1px 1px rgba(15, 23, 42, 0.04);
+  --qp-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.65),
+    0 1px 2px rgba(15, 23, 42, 0.04), 0 14px 36px -10px rgba(15, 23, 42, 0.14);
+  --qp-shadow-lg: inset 0 1px 0 rgba(255, 255, 255, 0.7),
+    0 2px 4px rgba(15, 23, 42, 0.05), 0 28px 64px -16px rgba(15, 23, 42, 0.22);
 }
 
 .dark {
-  --qp-bg: #0b0c0f;
-  --qp-surface: rgba(28, 28, 30, 0.72);
-  --qp-surface-solid: #1c1c1e;
-  --qp-ink: #f5f5f7;
-  --qp-muted: #a1a1a6;
-  --qp-hairline: rgba(255, 255, 255, 0.12);
-  --qp-accent: #409cff;
-  --qp-accent-soft: rgba(64, 156, 255, 0.16);
-  --qp-safe: #35c759;
-  --qp-safe-soft: rgba(53, 199, 89, 0.16);
+  --qp-bg: #0a0b0e;
+  --qp-surface: rgba(28, 30, 36, 0.62);
+  --qp-surface-solid: #1a1c22;
+  --qp-surface-raised: #23262e;
+  --qp-ink: #f5f6f8;
+  --qp-muted: #9ea2ad;
+  --qp-faint: #6c707a;
+  --qp-hairline: rgba(255, 255, 255, 0.09);
+  --qp-hairline-strong: rgba(255, 255, 255, 0.16);
+  --qp-accent: #4c9dff;
+  --qp-accent-2: #8b88ff;
+  --qp-accent-soft: rgba(76, 157, 255, 0.16);
+  --qp-safe: #36d36a;
+  --qp-safe-soft: rgba(54, 211, 106, 0.15);
   --qp-warn: #ffd60a;
-  --qp-warn-soft: rgba(255, 214, 10, 0.14);
-  --qp-danger: #ff453a;
-  --qp-danger-soft: rgba(255, 69, 58, 0.14);
-  --qp-shadow: 0 18px 70px rgba(0, 0, 0, 0.42);
+  --qp-warn-soft: rgba(255, 214, 10, 0.13);
+  --qp-danger: #ff5a4f;
+  --qp-danger-soft: rgba(255, 90, 79, 0.14);
+
+  --qp-glow-1: rgba(76, 157, 255, 0.2);
+  --qp-glow-2: rgba(139, 136, 255, 0.16);
+
+  --qp-shadow-sm: 0 1px 2px rgba(0, 0, 0, 0.45);
+  --qp-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.06),
+    0 1px 2px rgba(0, 0, 0, 0.4), 0 20px 50px -14px rgba(0, 0, 0, 0.7);
+  --qp-shadow-lg: inset 0 1px 0 rgba(255, 255, 255, 0.08),
+    0 2px 4px rgba(0, 0, 0, 0.5), 0 34px 72px -18px rgba(0, 0, 0, 0.78);
 }
 
 @theme inline {
   --color-bg: var(--qp-bg);
   --color-surface: var(--qp-surface);
   --color-surface-solid: var(--qp-surface-solid);
+  --color-surface-raised: var(--qp-surface-raised);
   --color-ink: var(--qp-ink);
   --color-muted: var(--qp-muted);
+  --color-faint: var(--qp-faint);
   --color-hairline: var(--qp-hairline);
+  --color-hairline-strong: var(--qp-hairline-strong);
   --color-accent: var(--qp-accent);
+  --color-accent-2: var(--qp-accent-2);
   --color-accent-soft: var(--qp-accent-soft);
   --color-safe: var(--qp-safe);
   --color-safe-soft: var(--qp-safe-soft);
@@ -61,8 +90,10 @@
   --font-mono: "JetBrains Mono Variable", ui-monospace, "Cascadia Code",
     monospace;
 
-  --radius-card: 24px;
+  --radius-card: 22px;
+  --shadow-sm: var(--qp-shadow-sm);
   --shadow-card: var(--qp-shadow);
+  --shadow-lg: var(--qp-shadow-lg);
 }
 
 html,
@@ -76,29 +107,95 @@ body {
   color: var(--qp-ink);
   font-family: var(--font-sans);
   font-variant-numeric: tabular-nums;
+  letter-spacing: -0.01em;
   text-rendering: geometricPrecision;
   -webkit-font-smoothing: antialiased;
 }
 
-/* Subtle background treatment per design.md §5.3 */
+/* Ambient depth — soft accent auras anchored to the viewport corners */
 body {
   background-image: radial-gradient(
-      60rem 40rem at 80% -10%,
-      var(--qp-accent-soft),
+      70rem 48rem at 88% -16%,
+      var(--qp-glow-1),
       transparent 60%
     ),
-    radial-gradient(50rem 35rem at -10% 110%, var(--qp-accent-soft), transparent 55%);
+    radial-gradient(58rem 44rem at -12% 116%, var(--qp-glow-2), transparent 55%);
   background-attachment: fixed;
+}
+
+/* Smooth theme handoff without animating layout-affecting props */
+body,
+.dark body {
+  transition: background-color 0.4s ease, color 0.3s ease;
 }
 
 ::selection {
   background: var(--qp-accent-soft);
+  color: var(--qp-ink);
 }
 
 *:focus-visible {
   outline: 2px solid var(--qp-accent);
   outline-offset: 2px;
-  border-radius: 4px;
+  border-radius: 6px;
+}
+
+/* Refined, theme-aware scrollbars */
+* {
+  scrollbar-width: thin;
+  scrollbar-color: var(--qp-hairline-strong) transparent;
+}
+*::-webkit-scrollbar {
+  width: 10px;
+  height: 10px;
+}
+*::-webkit-scrollbar-thumb {
+  background-color: var(--qp-hairline-strong);
+  border: 3px solid transparent;
+  background-clip: padding-box;
+  border-radius: 999px;
+}
+*::-webkit-scrollbar-thumb:hover {
+  background-color: var(--qp-faint);
+}
+
+/* ── Reusable design utilities ─────────────────────────────── */
+
+/* Glassy elevated panel — bundles surface, hairline, blur, layered shadow */
+@utility panel {
+  background-color: var(--qp-surface);
+  border: 1px solid var(--qp-hairline);
+  border-radius: var(--radius-card);
+  box-shadow: var(--qp-shadow);
+  backdrop-filter: blur(20px) saturate(140%);
+  -webkit-backdrop-filter: blur(20px) saturate(140%);
+}
+
+/* Accent-tinted text for emphasis words / wordmarks */
+@utility text-gradient {
+  background-image: linear-gradient(
+    115deg,
+    var(--qp-accent) 0%,
+    var(--qp-accent-2) 100%
+  );
+  -webkit-background-clip: text;
+  background-clip: text;
+  color: transparent;
+}
+
+/* Gentle entrance for content sections */
+@keyframes qp-rise {
+  from {
+    opacity: 0;
+    transform: translateY(6px);
+  }
+  to {
+    opacity: 1;
+    transform: none;
+  }
+}
+@utility animate-rise {
+  animation: qp-rise 0.4s cubic-bezier(0.16, 1, 0.3, 1) both;
 }
 
 @media (prefers-reduced-motion: reduce) {

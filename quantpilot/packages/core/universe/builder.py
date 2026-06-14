@@ -1,8 +1,11 @@
 from __future__ import annotations
 
+from collections.abc import Mapping
 from typing import Any
 
-from quantpilot.packages.core.schemas import CandidateUniverseItem, UserPolicy
+from quantpilot.packages.core.schemas import CandidateUniverseItem, PortfolioSnapshot, UserPolicy
+from quantpilot.packages.core.universe.ranking import CandidateRankingEngine, MAX_CANDIDATES_DEFAULT
+from quantpilot.packages.core.universe.ranking_types import RankedCandidate
 
 
 FIXTURE_SECURITIES: list[dict[str, Any]] = [
@@ -76,7 +79,10 @@ FIXTURE_SECURITIES: list[dict[str, Any]] = [
 def _theme_matches(policy: UserPolicy, security: dict[str, Any]) -> bool:
     if not policy.preferred_themes:
         return True
-    security_themes = {str(theme).lower() for theme in security.get("themes", [])}
+    raw_themes = security.get("themes", [])
+    if isinstance(raw_themes, str):
+        raw_themes = raw_themes.replace("|", ",").split(",")
+    security_themes = {str(theme).strip().lower() for theme in raw_themes if str(theme).strip()}
     return bool(security_themes.intersection(policy.preferred_themes))
 
 
@@ -130,3 +136,26 @@ def build_candidate_universe(policy: UserPolicy, securities: list[dict[str, Any]
             )
         )
     return universe
+
+
+def build_ranked_candidate_universe(
+    policy: UserPolicy,
+    securities: list[dict[str, Any]] | None = None,
+    *,
+    provider_metadata: Mapping[str, Mapping[str, Any]] | None = None,
+    portfolio_snapshot: PortfolioSnapshot | None = None,
+    max_candidates: int = MAX_CANDIDATES_DEFAULT,
+    include_excluded: bool = False,
+) -> list[RankedCandidate]:
+    selected = securities or FIXTURE_SECURITIES
+    candidates = build_candidate_universe(policy, selected)
+    ranked = CandidateRankingEngine(max_candidates=max_candidates).rank(
+        policy=policy,
+        candidates=candidates,
+        securities=selected,
+        provider_metadata=provider_metadata,
+        portfolio_snapshot=portfolio_snapshot,
+    )
+    if include_excluded:
+        return ranked
+    return [candidate for candidate in ranked if candidate.selected]

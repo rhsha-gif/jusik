@@ -1942,6 +1942,11 @@
               }
             ],
             "title": "Portfolio Plan Id"
+          },
+          "partial_allow": {
+            "type": "boolean",
+            "title": "Partial Allow",
+            "default": false
           }
         },
         "type": "object",

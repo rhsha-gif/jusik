@@ -15,7 +15,9 @@ from quantpilot.packages.core.portfolio.planner import (
     proposal_idempotency_key,
 )
 from quantpilot.packages.core.reports.service import build_operation_report
+from quantpilot.packages.core.risk.batch import run_batch_risk_gate
 from quantpilot.packages.core.risk.gatekeeper import run_risk_check
+from quantpilot.packages.core.risk.types import BatchRiskConfig
 from quantpilot.packages.core.schemas import (
     BrokerMode,
     BrokerOrder,
@@ -259,17 +261,60 @@ class HarnessService:
         snapshot: PortfolioSnapshot | None = None,
         run_risk: bool = True,
         propose_passed: bool = True,
+        partial_allow: bool = False,
     ) -> list[OrderPlan]:
         portfolio_plan = self.repositories.portfolio_plans.require(portfolio_plan_id)
         policy = self.repositories.policies.require(portfolio_plan.policy_id)
-        created: list[OrderPlan] = []
-        for intent in portfolio_plan.order_intents:
-            order_plan = OrderPlan(
+        portfolio_snapshot = snapshot or fixture_portfolio_snapshot()
+        candidate_orders = [
+            OrderPlan(
                 policy_id=policy.policy_id,
                 policy_version=policy.version,
                 intent=intent,
                 idempotency_key=f"{policy.policy_id}:{portfolio_plan.plan_id}:{intent.intent_id}",
             )
+            for intent in portfolio_plan.order_intents
+        ]
+        accepted_order_ids = {order.order_plan_id for order in candidate_orders}
+        if run_risk:
+            decision = run_batch_risk_gate(
+                policy=policy,
+                portfolio_plan=portfolio_plan,
+                snapshot=portfolio_snapshot,
+                quotes=self._quotes_for_intents([order.intent for order in candidate_orders]),
+                order_plans=candidate_orders,
+                config=BatchRiskConfig(
+                    partial_allow=partial_allow,
+                    quote_max_age_seconds=policy.human_review_quote_max_age_seconds,
+                ),
+                guardrail_state=self._guardrail_state(policy=policy, strategy_id="order_planner_stub"),
+                seen_idempotency_keys=self._seen_idempotency_keys(),
+            )
+            if not decision.passed:
+                self.audit.emit(
+                    user_id=policy.user_id,
+                    entity_type="portfolio_plan",
+                    entity_id=portfolio_plan.plan_id,
+                    action="batch_risk_rejected",
+                    after_state=decision,
+                    source="batch_risk_gate",
+                )
+                return []
+            accepted_order_ids = set(decision.accepted_order_plan_ids)
+            if decision.mode == "partial_batch":
+                self.audit.emit(
+                    user_id=policy.user_id,
+                    entity_type="portfolio_plan",
+                    entity_id=portfolio_plan.plan_id,
+                    action="batch_risk_partial_allowed",
+                    after_state=decision,
+                    source="batch_risk_gate",
+                )
+
+        created: list[OrderPlan] = []
+        for order_plan in candidate_orders:
+            if order_plan.order_plan_id not in accepted_order_ids:
+                continue
             self.repositories.order_plans.add(order_plan)
             self.audit.emit(
                 user_id=policy.user_id,
@@ -280,7 +325,7 @@ class HarnessService:
                 source="order_planner_stub",
             )
             if run_risk:
-                self.apply_risk_check(order_plan.order_plan_id, snapshot=snapshot)
+                self.apply_risk_check(order_plan.order_plan_id, snapshot=portfolio_snapshot)
                 order_plan = self.repositories.order_plans.require(order_plan.order_plan_id)
                 if propose_passed and order_plan.status == OrderStatus.risk_checked:
                     transition_order_plan(
@@ -294,7 +339,16 @@ class HarnessService:
             created.append(self.repositories.order_plans.require(order_plan.order_plan_id))
         return created
 
-    def _seen_idempotency_keys(self, *, exclude_order_plan_id: str | None = None, submitted_only: bool = False) -> set[str]:
+    def _seen_idempotency_keys(
+        self,
+        *,
+        exclude_order_plan_id: str | None = None,
+        exclude_order_plan_ids: set[str] | None = None,
+        submitted_only: bool = False,
+    ) -> set[str]:
+        excluded = set(exclude_order_plan_ids or set())
+        if exclude_order_plan_id is not None:
+            excluded.add(exclude_order_plan_id)
         submitted_states = {
             OrderStatus.submitted,
             OrderStatus.accepted,
@@ -303,7 +357,7 @@ class HarnessService:
         }
         keys: set[str] = set()
         for order in self.repositories.order_plans.list():
-            if order.order_plan_id == exclude_order_plan_id:
+            if order.order_plan_id in excluded:
                 continue
             if submitted_only and order.status not in submitted_states:
                 continue
@@ -316,7 +370,11 @@ class HarnessService:
         policy: UserPolicy,
         strategy_id: str,
         exclude_order_plan_id: str | None = None,
+        exclude_order_plan_ids: set[str] | None = None,
     ) -> GuardrailState:
+        excluded = set(exclude_order_plan_ids or set())
+        if exclude_order_plan_id is not None:
+            excluded.add(exclude_order_plan_id)
         submitted_states = {
             OrderStatus.submitted,
             OrderStatus.accepted,
@@ -333,12 +391,12 @@ class HarnessService:
         submitted_orders = [
             order
             for order in self.repositories.order_plans.list()
-            if order.policy_id == policy.policy_id and order.status in submitted_states and order.order_plan_id != exclude_order_plan_id
+            if order.policy_id == policy.policy_id and order.status in submitted_states and order.order_plan_id not in excluded
         ]
         unfilled_order_keys = [
             f"{order.explanation.strategy_id if order.explanation else strategy_id}:{order.intent.symbol}:{order.intent.side}"
             for order in self.repositories.order_plans.list()
-            if order.policy_id == policy.policy_id and order.status in unfilled_states and order.order_plan_id != exclude_order_plan_id
+            if order.policy_id == policy.policy_id and order.status in unfilled_states and order.order_plan_id not in excluded
         ]
         return GuardrailState(
             daily_order_count=len(submitted_orders),
@@ -357,11 +415,19 @@ class HarnessService:
         strategy = self.load_strategy()
         return strategy
 
+    def _quotes_for_intents(self, intents: list[OrderIntent]) -> dict[str, float]:
+        return {
+            intent.symbol: float(intent.limit_price)
+            for intent in intents
+            if intent.limit_price is not None
+        }
+
     def generate_order_proposals(
         self,
         *,
         portfolio_plan_id: str,
         snapshot: PortfolioSnapshot | None = None,
+        partial_allow: bool = False,
     ) -> list[OrderPlan]:
         portfolio_plan = self.repositories.portfolio_plans.require(portfolio_plan_id)
         policy = self.repositories.policies.require(portfolio_plan.policy_id)
@@ -398,9 +464,8 @@ class HarnessService:
             )
             return []
 
+        candidate_records: list[tuple[OrderPlan, Signal | None, str, str]] = []
         for intent in ordered_intents:
-            if len(created) >= policy.max_daily_orders:
-                break
             signal = signals_by_symbol.get(intent.symbol)
             strategy_id = signal.strategy_id if signal else strategy.strategy_id
             strategy_version = signal.recipe_version if signal else strategy.version
@@ -432,6 +497,62 @@ class HarnessService:
                 auto_order_reference_price=intent.limit_price,
                 expires_at=now + timedelta(minutes=policy.order_expiry_minutes),
             )
+            candidate_records.append((order_plan, signal, strategy_id, strategy_version))
+
+        if not candidate_records:
+            return []
+
+        batch_decision = run_batch_risk_gate(
+            policy=policy,
+            portfolio_plan=portfolio_plan,
+            snapshot=portfolio_snapshot,
+            quotes=self._quotes_for_intents([record[0].intent for record in candidate_records]),
+            order_plans=[record[0] for record in candidate_records],
+            config=BatchRiskConfig(
+                partial_allow=partial_allow,
+                quote_max_age_seconds=policy.human_review_quote_max_age_seconds,
+            ),
+            guardrail_state=self._guardrail_state(policy=policy, strategy_id=strategy.strategy_id),
+            seen_idempotency_keys=self._seen_idempotency_keys(),
+            now=now,
+        )
+        if not batch_decision.passed:
+            self.audit.emit(
+                user_id=policy.user_id,
+                entity_type="portfolio_plan",
+                entity_id=portfolio_plan.plan_id,
+                action="batch_risk_rejected",
+                after_state=batch_decision,
+                source="batch_risk_gate",
+            )
+            return []
+        if batch_decision.mode == "partial_batch":
+            self.audit.emit(
+                user_id=policy.user_id,
+                entity_type="portfolio_plan",
+                entity_id=portfolio_plan.plan_id,
+                action="batch_risk_partial_allowed",
+                after_state=batch_decision,
+                source="batch_risk_gate",
+            )
+
+        accepted_order_ids = set(batch_decision.accepted_order_plan_ids)
+        for order_plan, signal, strategy_id, strategy_version in candidate_records:
+            if order_plan.order_plan_id not in accepted_order_ids:
+                self.audit.emit(
+                    user_id=policy.user_id,
+                    entity_type="order_plan",
+                    entity_id=order_plan.order_plan_id,
+                    action="proposal_blocked",
+                    after_state={
+                        "reason": "batch_risk_rejected",
+                        "batch_reasons": batch_decision.rejected_reasons.get(order_plan.order_plan_id, []),
+                    },
+                    source="batch_risk_gate",
+                )
+                continue
+
+            intent = order_plan.intent
             state = self._guardrail_state(policy=policy, strategy_id=strategy_id, exclude_order_plan_id=order_plan.order_plan_id)
             risk_check = run_risk_check(
                 policy=policy,
@@ -680,6 +801,38 @@ class HarnessService:
             return MockBroker()
         raise RuntimeError("live broker mode is disabled in the pre-harness")
 
+    def _orders_for_submit_batch(self, order_plan: OrderPlan) -> list[OrderPlan]:
+        batch_statuses = {
+            OrderStatus.proposed,
+            OrderStatus.user_approved,
+            OrderStatus.submitted,
+            OrderStatus.accepted,
+            OrderStatus.partially_filled,
+            OrderStatus.filled,
+        }
+        batch: list[OrderPlan] = []
+        current_seen = False
+        for existing in self.repositories.order_plans.list():
+            if existing.policy_id != order_plan.policy_id or existing.status not in batch_statuses:
+                continue
+            if existing.order_plan_id == order_plan.order_plan_id:
+                batch.append(order_plan)
+                current_seen = True
+            else:
+                batch.append(existing)
+        if not current_seen:
+            batch.append(order_plan)
+        return batch
+
+    def _portfolio_plan_for_order_batch(self, *, policy: UserPolicy, order_plans: list[OrderPlan]) -> PortfolioPlan:
+        return PortfolioPlan(
+            policy_id=policy.policy_id,
+            policy_version=policy.version,
+            target_weights={},
+            cash_target_weight=0.0,
+            order_intents=[order.intent for order in order_plans],
+        )
+
     def submit_order_plan(self, order_plan_id: str) -> tuple[OrderPlan, BrokerOrder, list[Fill]]:
         order_plan = self.repositories.order_plans.require(order_plan_id)
         policy = self.repositories.policies.require(order_plan.policy_id)
@@ -723,6 +876,40 @@ class HarnessService:
             raise RiskCheckRequired(f"fresh risk check failed: {fresh_risk.failed_checks}")
         order_plan.risk_check_id = fresh_risk.risk_check_id
         order_plan.risk_check_expires_at = fresh_risk.expires_at
+
+        batch_orders = self._orders_for_submit_batch(order_plan)
+        batch_order_ids = {order.order_plan_id for order in batch_orders}
+        batch_decision = run_batch_risk_gate(
+            policy=policy,
+            portfolio_plan=self._portfolio_plan_for_order_batch(policy=policy, order_plans=batch_orders),
+            snapshot=fixture_portfolio_snapshot(),
+            quotes=self._quotes_for_intents([order.intent for order in batch_orders]),
+            order_plans=batch_orders,
+            config=BatchRiskConfig(quote_max_age_seconds=policy.stale_quote_max_age_seconds),
+            guardrail_state=self._guardrail_state(
+                policy=policy,
+                strategy_id=strategy_id,
+                exclude_order_plan_ids=batch_order_ids,
+            ),
+            seen_idempotency_keys=self._seen_idempotency_keys(
+                exclude_order_plan_ids=batch_order_ids,
+                submitted_only=True,
+            ),
+        )
+        if not batch_decision.passed or order_plan.order_plan_id not in set(batch_decision.accepted_order_plan_ids):
+            before_blocked = order_plan.model_copy(deep=True)
+            order_plan.blocked_reason = "batch_risk_rejected"
+            self.repositories.order_plans.update(order_plan)
+            self.audit.emit(
+                user_id=policy.user_id,
+                entity_type="order_plan",
+                entity_id=order_plan.order_plan_id,
+                action="batch_risk_rejected",
+                before_state=before_blocked,
+                after_state=batch_decision,
+                source="execution_service",
+            )
+            raise RiskCheckRequired(f"batch risk check failed: {batch_decision.failed_checks}")
 
         broker = self._broker_for_policy(policy)
         transition_order_plan(

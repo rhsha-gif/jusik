@@ -14,6 +14,7 @@ router = APIRouter()
 
 class OrderPlanRequest(BaseModel):
     portfolio_plan_id: str | None = None
+    partial_allow: bool = False
 
 
 class RejectOrderRequest(BaseModel):
@@ -35,7 +36,10 @@ def create_order_plans(
         resource="portfolio plan",
         next_step="POST /api/portfolio/plan",
     ).plan_id
-    return service.create_order_plans(portfolio_plan_id=portfolio_plan_id)
+    return service.create_order_plans(
+        portfolio_plan_id=portfolio_plan_id,
+        partial_allow=request.partial_allow,
+    )
 
 
 @router.post("/orders/generate-proposals")
@@ -48,7 +52,10 @@ def generate_order_proposals(
         resource="portfolio plan",
         next_step="POST /api/portfolio/plan",
     ).plan_id
-    return service.generate_order_proposals(portfolio_plan_id=portfolio_plan_id)
+    return service.generate_order_proposals(
+        portfolio_plan_id=portfolio_plan_id,
+        partial_allow=request.partial_allow,
+    )
 
 
 @router.get("/orders/proposed")

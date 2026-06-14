@@ -857,6 +857,11 @@ export interface components {
         OrderPlanRequest: {
             /** Portfolio Plan Id */
             portfolio_plan_id?: string | null;
+            /**
+             * Partial Allow
+             * @default false
+             */
+            partial_allow: boolean;
         };
         /**
          * OrderStatus

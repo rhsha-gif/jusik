@@ -39,6 +39,8 @@ AUDIT_EVENT_ACTIONS = {
     "order_proposed",
     "proposal_created",
     "proposal_blocked",
+    "batch_risk_partial_allowed",
+    "batch_risk_rejected",
     "proposal_approved",
     "proposal_rejected",
     "proposal_modified",

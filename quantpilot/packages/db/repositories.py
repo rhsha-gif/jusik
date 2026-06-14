@@ -13,6 +13,7 @@ from quantpilot.packages.core.schemas import (
     StrategyRecipe,
     UserPolicy,
 )
+from quantpilot.packages.core.ledger.store import InMemoryLedgerStore
 
 
 T = TypeVar("T")
@@ -80,6 +81,7 @@ class RepositoryRegistry:
         self.order_plans = InMemoryRepository[OrderPlan](lambda item: item.order_plan_id)
         self.broker_orders = InMemoryRepository[BrokerOrder](lambda item: item.broker_order_id)
         self.fills = InMemoryRepository[Fill](lambda item: item.fill_id)
+        self.reconciliation_ledger = InMemoryLedgerStore()
         self.audit_logs = InMemoryRepository[AuditLogEvent](lambda item: item.event_id)
         self.operation_reports = InMemoryRepository[OperationReport](lambda item: item.report_id)
 
@@ -91,5 +93,6 @@ class RepositoryRegistry:
         self.order_plans.clear()
         self.broker_orders.clear()
         self.fills.clear()
+        self.reconciliation_ledger.clear()
         self.audit_logs.clear()
         self.operation_reports.clear()

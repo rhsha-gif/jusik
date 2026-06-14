@@ -16,6 +16,7 @@ from quantpilot.packages.core.execution.order_context import (
 )
 from quantpilot.packages.core.policy.parser import DEFAULT_POLICY_TEXT, parse_policy_text
 from quantpilot.packages.core.level12.service import Level12RunResult, Level12Service
+from quantpilot.packages.core.ledger.service import ReconciliationLedgerService
 from quantpilot.packages.core.portfolio.planner import (
     build_portfolio_plan,
     current_weight,
@@ -77,6 +78,7 @@ class HarnessService:
     ) -> None:
         self.repositories = repositories or RepositoryRegistry()
         self.audit = AuditRecorder(self.repositories.audit_logs)
+        self.ledger = ReconciliationLedgerService(self.repositories.reconciliation_ledger)
         self.autopilot_paused = False
         self.last_blocked_reason: str | None = None
         # Fixtures stay the default; local/historical providers are injected explicitly.
@@ -253,6 +255,11 @@ class HarnessService:
             if order_plan.order_plan_id not in accepted_order_ids:
                 continue
             self.repositories.order_plans.add(order_plan)
+            self.ledger.record_order_intent(
+                policy=policy,
+                order_plan=order_plan,
+                metadata={"portfolio_plan_id": portfolio_plan.plan_id, "source": "order_planner_stub"},
+            )
             self.audit.emit(
                 user_id=policy.user_id,
                 entity_type="order_plan",
@@ -544,6 +551,16 @@ class HarnessService:
                 now=now,
             )
             self.repositories.order_plans.add(order_plan)
+            self.ledger.record_order_intent(
+                policy=policy,
+                order_plan=order_plan,
+                metadata={
+                    "portfolio_plan_id": portfolio_plan.plan_id,
+                    "strategy_id": strategy_id,
+                    "strategy_version": strategy_version,
+                    "source": "level3_proposal_service",
+                },
+            )
             transition_order_plan(
                 order_plan=order_plan,
                 new_status=OrderStatus.risk_checked,
@@ -626,6 +643,22 @@ class HarnessService:
             source="user_rejection",
             action="proposal_rejected",
         )
+        self.ledger.record_reject(policy=policy, order_plan=order_plan, reason=reason)
+        return self.repositories.order_plans.update(order_plan)
+
+    def cancel_order_plan(self, order_plan_id: str, *, reason: str = "user_cancelled") -> OrderPlan:
+        order_plan = self.repositories.order_plans.require(order_plan_id)
+        policy = self.repositories.policies.require(order_plan.policy_id)
+        order_plan.blocked_reason = reason
+        transition_order_plan(
+            order_plan=order_plan,
+            new_status=OrderStatus.cancelled,
+            audit=self.audit,
+            user_id=policy.user_id,
+            source="user_cancel",
+            action="order_cancelled",
+        )
+        self.ledger.record_cancel(policy=policy, order_plan=order_plan, reason=reason)
         return self.repositories.order_plans.update(order_plan)
 
     def modify_order_plan(self, order_plan_id: str, *, quantity: float, limit_price: float | None) -> OrderPlan:
@@ -711,6 +744,11 @@ class HarnessService:
         )
         self.repositories.order_plans.update(original)
         self.repositories.order_plans.add(new_order)
+        self.ledger.record_order_intent(
+            policy=policy,
+            order_plan=new_order,
+            metadata={"replaces_order_plan_id": original.order_plan_id, "source": "user_modification"},
+        )
         transition_order_plan(
             order_plan=new_order,
             new_status=OrderStatus.risk_checked,
@@ -820,6 +858,7 @@ class HarnessService:
         )
         broker_order, fills = broker.submit_order(order_plan)
         self.repositories.broker_orders.add(broker_order)
+        self.ledger.record_submitted(policy=policy, order_plan=order_plan, broker_order=broker_order)
         transition_order_plan(
             order_plan=order_plan,
             new_status=OrderStatus.accepted,
@@ -827,7 +866,7 @@ class HarnessService:
             user_id=policy.user_id,
             source="broker_adapter",
         )
-        for fill in fills:
+        for index, fill in enumerate(fills):
             self.repositories.fills.add(fill)
             self.audit.emit(
                 user_id=policy.user_id,
@@ -836,6 +875,13 @@ class HarnessService:
                 action="fill_recorded",
                 after_state=fill,
                 source="broker_adapter",
+            )
+            self.ledger.record_fill(
+                policy=policy,
+                order_plan=order_plan,
+                broker_order=broker_order,
+                fill=fill,
+                partial=len(fills) > 1 and index < len(fills) - 1,
             )
         if len(fills) > 1:
             transition_order_plan(
@@ -852,6 +898,8 @@ class HarnessService:
             user_id=policy.user_id,
             source="broker_adapter",
         )
+        if fills:
+            self.ledger.record_position_update(policy=policy, order_plan=order_plan, broker_order=broker_order, fills=fills)
         self.repositories.order_plans.update(order_plan)
         return order_plan, broker_order, fills
 

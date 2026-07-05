@@ -1549,6 +1549,8 @@ class HarnessService:
         self, strategy_id: str, *, execution_level: str
     ) -> tuple[bool, str]:
         """Fail-closed gate: is there an active approval covering this level?"""
+        if any(policy.kill_switch_engaged for policy in self.repositories.policies.list()):
+            return False, "kill_switch_engaged"
         covered_by_level = {
             "level_3": {"level_3"},
             "level_4": {"level_3", "level_4"},
@@ -1870,6 +1872,15 @@ class HarnessService:
             source="autopilot_service",
         )
         self.repositories.policies.update(policy)
+        # Strategy-level approvals are armed authority; the kill switch must
+        # revoke them too (design doc §4.5). They stay revoked after release —
+        # re-arming requires a fresh approval ticket.
+        for ticket in self.repositories.strategy_approval_tickets.list():
+            if ticket.status in {
+                StrategyApprovalTicketStatus.pending,
+                StrategyApprovalTicketStatus.approved,
+            }:
+                self.revoke_strategy_ticket(ticket.ticket_id, reason="kill_switch_engaged")
         return self.autopilot_status(policy_id=policy_id)
 
     def release_kill_switch(self, *, policy_id: str, confirmation: str) -> dict[str, object]:

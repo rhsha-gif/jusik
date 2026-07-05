@@ -94,6 +94,26 @@ def test_auto_feed_is_empty_without_fills() -> None:
     assert service.run_strategy_performance_feed() == []
 
 
+def test_kill_switch_revokes_armed_strategies_and_closes_gate() -> None:
+    service = HarnessService()
+    ticket = _approved_ticket(service)
+    policy = service.parse_policy("fixture")
+    assert service.strategy_activation_allowed("strat_alpha", execution_level="level_3")[0] is True
+
+    service.engage_kill_switch(policy_id=policy.policy_id, reason="test")
+
+    allowed, detail = service.strategy_activation_allowed("strat_alpha", execution_level="level_3")
+    assert allowed is False
+    assert detail == "kill_switch_engaged"
+    stored = service.repositories.strategy_approval_tickets.require(ticket.ticket_id)
+    assert stored.status == StrategyApprovalTicketStatus.revoked
+    assert stored.revoked_reason == "kill_switch_engaged"
+
+    # Releasing the switch does NOT re-arm strategies: a fresh approval is required.
+    service.release_kill_switch(policy_id=policy.policy_id, confirmation="release kill switch")
+    assert service.strategy_activation_allowed("strat_alpha", execution_level="level_3")[0] is False
+
+
 def test_no_performance_record_keeps_activation_open() -> None:
     service = HarnessService()
     ticket = _approved_ticket(service)

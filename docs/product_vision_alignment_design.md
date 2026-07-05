@@ -222,6 +222,12 @@ class CapitalAllocationPolicy(BaseModel):
 
 ### 4.5 통지 + 킬스위치
 
+> **킬스위치 연결됨 (2026-07-06)**: 기존 정책 단위 킬스위치(`engage_kill_switch`)가
+> 이제 무장된 전략 티켓 전부를 `kill_switch_engaged` 사유로 revoke하고,
+> `strategy_activation_allowed`는 킬스위치 중 무조건 차단. 해제(명시적 확인 문구
+> 필요) 후에도 전략은 재승인 전까지 비활성 — 원버튼 정지 요건 충족.
+> 통지 인박스(`OperatorNotification`)는 미구현.
+
 ```python
 class OperatorNotification(BaseModel):
     notification_id: str

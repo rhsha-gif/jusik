@@ -77,23 +77,27 @@ Level 1~5 자율화 전 과정을 먼저 완성하고, 사람 승인 게이트�
   콘솔 에러 0). vitest 20 passed, build OK. 참고: 8010의 구버전 API 서버는
   새 엔드포인트가 없어 404 — 재시작 필요 (검증은 8011 신규 서버로 수행)
 
+- **DriftMonitor + 킬스위치 + 통지 인박스 (설계 §4.2·§4.5 완성)** — ① 실현 MDD >
+  백테스트 MDD×1.5 시 티켓 자동 만료 (1.5배는 사람 확정 대기), 성과 자동 피드는
+  Fill→OrderPlan.explanation 귀속으로 체결 시퀀스 PnL 적산
+  (`/api/execution/strategy-performance/refresh`) ② 킬스위치 발동 시 무장 전략
+  전부 revoke + 게이트 차단, 해제해도 재승인 필요 ③ 안전 이벤트가
+  `OperatorNotification` 인박스에 자동 적재 (`GET /api/notifications`).
+  검증: pytest 317개 중 316 passed·1 skipped (junit), smoke OK, vitest 20, build OK
+
 ## 다음 단계 후보 (우선순위 제안)
 
 > 제품 구상(대화형 전략 수립 → 전략 단위 승인 → 자동 운용)과의 정렬 설계 및
 > 전체 로드맵: `docs/product_vision_alignment_design.md`
 
 1. 승인 기준(acceptance thresholds) 확정 — 표본이 생겼으므로 이제 논의 가능 (사람 입력)
-2. ~~DriftMonitor~~ ✅ 평가기+자동 피드 완료 (실현 MDD > 백테스트 MDD×1.5 시 티켓
-   자동 만료; 피드는 Fill→OrderPlan.explanation 귀속으로 체결 시퀀스 PnL 적산,
-   `/api/execution/strategy-performance/refresh`). 1.5배 값은 사람 확정 대기.
-   개선 여지: 일별 종가 재평가, 수수료 반영
-3. 자본 배분 정책 (설계 §4.4 CapitalAllocationPolicy) 또는 통지 인박스+킬스위치
-   (설계 §4.5; `GuardrailState.kill_switch_engaged`가 이미 존재 — 전략 티켓
-   일괄 revoke와 연결 필요)
-4. 라우터 분리 부채: strategy-studio·strategy-tickets 엔드포인트가 execution.py에 동거
-   (main.py에 타 세션 미커밋 CORS 변경 있음 — 커밋 전 주의)
-4. KIS 앱키 확보 시: 토큰 발급 헬퍼 구현 → `RUN_KIS_MANUAL_INTEGRATION=1` 수동 통합 테스트
-5. 소소한 부채: `MARKET_ORDERS_ENABLED` 판독 중복 제거, `.env.example` 동기화 코드 가드
+2. 자본 배분 정책 (설계 §4.4 CapitalAllocationPolicy) — 다중 전략 승인 시 전략별
+   예산·충돌 규칙. 티켓의 `capital_budget_pct`는 이미 저장됨, 집행 게이트가 없음
+3. 프론트 후속: 통지 인박스 UI(API 준비됨), DriftMonitor 개선(일별 종가 재평가·수수료 반영)
+4. 라우터 분리 부채: strategy-studio·strategy-tickets·notifications 엔드포인트가
+   execution.py에 동거 (main.py에 타 세션 미커밋 CORS 변경 있음 — 커밋 전 주의)
+5. KIS 앱키 확보 시: 토큰 발급 헬퍼 구현 → `RUN_KIS_MANUAL_INTEGRATION=1` 수동 통합 테스트
+6. 소소한 부채: `MARKET_ORDERS_ENABLED` 판독 중복 제거, `.env.example` 동기화 코드 가드
 
 ## 사람 입력 대기
 

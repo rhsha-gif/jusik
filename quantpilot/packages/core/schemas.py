@@ -516,6 +516,24 @@ class StrategyDraft(HarnessModel):
     validated_at: datetime | None = None
 
 
+class StrategyPerformanceRecord(HarnessModel):
+    """Point-in-time realized performance snapshot for an armed strategy.
+
+    Fed from mock-execution fills or operator runs; the DriftMonitor (design
+    doc §4.2) compares these realized figures against the backtest evidence
+    attached to the strategy's approval ticket to fire reapproval triggers.
+    """
+
+    record_id: str = Field(default_factory=lambda: new_id("sperf"))
+    strategy_id: str
+    strategy_version: str
+    as_of: datetime = Field(default_factory=utc_now)
+    realized_max_drawdown: float = Field(ge=0)
+    realized_total_return: float
+    observation_days: int = Field(gt=0)
+    source: str = "mock_execution"
+
+
 class StrategyApprovalTicketStatus(str, Enum):
     pending = "pending"
     approved = "approved"

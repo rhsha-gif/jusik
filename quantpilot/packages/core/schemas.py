@@ -489,6 +489,33 @@ class TradeApprovalTicket(HarnessModel):
     live_trading_enabled: bool = False
 
 
+class StrategyDraftStatus(str, Enum):
+    drafted = "drafted"
+    validated = "validated"
+    validation_failed = "validation_failed"
+
+
+class StrategyDraft(HarnessModel):
+    """Strategy-studio draft (design doc §4.3): recipe + universe, no orders.
+
+    A draft is armed research material only; validation attaches backtest
+    evidence, and only then can a strategy approval ticket be created.
+    """
+
+    draft_id: str = Field(default_factory=lambda: new_id("sdrf"))
+    user_id: str = "fixture-user"
+    strategy_id: str
+    strategy_version: str
+    spec_hash: str
+    universe_symbols: list[str]
+    requested_sectors: list[str] = Field(default_factory=list)
+    rationale: str
+    status: StrategyDraftStatus = StrategyDraftStatus.drafted
+    backtest_report_id: str | None = None
+    created_at: datetime = Field(default_factory=utc_now)
+    validated_at: datetime | None = None
+
+
 class StrategyApprovalTicketStatus(str, Enum):
     pending = "pending"
     approved = "approved"

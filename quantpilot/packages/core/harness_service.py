@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import hashlib
 from datetime import timedelta
 
 from quantpilot.packages.brokers.mock_broker import MockBroker
@@ -40,6 +41,8 @@ from quantpilot.packages.core.schemas import (
     Signal,
     StrategyApprovalTicket,
     StrategyApprovalTicketStatus,
+    StrategyDraft,
+    StrategyDraftStatus,
     StrategyRecipe,
     TradeApprovalTicket,
     UserPolicy,
@@ -47,7 +50,10 @@ from quantpilot.packages.core.schemas import (
     new_id,
     utc_now,
 )
-from quantpilot.packages.core.backtest.schemas import BacktestResult
+from quantpilot.packages.core.backtest.costs import kis_retail_assumptions
+from quantpilot.packages.core.backtest.engine import run_backtest
+from quantpilot.packages.core.backtest.replay import replay_signals
+from quantpilot.packages.core.backtest.schemas import BacktestRequest, BacktestResult
 from quantpilot.packages.core.data.providers import (
     FixtureMarketDataProvider,
     FixtureSecurityProvider,
@@ -1416,6 +1422,106 @@ class HarnessService:
             if execution_level in covered_by_level.get(refreshed.requested_execution_level, set()):
                 return True, refreshed.ticket_id
         return False, "no_active_strategy_approval"
+
+    # --- strategy studio (product vision design doc §4.3) ---
+
+    def create_strategy_draft(
+        self,
+        *,
+        symbols: list[str] | None = None,
+        sectors: list[str] | None = None,
+        note: str = "",
+        user_id: str = "fixture-user",
+    ) -> StrategyDraft:
+        requested_symbols = {str(item).strip().upper() for item in (symbols or []) if str(item).strip()}
+        requested_sectors = {str(item).strip().lower() for item in (sectors or []) if str(item).strip()}
+        if not requested_symbols and not requested_sectors:
+            raise RuntimeError("at least one symbol or sector is required")
+
+        universe: list[str] = []
+        for row in self.security_provider.get_securities():
+            symbol = str(row.get("ticker") or row.get("symbol") or "").upper()
+            sector = str(row.get("sector") or "").lower()
+            if not symbol:
+                continue
+            if symbol in requested_symbols or sector in requested_sectors:
+                universe.append(symbol)
+        if not universe:
+            raise RuntimeError("no universe symbols match the requested symbols/sectors")
+
+        recipe = load_default_strategy()
+        spec_hash = hashlib.sha256(
+            "|".join([recipe.strategy_id, recipe.version, *sorted(universe)]).encode("utf-8")
+        ).hexdigest()[:16]
+        rationale = (
+            f"rule-based recipe {recipe.strategy_id} v{recipe.version} armed over "
+            f"{len(universe)} symbol(s); entries wait for the classifier's setup "
+            f"(arming principle - approval is not an immediate buy). {note}"
+        ).strip()
+        draft = StrategyDraft(
+            user_id=user_id,
+            strategy_id=recipe.strategy_id,
+            strategy_version=recipe.version,
+            spec_hash=spec_hash,
+            universe_symbols=sorted(set(universe)),
+            requested_sectors=sorted(requested_sectors),
+            rationale=rationale,
+        )
+        self.repositories.strategy_drafts.add(draft)
+        self.audit.emit(
+            user_id=draft.user_id,
+            entity_type="strategy_draft",
+            entity_id=draft.draft_id,
+            action="strategy_draft_created",
+            after_state=draft,
+            source="strategy_studio_service",
+        )
+        return draft
+
+    def validate_strategy_draft(self, draft_id: str) -> dict[str, object]:
+        draft = self.repositories.strategy_drafts.require(draft_id)
+        wanted = set(draft.universe_symbols)
+        history = [
+            dict(row, symbol=str(row.get("symbol") or row.get("ticker") or "").upper())
+            for row in self.market_data_provider.get_price_history()
+        ]
+        history = [row for row in history if row["symbol"] in wanted]
+        if not history:
+            raise RuntimeError("no price history covers the draft universe; check DATA_MODE/LOCAL_DATA_DIR")
+
+        signals = replay_signals(history, warmup_bars=20)
+        result = run_backtest(
+            BacktestRequest(
+                strategy_id=draft.strategy_id,
+                recipe_version=draft.strategy_version,
+                signals=signals,
+                assumptions=kis_retail_assumptions(),
+            ),
+            history,
+        )
+        self.record_backtest_result(result)
+        before = draft.model_copy(deep=True)
+        draft.status = StrategyDraftStatus.validated
+        draft.backtest_report_id = result.result_id
+        draft.validated_at = utc_now()
+        self.repositories.strategy_drafts.update(draft)
+        self.audit.emit(
+            user_id=draft.user_id,
+            entity_type="strategy_draft",
+            entity_id=draft.draft_id,
+            action="strategy_draft_validated",
+            before_state=before,
+            after_state=draft,
+            source="strategy_studio_service",
+        )
+        return {
+            "draft": draft,
+            "backtest_report_id": result.result_id,
+            "replayed_signals": len(signals),
+            "metrics": result.metrics,
+            "warnings": list(result.warnings),
+            "ticket_ready": True,
+        }
 
     def _broker_for_policy(self, policy: UserPolicy):
         if policy.broker == BrokerMode.paper:

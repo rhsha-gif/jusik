@@ -100,6 +100,8 @@ AUDIT_EVENT_ACTIONS = {
     "approval_ticket_submission_blocked",
     "approval_ticket_submitted",
     "backtest_result_recorded",
+    "strategy_draft_created",
+    "strategy_draft_validated",
     "strategy_ticket_created",
     "strategy_ticket_superseded",
     "strategy_ticket_approved",

@@ -633,6 +633,57 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/strategy-studio/draft": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Create Strategy Draft */
+        post: operations["create_strategy_draft_api_strategy_studio_draft_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/strategy-studio/drafts/{draft_id}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Get Strategy Draft */
+        get: operations["get_strategy_draft_api_strategy_studio_drafts__draft_id__get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/strategy-studio/drafts/{draft_id}/validate": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Validate Strategy Draft */
+        post: operations["validate_strategy_draft_api_strategy_studio_drafts__draft_id__validate_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/execution/strategy-tickets/activation-allowed": {
         parameters: {
             query?: never;
@@ -1368,6 +1419,68 @@ export interface components {
          * @enum {string}
          */
         StrategyApprovalTicketStatus: "pending" | "approved" | "rejected" | "expired" | "revoked" | "superseded";
+        /**
+         * StrategyDraft
+         * @description Strategy-studio draft (design doc §4.3): recipe + universe, no orders.
+         *
+         *     A draft is armed research material only; validation attaches backtest
+         *     evidence, and only then can a strategy approval ticket be created.
+         */
+        StrategyDraft: {
+            /** Draft Id */
+            draft_id?: string;
+            /**
+             * User Id
+             * @default fixture-user
+             */
+            user_id: string;
+            /** Strategy Id */
+            strategy_id: string;
+            /** Strategy Version */
+            strategy_version: string;
+            /** Spec Hash */
+            spec_hash: string;
+            /** Universe Symbols */
+            universe_symbols: string[];
+            /** Requested Sectors */
+            requested_sectors?: string[];
+            /** Rationale */
+            rationale: string;
+            /** @default drafted */
+            status: components["schemas"]["StrategyDraftStatus"];
+            /** Backtest Report Id */
+            backtest_report_id?: string | null;
+            /**
+             * Created At
+             * Format: date-time
+             */
+            created_at?: string;
+            /** Validated At */
+            validated_at?: string | null;
+        };
+        /** StrategyDraftRequest */
+        StrategyDraftRequest: {
+            /**
+             * Symbols
+             * @default []
+             */
+            symbols: string[];
+            /**
+             * Sectors
+             * @default []
+             */
+            sectors: string[];
+            /**
+             * Note
+             * @default
+             */
+            note: string;
+        };
+        /**
+         * StrategyDraftStatus
+         * @enum {string}
+         */
+        StrategyDraftStatus: "drafted" | "validated" | "validation_failed";
         /** StrategySelectionDecision */
         StrategySelectionDecision: {
             /** Selected Strategy Id */
@@ -2823,6 +2936,103 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["StrategyApprovalTicket"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    create_strategy_draft_api_strategy_studio_draft_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["StrategyDraftRequest"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["StrategyDraft"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    get_strategy_draft_api_strategy_studio_drafts__draft_id__get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                draft_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["StrategyDraft"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    validate_strategy_draft_api_strategy_studio_drafts__draft_id__validate_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                draft_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        [key: string]: unknown;
+                    };
                 };
             };
             /** @description Validation Error */

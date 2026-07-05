@@ -1417,6 +1417,124 @@
         }
       }
     },
+    "/api/strategy-studio/draft": {
+      "post": {
+        "summary": "Create Strategy Draft",
+        "operationId": "create_strategy_draft_api_strategy_studio_draft_post",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/StrategyDraftRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/StrategyDraft"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/strategy-studio/drafts/{draft_id}": {
+      "get": {
+        "summary": "Get Strategy Draft",
+        "operationId": "get_strategy_draft_api_strategy_studio_drafts__draft_id__get",
+        "parameters": [
+          {
+            "name": "draft_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Draft Id"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/StrategyDraft"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/strategy-studio/drafts/{draft_id}/validate": {
+      "post": {
+        "summary": "Validate Strategy Draft",
+        "operationId": "validate_strategy_draft_api_strategy_studio_drafts__draft_id__validate_post",
+        "parameters": [
+          {
+            "name": "draft_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Draft Id"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "additionalProperties": true,
+                  "title": "Response Validate Strategy Draft Api Strategy Studio Drafts  Draft Id  Validate Post"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
     "/api/execution/strategy-tickets/activation-allowed": {
       "get": {
         "summary": "Strategy Activation Allowed",
@@ -3208,6 +3326,128 @@
           "superseded"
         ],
         "title": "StrategyApprovalTicketStatus"
+      },
+      "StrategyDraft": {
+        "properties": {
+          "draft_id": {
+            "type": "string",
+            "title": "Draft Id"
+          },
+          "user_id": {
+            "type": "string",
+            "title": "User Id",
+            "default": "fixture-user"
+          },
+          "strategy_id": {
+            "type": "string",
+            "title": "Strategy Id"
+          },
+          "strategy_version": {
+            "type": "string",
+            "title": "Strategy Version"
+          },
+          "spec_hash": {
+            "type": "string",
+            "title": "Spec Hash"
+          },
+          "universe_symbols": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array",
+            "title": "Universe Symbols"
+          },
+          "requested_sectors": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array",
+            "title": "Requested Sectors"
+          },
+          "rationale": {
+            "type": "string",
+            "title": "Rationale"
+          },
+          "status": {
+            "$ref": "#/components/schemas/StrategyDraftStatus",
+            "default": "drafted"
+          },
+          "backtest_report_id": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Backtest Report Id"
+          },
+          "created_at": {
+            "type": "string",
+            "format": "date-time",
+            "title": "Created At"
+          },
+          "validated_at": {
+            "anyOf": [
+              {
+                "type": "string",
+                "format": "date-time"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Validated At"
+          }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "required": [
+          "strategy_id",
+          "strategy_version",
+          "spec_hash",
+          "universe_symbols",
+          "rationale"
+        ],
+        "title": "StrategyDraft",
+        "description": "Strategy-studio draft (design doc §4.3): recipe + universe, no orders.\n\nA draft is armed research material only; validation attaches backtest\nevidence, and only then can a strategy approval ticket be created."
+      },
+      "StrategyDraftRequest": {
+        "properties": {
+          "symbols": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array",
+            "title": "Symbols",
+            "default": []
+          },
+          "sectors": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array",
+            "title": "Sectors",
+            "default": []
+          },
+          "note": {
+            "type": "string",
+            "title": "Note",
+            "default": ""
+          }
+        },
+        "type": "object",
+        "title": "StrategyDraftRequest"
+      },
+      "StrategyDraftStatus": {
+        "type": "string",
+        "enum": [
+          "drafted",
+          "validated",
+          "validation_failed"
+        ],
+        "title": "StrategyDraftStatus"
       },
       "StrategySelectionDecision": {
         "properties": {

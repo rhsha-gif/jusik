@@ -12,6 +12,7 @@ from quantpilot.packages.core.schemas import (
     PortfolioPlan,
     Signal,
     StrategyApprovalTicket,
+    StrategyDraft,
     StrategyRecipe,
     TradeApprovalTicket,
     UserPolicy,
@@ -88,6 +89,7 @@ class RepositoryRegistry:
         self.approval_tickets = InMemoryRepository[TradeApprovalTicket](lambda item: item.ticket_id)
         self.strategy_approval_tickets = InMemoryRepository[StrategyApprovalTicket](lambda item: item.ticket_id)
         self.backtest_results = InMemoryRepository[BacktestResult](lambda item: item.result_id)
+        self.strategy_drafts = InMemoryRepository[StrategyDraft](lambda item: item.draft_id)
 
     def clear(self) -> None:
         self.policies.clear()
@@ -102,3 +104,4 @@ class RepositoryRegistry:
         self.approval_tickets.clear()
         self.strategy_approval_tickets.clear()
         self.backtest_results.clear()
+        self.strategy_drafts.clear()

@@ -171,6 +171,13 @@ class StrategyApprovalTicket(BaseModel):
 
 ### 4.3 대화형 전략 수립 플로우 (구상 ②의 API/UI)
 
+> **백엔드 구현됨 (2026-07-06)**: `StrategyDraft` 스키마 + `create_strategy_draft`
+> (fail-closed 유니버스 매칭) + `validate_strategy_draft`(리플레이 백테스트,
+> KIS 비용 기준, 증빙 자동 저장) + `/api/strategy-studio/draft`,
+> `/drafts/{id}`, `/drafts/{id}/validate`. 초안→검증→티켓→승인→게이트
+> 전체 경로가 테스트로 검증됨. 남은 것: 프론트 페이지, validate 통과 기준
+> 연동(§7 사람 확정 대기), LLM 기반 레시피 다변화(현재는 기본 룰 레시피 고정).
+
 ```text
 POST /api/strategy-studio/draft        # 입력: 관심 섹터/종목/제약 → recipe 초안 생성
 POST /api/strategy-studio/validate     # 초안 → run_local_backtest 실행 → 검증 리포트

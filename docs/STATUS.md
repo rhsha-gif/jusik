@@ -63,6 +63,14 @@ Level 1~5 자율화 전 과정을 먼저 완성하고, 사람 승인 게이트�
   304 passed·1 skipped (junit), run_smoke OK, vitest 20 passed, build OK,
   openapi 타입 재생성. 원칙 추가: 전략 승인 = arming (즉시 매수 아님, §3.0)
 
+- **strategy-studio 백엔드 구현 (설계 §4.3)** — 섹터/종목 입력 → `StrategyDraft`
+  생성(fail-closed 유니버스 매칭) → 검증(현 데이터 모드에서 no-lookahead 리플레이
+  백테스트, KIS 비용 기준) → 증빙 저장 → 티켓 생성 가능. 구상의 전체 경로
+  (선택→초안→검증→승인→활성화 게이트)가 테스트로 엔드투엔드 검증됨.
+  `/api/strategy-studio/*` 3개 엔드포인트. 검증: pytest 309개 중 308 passed·
+  1 skipped (junit), run_smoke OK, vitest 20 passed, build OK. 남은 것:
+  studio 프론트 페이지(§4.3 UI), 라우터 파일 분리(현재 execution.py에 동거)
+
 ## 다음 단계 후보 (우선순위 제안)
 
 > 제품 구상(대화형 전략 수립 → 전략 단위 승인 → 자동 운용)과의 정렬 설계 및

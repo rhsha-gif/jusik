@@ -2,6 +2,7 @@ import { NavLink, Outlet, useLocation } from "react-router-dom";
 import { AnimatePresence, motion, useReducedMotion } from "framer-motion";
 import {
   Activity,
+  BellRing,
   Bot,
   FlaskConical,
   Gauge,
@@ -13,7 +14,7 @@ import {
 } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { getApiBase } from "@/lib/api";
-import { useHealth } from "@/lib/queries";
+import { useHealth, usePendingApprovalTickets } from "@/lib/queries";
 import { HealthPill } from "./health-pill";
 import { SafetyBanner } from "./safety-banner";
 import { ThemeToggle } from "./theme-toggle";
@@ -24,6 +25,7 @@ const NAV_ITEMS = [
   { to: "/policies", label: "정책 스튜디오", icon: ListChecks },
   { to: "/signals", label: "신호 보드", icon: Radar },
   { to: "/run", label: "Level 1-2 실행", icon: Activity },
+  { to: "/execution", label: "승인 알림", icon: BellRing },
   { to: "/operator", label: "Level 5 운영자", icon: Bot },
   { to: "/jobs", label: "작업 & 로그", icon: ScrollText },
   { to: "/settings", label: "설정 & 안전", icon: Settings },
@@ -42,6 +44,43 @@ function Wordmark() {
         </p>
       </div>
     </div>
+  );
+}
+
+/**
+ * Global "trade timing detected" alarm. Pending approval tickets are created
+ * when the program judges it's time to trade in a real-trading data mode; this
+ * bell surfaces them from any page so the operator never misses an approval
+ * request. Clicking jumps to the Execution page to approve/reject.
+ */
+function ApprovalAlertBell() {
+  const pending = usePendingApprovalTickets();
+  const count = pending.data?.length ?? 0;
+  const active = count > 0;
+  return (
+    <NavLink
+      to="/execution"
+      aria-label={active ? `승인 대기 ${count}건 — 매매 승인 알림` : "매매 승인 알림"}
+      className={cn(
+        "relative flex size-9 items-center justify-center rounded-full border transition-colors",
+        active
+          ? "border-warn/50 bg-warn-soft text-warn"
+          : "border-hairline text-muted hover:text-ink",
+      )}
+    >
+      {active && (
+        <span
+          aria-hidden
+          className="absolute inset-0 animate-ping rounded-full border border-warn/40"
+        />
+      )}
+      <BellRing className="relative z-10 size-4.5" />
+      {active && (
+        <span className="absolute -right-1 -top-1 z-10 flex min-w-[18px] items-center justify-center rounded-full bg-warn px-1 text-[10.5px] font-semibold leading-none text-white">
+          {count > 99 ? "99+" : count}
+        </span>
+      )}
+    </NavLink>
   );
 }
 
@@ -151,6 +190,7 @@ export function AppShell() {
             ))}
           </nav>
           <div className="ml-auto flex shrink-0 items-center gap-3">
+            <ApprovalAlertBell />
             <HealthPill />
             <ThemeToggle />
           </div>

@@ -7,6 +7,7 @@ import { ResearchPage } from "@/pages/research";
 import { PoliciesPage } from "@/pages/policies";
 import { SignalsPage } from "@/pages/signals";
 import { RunPage } from "@/pages/run";
+import { ExecutionPage } from "@/pages/execution";
 import { OperatorPage } from "@/pages/operator";
 import { JobsPage } from "@/pages/jobs";
 import { SettingsPage } from "@/pages/settings";
@@ -55,6 +56,7 @@ const router = createBrowserRouter([
       { path: "policies", element: <PoliciesPage /> },
       { path: "signals", element: <SignalsPage /> },
       { path: "run", element: <RunPage /> },
+      { path: "execution", element: <ExecutionPage /> },
       { path: "operator", element: <OperatorPage /> },
       { path: "jobs", element: <JobsPage /> },
       { path: "settings", element: <SettingsPage /> },

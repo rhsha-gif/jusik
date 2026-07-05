@@ -199,6 +199,46 @@
         }
       }
     },
+    "/api/level-1-2/mock-execute": {
+      "post": {
+        "summary": "Run Level 1 2 Mock Execute",
+        "operationId": "run_level_1_2_mock_execute_api_level_1_2_mock_execute_post",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/Level12MockExecuteRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "additionalProperties": true,
+                  "type": "object",
+                  "title": "Response Run Level 1 2 Mock Execute Api Level 1 2 Mock Execute Post"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
     "/api/research/universe": {
       "post": {
         "summary": "Research Universe",
@@ -1006,6 +1046,170 @@
         }
       }
     },
+    "/api/execution/approval-tickets/generate": {
+      "post": {
+        "summary": "Generate Approval Tickets",
+        "operationId": "generate_approval_tickets_api_execution_approval_tickets_generate_post",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ApprovalTicketGenerateRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "items": {
+                    "$ref": "#/components/schemas/TradeApprovalTicket"
+                  },
+                  "type": "array",
+                  "title": "Response Generate Approval Tickets Api Execution Approval Tickets Generate Post"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/execution/approval-tickets/pending": {
+      "get": {
+        "summary": "Pending Approval Tickets",
+        "operationId": "pending_approval_tickets_api_execution_approval_tickets_pending_get",
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "items": {
+                    "$ref": "#/components/schemas/TradeApprovalTicket"
+                  },
+                  "type": "array",
+                  "title": "Response Pending Approval Tickets Api Execution Approval Tickets Pending Get"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/execution/approval-tickets/{ticket_id}/approve-and-submit": {
+      "post": {
+        "summary": "Approve And Submit Approval Ticket",
+        "operationId": "approve_and_submit_approval_ticket_api_execution_approval_tickets__ticket_id__approve_and_submit_post",
+        "parameters": [
+          {
+            "name": "ticket_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Ticket Id"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ApprovalTicketDecisionRequest"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "additionalProperties": true,
+                  "title": "Response Approve And Submit Approval Ticket Api Execution Approval Tickets  Ticket Id  Approve And Submit Post"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/execution/approval-tickets/{ticket_id}/reject": {
+      "post": {
+        "summary": "Reject Approval Ticket",
+        "operationId": "reject_approval_ticket_api_execution_approval_tickets__ticket_id__reject_post",
+        "parameters": [
+          {
+            "name": "ticket_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Ticket Id"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ApprovalTicketDecisionRequest"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/TradeApprovalTicket"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
     "/api/operator/run-once": {
       "post": {
         "summary": "Operator Run Once",
@@ -1125,6 +1329,77 @@
   },
   "components": {
     "schemas": {
+      "ApprovalTicketDecisionRequest": {
+        "properties": {
+          "approved_by": {
+            "type": "string",
+            "title": "Approved By",
+            "default": "user"
+          },
+          "reason": {
+            "type": "string",
+            "title": "Reason",
+            "default": "user_rejected"
+          }
+        },
+        "type": "object",
+        "title": "ApprovalTicketDecisionRequest"
+      },
+      "ApprovalTicketGenerateRequest": {
+        "properties": {
+          "policy_id": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Policy Id"
+          },
+          "portfolio_plan_id": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Portfolio Plan Id"
+          },
+          "data_mode": {
+            "type": "string",
+            "enum": [
+              "fixture",
+              "paper_trading",
+              "live_trading_candidate"
+            ],
+            "title": "Data Mode",
+            "default": "live_trading_candidate"
+          },
+          "partial_allow": {
+            "type": "boolean",
+            "title": "Partial Allow",
+            "default": false
+          }
+        },
+        "type": "object",
+        "title": "ApprovalTicketGenerateRequest"
+      },
+      "ApprovalTicketStatus": {
+        "type": "string",
+        "enum": [
+          "pending",
+          "approved",
+          "rejected",
+          "expired",
+          "submitted",
+          "blocked"
+        ],
+        "title": "ApprovalTicketStatus"
+      },
       "AutopilotPolicyRequest": {
         "properties": {
           "policy_id": {
@@ -1311,6 +1586,38 @@
         },
         "type": "object",
         "title": "KillSwitchRequest"
+      },
+      "Level12MockExecuteRequest": {
+        "properties": {
+          "policy_id": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Policy Id"
+          },
+          "text": {
+            "type": "string",
+            "title": "Text",
+            "default": "KR stock moderate risk weekly rebalance, approval required, mock broker, limit orders only."
+          },
+          "user_id": {
+            "type": "string",
+            "title": "User Id",
+            "default": "fixture-user"
+          },
+          "partial_allow": {
+            "type": "boolean",
+            "title": "Partial Allow",
+            "default": false
+          }
+        },
+        "type": "object",
+        "title": "Level12MockExecuteRequest"
       },
       "Level12Request": {
         "properties": {
@@ -2514,6 +2821,202 @@
           "reason"
         ],
         "title": "StrategySelectionDecision"
+      },
+      "TradeApprovalTicket": {
+        "properties": {
+          "ticket_id": {
+            "type": "string",
+            "title": "Ticket Id"
+          },
+          "user_id": {
+            "type": "string",
+            "title": "User Id",
+            "default": "fixture-user"
+          },
+          "policy_id": {
+            "type": "string",
+            "title": "Policy Id"
+          },
+          "policy_version": {
+            "type": "integer",
+            "title": "Policy Version"
+          },
+          "order_plan_id": {
+            "type": "string",
+            "title": "Order Plan Id"
+          },
+          "data_mode": {
+            "type": "string",
+            "enum": [
+              "fixture",
+              "paper_trading",
+              "live_trading_candidate"
+            ],
+            "title": "Data Mode",
+            "default": "live_trading_candidate"
+          },
+          "status": {
+            "$ref": "#/components/schemas/ApprovalTicketStatus",
+            "default": "pending"
+          },
+          "symbol": {
+            "type": "string",
+            "title": "Symbol"
+          },
+          "side": {
+            "type": "string",
+            "enum": [
+              "buy",
+              "sell"
+            ],
+            "title": "Side"
+          },
+          "quantity": {
+            "type": "number",
+            "exclusiveMinimum": 0.0,
+            "title": "Quantity"
+          },
+          "limit_price": {
+            "anyOf": [
+              {
+                "type": "number",
+                "exclusiveMinimum": 0.0
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Limit Price"
+          },
+          "notional": {
+            "type": "number",
+            "exclusiveMinimum": 0.0,
+            "title": "Notional"
+          },
+          "reason": {
+            "type": "string",
+            "title": "Reason"
+          },
+          "requested_at": {
+            "type": "string",
+            "format": "date-time",
+            "title": "Requested At"
+          },
+          "expires_at": {
+            "type": "string",
+            "format": "date-time",
+            "title": "Expires At"
+          },
+          "approved_at": {
+            "anyOf": [
+              {
+                "type": "string",
+                "format": "date-time"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Approved At"
+          },
+          "approved_by": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Approved By"
+          },
+          "rejected_at": {
+            "anyOf": [
+              {
+                "type": "string",
+                "format": "date-time"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Rejected At"
+          },
+          "rejection_reason": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Rejection Reason"
+          },
+          "submitted_at": {
+            "anyOf": [
+              {
+                "type": "string",
+                "format": "date-time"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Submitted At"
+          },
+          "submitted_order_plan_id": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Submitted Order Plan Id"
+          },
+          "broker_order_id": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Broker Order Id"
+          },
+          "blocked_reason": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Blocked Reason"
+          },
+          "live_trading_enabled": {
+            "type": "boolean",
+            "title": "Live Trading Enabled",
+            "default": false
+          }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "required": [
+          "policy_id",
+          "policy_version",
+          "order_plan_id",
+          "symbol",
+          "side",
+          "quantity",
+          "notional",
+          "reason"
+        ],
+        "title": "TradeApprovalTicket"
       },
       "UserPolicy": {
         "properties": {

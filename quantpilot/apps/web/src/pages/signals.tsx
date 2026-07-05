@@ -1,9 +1,11 @@
 import { useMemo, useState } from "react";
-import { Radar, Search } from "lucide-react";
+import { Gauge, Radar, Search, ShieldAlert, Sparkles } from "lucide-react";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
+import { Stat } from "@/components/ui/stat";
+import { ChartLegend, DistributionDonut, StrengthHistogram } from "@/components/charts";
 import {
   Select,
   SelectContent,
@@ -36,6 +38,21 @@ const ACTION_META: Record<
   exit: { label: "정리", variant: "warn" },
   watch: { label: "관찰", variant: "accent" },
   blocked: { label: "차단", variant: "danger" },
+};
+
+/**
+ * Distinct color per action for the distribution donut + legend. Badges keep
+ * their semantic 5-tone scale, but the donut needs 7 separable hues so no two
+ * slices (e.g. 매수 대기 vs 관찰, 축소 vs 정리) ever render the same color.
+ */
+const ACTION_COLOR: Record<SignalActionValue, string> = {
+  buy_ready: "var(--qp-safe)",
+  buy_wait: "var(--qp-accent)",
+  watch: "var(--qp-chart-teal)",
+  hold: "var(--qp-faint)",
+  trim: "var(--qp-warn)",
+  exit: "var(--qp-accent-2)",
+  blocked: "var(--qp-danger)",
 };
 
 export function SignalsPage() {
@@ -94,6 +111,8 @@ export function SignalsPage() {
 
       {board.isSuccess && (
         <>
+          {board.data.signals.length > 0 && <SignalsSummary signals={board.data.signals} />}
+
           <div className="flex flex-wrap items-center gap-3">
             <div className="relative">
               <Search className="absolute left-3 top-1/2 size-4 -translate-y-1/2 text-muted" />
@@ -160,6 +179,66 @@ export function SignalsPage() {
 
       <SignalDetailDialog signal={selected} onClose={() => setSelected(null)} />
     </>
+  );
+}
+
+function SignalsSummary({ signals }: { signals: Signal[] }) {
+  const total = signals.length;
+  const avgStrength =
+    total > 0
+      ? signals.reduce((s, sig) => s + (Number.isFinite(sig.strength) ? sig.strength : 0), 0) / total
+      : 0;
+  const buyReady = signals.filter((s) => s.action === "buy_ready").length;
+  const blocked = signals.filter((s) => s.action === "blocked").length;
+
+  // Action mix, ordered by the canonical ACTION_META sequence, zeros dropped.
+  const distribution = (Object.keys(ACTION_META) as SignalActionValue[])
+    .map((action) => ({
+      name: ACTION_META[action].label,
+      value: signals.filter((s) => s.action === action).length,
+      color: ACTION_COLOR[action],
+    }))
+    .filter((d) => d.value > 0);
+
+  return (
+    <section aria-label="신호 요약" className="flex flex-col gap-4">
+      <div className="grid grid-cols-2 gap-3 sm:grid-cols-4">
+        <Stat label="총 신호" value={total} icon={Radar} tone="accent" />
+        <Stat
+          label="평균 강도"
+          value={Math.round(avgStrength * 100)}
+          suffix="%"
+          icon={Gauge}
+        />
+        <Stat label="매수 준비" value={buyReady} icon={Sparkles} tone="safe" />
+        <Stat label="차단" value={blocked} icon={ShieldAlert} tone={blocked > 0 ? "danger" : "default"} />
+      </div>
+
+      <div className="grid gap-4 lg:grid-cols-2">
+        <Card>
+          <CardHeader className="pb-2">
+            <CardTitle className="text-[15px]">방향 분포</CardTitle>
+            <CardDescription>신호 액션별 구성 비율</CardDescription>
+          </CardHeader>
+          <CardContent className="grid grid-cols-1 items-center gap-4 sm:grid-cols-[150px_minmax(0,1fr)]">
+            <DistributionDonut data={distribution} centerLabel="신호" />
+            <ChartLegend
+              items={distribution.map((d) => ({ name: d.name, color: d.color, value: d.value }))}
+            />
+          </CardContent>
+        </Card>
+
+        <Card>
+          <CardHeader className="pb-2">
+            <CardTitle className="text-[15px]">강도 분포</CardTitle>
+            <CardDescription>신호 강도(%) 구간별 분포</CardDescription>
+          </CardHeader>
+          <CardContent>
+            <StrengthHistogram values={signals.map((s) => s.strength)} />
+          </CardContent>
+        </Card>
+      </div>
+    </section>
   );
 }
 

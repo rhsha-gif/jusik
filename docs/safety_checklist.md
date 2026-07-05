@@ -22,6 +22,8 @@ Run through this list before enabling any operator capability, and again after a
 ## Invariants enforced in code (verify after any refactor)
 
 - [ ] Only `HarnessService.submit_order_plan` calls `broker.submit_order` (single submission path, state machine + fresh risk check + idempotency).
+- [ ] `/api/level-1-2/run` remains suggestion-only. Mock execution must use `/api/level-1-2/mock-execute`, and that path must require `BrokerMode.mock`.
+- [ ] Approval tickets may record `live_trading_candidate` user approval, but must block before broker submission with no live broker adapter or credentials.
 - [ ] `authorize_level5` re-checks flag, kill switches, broker mode, promotion, version, quote freshness, registry status, order type, loss limits, conflicts, idempotency, and a fresh risk check per order.
 - [ ] No LLM or RL output reaches a broker: RL contract limits outputs to `target_weight_delta`/`strategy_selection`; reports render deterministically without an LLM.
 - [ ] Audit recorder whitelist rejects unknown actions (fail-closed).

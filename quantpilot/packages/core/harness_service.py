@@ -4,7 +4,13 @@ from datetime import timedelta
 
 from quantpilot.packages.brokers.mock_broker import MockBroker
 from quantpilot.packages.brokers.paper_broker import PaperBroker
-from quantpilot.packages.core.execution.state_machine import ApprovalRequired, RiskCheckRequired, authorize_level4, transition_order_plan
+from quantpilot.packages.core.execution.state_machine import (
+    ApprovalRequired,
+    RiskCheckRequired,
+    authorize_level4,
+    live_trading_flag_enabled,
+    transition_order_plan,
+)
 from quantpilot.packages.core.policy.parser import DEFAULT_POLICY_TEXT, parse_policy_text
 from quantpilot.packages.core.analyst.reports import generate_analyst_report
 from quantpilot.packages.core.portfolio.planner import (
@@ -33,7 +39,9 @@ from quantpilot.packages.core.schemas import (
     ProposalExplanation,
     Signal,
     StrategyRecipe,
+    TradeApprovalTicket,
     UserPolicy,
+    ApprovalTicketStatus,
     new_id,
     utc_now,
 )
@@ -224,6 +232,186 @@ class HarnessService:
             "rebalance": rebalance_report,
             "daily_report": operation_report,
             "order_submission_enabled": False,
+        }
+
+    def _authorize_simulated_order_plan(self, order_plan: OrderPlan, *, source: str) -> OrderPlan:
+        policy = self.repositories.policies.require(order_plan.policy_id)
+        before = order_plan.model_copy(deep=True)
+        order_plan.approved_by = f"{source}:mock_policy_v{policy.version}"
+        self.audit.emit(
+            user_id=policy.user_id,
+            entity_type="order_plan",
+            entity_id=order_plan.order_plan_id,
+            action="level_1_2_mock_order_authorized",
+            before_state=before,
+            after_state=order_plan,
+            source=source,
+        )
+        transition_order_plan(
+            order_plan=order_plan,
+            new_status=OrderStatus.user_approved,
+            audit=self.audit,
+            user_id=policy.user_id,
+            source=source,
+            action="level_1_2_mock_order_authorized",
+        )
+        return self.repositories.order_plans.update(order_plan)
+
+    def run_level_1_2_mock_execution(self, *, policy_id: str, partial_allow: bool = False) -> dict[str, object]:
+        policy = self.repositories.policies.require(policy_id)
+        if live_trading_flag_enabled():
+            raise RuntimeError("mock execution requires LIVE_TRADING_ENABLED=false")
+        if policy.broker != BrokerMode.mock:
+            raise RuntimeError("Level 1-2 mock execution requires BrokerMode.mock")
+
+        self.audit.emit(
+            user_id=policy.user_id,
+            entity_type="policy",
+            entity_id=policy.policy_id,
+            action="level_1_2_mock_execution_started",
+            after_state={"data_mode": "fixture", "broker": policy.broker.value},
+            source="level_1_2_mock_execution",
+        )
+        level_1_2 = self.run_level_1_2(policy_id=policy.policy_id)
+        signals = list(level_1_2["signals"])  # type: ignore[arg-type]
+        snapshot = fixture_portfolio_snapshot()
+        executable_plan = self.create_portfolio_plan(
+            policy_id=policy.policy_id,
+            signals=signals,
+            snapshot=snapshot,
+        )
+        proposals = self.generate_order_proposals(
+            portfolio_plan_id=executable_plan.plan_id,
+            snapshot=snapshot,
+            partial_allow=partial_allow,
+        )
+
+        submitted_order_plans: list[OrderPlan] = []
+        broker_orders: list[BrokerOrder] = []
+        fills: list[Fill] = []
+        blocked_proposals: list[dict[str, object]] = []
+
+        for proposal in proposals:
+            try:
+                authorized = self._authorize_simulated_order_plan(
+                    proposal,
+                    source="level_1_2_mock_execution",
+                )
+                order_plan, broker_order, order_fills = self.submit_order_plan(authorized.order_plan_id)
+                self.audit.emit(
+                    user_id=policy.user_id,
+                    entity_type="order_plan",
+                    entity_id=order_plan.order_plan_id,
+                    action="level_1_2_mock_order_submitted",
+                    after_state=order_plan,
+                    source="level_1_2_mock_execution",
+                )
+                submitted_order_plans.append(order_plan)
+                broker_orders.append(broker_order)
+                fills.extend(order_fills)
+            except (ApprovalRequired, RiskCheckRequired, RuntimeError) as exc:
+                current = self.repositories.order_plans.require(proposal.order_plan_id)
+                current.blocked_reason = str(exc)
+                self.repositories.order_plans.update(current)
+                blocked_proposals.append({"order_plan_id": current.order_plan_id, "reason": str(exc)})
+
+        daily_report = self.create_daily_report(policy_id=policy.policy_id)
+        self.audit.emit(
+            user_id=policy.user_id,
+            entity_type="operation_report",
+            entity_id=daily_report.report_id,
+            action="level_1_2_mock_execution_completed",
+            after_state={
+                "submitted_order_plan_ids": [order.order_plan_id for order in submitted_order_plans],
+                "broker_order_ids": [order.broker_order_id for order in broker_orders],
+                "fill_ids": [fill.fill_id for fill in fills],
+                "blocked": blocked_proposals,
+                "live_trading_enabled": False,
+            },
+            source="level_1_2_mock_execution",
+        )
+
+        auto_execution = self._build_auto_execution_summary(
+            signals=signals,
+            proposals=proposals,
+            submitted_order_plans=submitted_order_plans,
+            broker_orders=broker_orders,
+            fills=fills,
+            blocked_proposals=blocked_proposals,
+        )
+
+        return {
+            **level_1_2,
+            "portfolio_plan": executable_plan,
+            "proposals": proposals,
+            "submitted_order_plans": submitted_order_plans,
+            "broker_orders": broker_orders,
+            "fills": fills,
+            "blocked_proposals": blocked_proposals,
+            "auto_execution": auto_execution,
+            "daily_report": daily_report,
+            "data_mode": "fixture",
+            "broker": BrokerMode.mock.value,
+            "order_submission_enabled": True,
+            "live_trading_enabled": False,
+        }
+
+    def _build_auto_execution_summary(
+        self,
+        *,
+        signals: list[Signal],
+        proposals: list[OrderPlan],
+        submitted_order_plans: list[OrderPlan],
+        broker_orders: list[BrokerOrder],
+        fills: list[Fill],
+        blocked_proposals: list[dict[str, object]],
+    ) -> dict[str, object]:
+        """Summarise the Level 1-2 program-trading run for the operator console.
+
+        Level 1-2 has no human in the loop: the program judges trade timing from
+        the signals and submits to the MockBroker automatically. This block makes
+        that narrative first-class (per-symbol timing decisions + outcomes) without
+        creating any new side effects — every value is derived from objects already
+        produced by the run above.
+        """
+        signals_by_symbol = {signal.symbol: signal for signal in signals}
+        broker_by_plan = {order.order_plan_id: order.broker_order_id for order in broker_orders}
+        blocked_by_plan = {str(item["order_plan_id"]): str(item["reason"]) for item in blocked_proposals}
+        submitted_ids = {order.order_plan_id for order in submitted_order_plans}
+
+        decisions: list[dict[str, object]] = []
+        for proposal in proposals:
+            signal = signals_by_symbol.get(proposal.intent.symbol)
+            executed = proposal.order_plan_id in submitted_ids
+            explanation = proposal.explanation
+            decisions.append(
+                {
+                    "order_plan_id": proposal.order_plan_id,
+                    "symbol": proposal.intent.symbol,
+                    "side": proposal.intent.side,
+                    "action": signal.action.value if signal else None,
+                    "strength": signal.strength if signal else None,
+                    "quantity": proposal.intent.quantity,
+                    "notional": proposal.intent.notional,
+                    "decision": "executed" if executed else "blocked",
+                    "reason": (explanation.signal_reason if explanation else None)
+                    or (signal.reason if signal else proposal.intent.reason),
+                    "broker_order_id": broker_by_plan.get(proposal.order_plan_id),
+                    "blocked_reason": blocked_by_plan.get(proposal.order_plan_id),
+                }
+            )
+
+        return {
+            "mode": "program_auto_trade",
+            "executed": bool(submitted_order_plans),
+            "signals_evaluated": len(signals),
+            "proposals": len(proposals),
+            "auto_submitted": len(submitted_order_plans),
+            "filled": len(fills),
+            "blocked": len(blocked_proposals),
+            "filled_notional": round(sum(fill.notional for fill in fills), 2),
+            "decisions": decisions,
+            "live_trading_enabled": False,
         }
 
     def create_portfolio_plan(
@@ -793,6 +981,227 @@ class HarnessService:
             action="proposal_created",
         )
         return self.repositories.order_plans.update(new_order)
+
+    def _validated_approval_data_mode(self, data_mode: str) -> str:
+        allowed = {"fixture", "paper_trading", "live_trading_candidate"}
+        if data_mode not in allowed:
+            raise RuntimeError(f"unsupported approval data mode: {data_mode}")
+        return data_mode
+
+    def _expire_approval_ticket_if_needed(self, ticket: TradeApprovalTicket) -> TradeApprovalTicket:
+        if ticket.status == ApprovalTicketStatus.pending and ticket.expires_at <= utc_now():
+            before = ticket.model_copy(deep=True)
+            ticket.status = ApprovalTicketStatus.expired
+            self.repositories.approval_tickets.update(ticket)
+            self.audit.emit(
+                user_id=ticket.user_id,
+                entity_type="approval_ticket",
+                entity_id=ticket.ticket_id,
+                action="approval_ticket_expired",
+                before_state=before,
+                after_state=ticket,
+                source="approval_ticket_service",
+            )
+        return ticket
+
+    def _pending_ticket_for_order(self, order_plan_id: str) -> TradeApprovalTicket | None:
+        for ticket in self.repositories.approval_tickets.list():
+            refreshed = self._expire_approval_ticket_if_needed(ticket)
+            if refreshed.order_plan_id == order_plan_id and refreshed.status == ApprovalTicketStatus.pending:
+                return refreshed
+        return None
+
+    def generate_approval_tickets(
+        self,
+        *,
+        policy_id: str,
+        portfolio_plan_id: str | None = None,
+        data_mode: str = "live_trading_candidate",
+        partial_allow: bool = False,
+    ) -> list[TradeApprovalTicket]:
+        selected_mode = self._validated_approval_data_mode(data_mode)
+        policy = self.repositories.policies.require(policy_id)
+        snapshot = fixture_portfolio_snapshot()
+        if portfolio_plan_id is None:
+            level_1_2 = self.run_level_1_2(policy_id=policy.policy_id)
+            signals = list(level_1_2["signals"])  # type: ignore[arg-type]
+            portfolio_plan = self.create_portfolio_plan(
+                policy_id=policy.policy_id,
+                signals=signals,
+                snapshot=snapshot,
+            )
+        else:
+            portfolio_plan = self.repositories.portfolio_plans.require(portfolio_plan_id)
+
+        proposals = self.generate_order_proposals(
+            portfolio_plan_id=portfolio_plan.plan_id,
+            snapshot=snapshot,
+            partial_allow=partial_allow,
+        )
+        tickets: list[TradeApprovalTicket] = []
+        for proposal in proposals:
+            existing = self._pending_ticket_for_order(proposal.order_plan_id)
+            if existing is not None:
+                self.audit.emit(
+                    user_id=policy.user_id,
+                    entity_type="approval_ticket",
+                    entity_id=existing.ticket_id,
+                    action="approval_ticket_duplicate_blocked",
+                    after_state={"order_plan_id": proposal.order_plan_id},
+                    source="approval_ticket_service",
+                )
+                continue
+
+            ticket = TradeApprovalTicket(
+                user_id=policy.user_id,
+                policy_id=policy.policy_id,
+                policy_version=policy.version,
+                order_plan_id=proposal.order_plan_id,
+                data_mode=selected_mode,  # type: ignore[arg-type]
+                symbol=proposal.intent.symbol,
+                side=proposal.intent.side,
+                quantity=proposal.intent.quantity,
+                limit_price=proposal.intent.limit_price,
+                notional=proposal.intent.notional,
+                reason=proposal.explanation.signal_reason if proposal.explanation else proposal.intent.reason,
+                expires_at=proposal.expires_at or (utc_now() + timedelta(minutes=policy.order_expiry_minutes)),
+                live_trading_enabled=False,
+            )
+            self.repositories.approval_tickets.add(ticket)
+            self.audit.emit(
+                user_id=policy.user_id,
+                entity_type="approval_ticket",
+                entity_id=ticket.ticket_id,
+                action="approval_ticket_created",
+                after_state=ticket,
+                source="approval_ticket_service",
+            )
+            tickets.append(ticket)
+        return tickets
+
+    def pending_approval_tickets(self) -> list[TradeApprovalTicket]:
+        return [
+            refreshed
+            for ticket in self.repositories.approval_tickets.list()
+            if (refreshed := self._expire_approval_ticket_if_needed(ticket)).status == ApprovalTicketStatus.pending
+        ]
+
+    def _block_approval_ticket(self, ticket: TradeApprovalTicket, *, reason: str) -> TradeApprovalTicket:
+        before = ticket.model_copy(deep=True)
+        ticket.status = ApprovalTicketStatus.blocked
+        ticket.blocked_reason = reason
+        self.repositories.approval_tickets.update(ticket)
+        self.audit.emit(
+            user_id=ticket.user_id,
+            entity_type="approval_ticket",
+            entity_id=ticket.ticket_id,
+            action="approval_ticket_submission_blocked",
+            before_state=before,
+            after_state=ticket,
+            source="approval_ticket_service",
+        )
+        return ticket
+
+    def approve_and_submit_approval_ticket(
+        self,
+        ticket_id: str,
+        *,
+        approved_by: str = "user",
+    ) -> dict[str, object]:
+        ticket = self._expire_approval_ticket_if_needed(self.repositories.approval_tickets.require(ticket_id))
+        if ticket.status != ApprovalTicketStatus.pending:
+            raise RuntimeError(f"approval ticket is not pending: {ticket.status.value}")
+
+        order_plan = self.repositories.order_plans.require(ticket.order_plan_id)
+        policy = self.repositories.policies.require(ticket.policy_id)
+        before = ticket.model_copy(deep=True)
+        ticket.status = ApprovalTicketStatus.approved
+        ticket.approved_at = utc_now()
+        ticket.approved_by = approved_by
+        self.repositories.approval_tickets.update(ticket)
+        self.audit.emit(
+            user_id=ticket.user_id,
+            entity_type="approval_ticket",
+            entity_id=ticket.ticket_id,
+            action="approval_ticket_approved",
+            before_state=before,
+            after_state=ticket,
+            source="approval_ticket_service",
+        )
+
+        if ticket.data_mode == "live_trading_candidate":
+            blocked = self._block_approval_ticket(ticket, reason="live_broker_unavailable")
+            return {"ticket": blocked, "order_plan": order_plan, "broker_order": None, "fills": [], "live_trading_enabled": False}
+        if live_trading_flag_enabled():
+            blocked = self._block_approval_ticket(ticket, reason="live_trading_flag_engaged")
+            return {"ticket": blocked, "order_plan": order_plan, "broker_order": None, "fills": [], "live_trading_enabled": False}
+        if ticket.data_mode == "fixture" and policy.broker != BrokerMode.mock:
+            blocked = self._block_approval_ticket(ticket, reason="mock_broker_required")
+            return {"ticket": blocked, "order_plan": order_plan, "broker_order": None, "fills": [], "live_trading_enabled": False}
+        if ticket.data_mode == "paper_trading" and policy.broker != BrokerMode.paper:
+            blocked = self._block_approval_ticket(ticket, reason="paper_broker_required")
+            return {"ticket": blocked, "order_plan": order_plan, "broker_order": None, "fills": [], "live_trading_enabled": False}
+
+        transition_order_plan(
+            order_plan=order_plan,
+            new_status=OrderStatus.user_approved,
+            audit=self.audit,
+            user_id=policy.user_id,
+            source="approval_ticket_service",
+            action="approval_ticket_approved",
+        )
+        self.repositories.order_plans.update(order_plan)
+        try:
+            submitted, broker_order, fills = self.submit_order_plan(order_plan.order_plan_id)
+        except (ApprovalRequired, RiskCheckRequired, RuntimeError) as exc:
+            blocked = self._block_approval_ticket(ticket, reason=str(exc))
+            return {"ticket": blocked, "order_plan": order_plan, "broker_order": None, "fills": [], "live_trading_enabled": False}
+
+        before_submit = ticket.model_copy(deep=True)
+        ticket.status = ApprovalTicketStatus.submitted
+        ticket.submitted_at = utc_now()
+        ticket.submitted_order_plan_id = submitted.order_plan_id
+        ticket.broker_order_id = broker_order.broker_order_id
+        self.repositories.approval_tickets.update(ticket)
+        self.audit.emit(
+            user_id=ticket.user_id,
+            entity_type="approval_ticket",
+            entity_id=ticket.ticket_id,
+            action="approval_ticket_submitted",
+            before_state=before_submit,
+            after_state=ticket,
+            source="approval_ticket_service",
+        )
+        return {
+            "ticket": ticket,
+            "order_plan": submitted,
+            "broker_order": broker_order,
+            "fills": fills,
+            "live_trading_enabled": False,
+        }
+
+    def reject_approval_ticket(self, ticket_id: str, *, reason: str = "user_rejected") -> TradeApprovalTicket:
+        ticket = self._expire_approval_ticket_if_needed(self.repositories.approval_tickets.require(ticket_id))
+        if ticket.status != ApprovalTicketStatus.pending:
+            raise RuntimeError(f"approval ticket is not pending: {ticket.status.value}")
+        before = ticket.model_copy(deep=True)
+        ticket.status = ApprovalTicketStatus.rejected
+        ticket.rejected_at = utc_now()
+        ticket.rejection_reason = reason
+        self.repositories.approval_tickets.update(ticket)
+        order_plan = self.repositories.order_plans.get(ticket.order_plan_id)
+        if order_plan is not None and order_plan.status == OrderStatus.proposed:
+            self.reject_order_plan(order_plan.order_plan_id, reason=reason)
+        self.audit.emit(
+            user_id=ticket.user_id,
+            entity_type="approval_ticket",
+            entity_id=ticket.ticket_id,
+            action="approval_ticket_rejected",
+            before_state=before,
+            after_state=ticket,
+            source="approval_ticket_service",
+        )
+        return ticket
 
     def _broker_for_policy(self, policy: UserPolicy):
         if policy.broker == BrokerMode.paper:

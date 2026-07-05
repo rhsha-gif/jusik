@@ -27,6 +27,15 @@
   --qp-glow-1: rgba(10, 132, 255, 0.12);
   --qp-glow-2: rgba(94, 92, 230, 0.09);
 
+  /* Chart scaffolding — grid + axis tuned to read as quiet hairlines.
+     Series colors reuse the semantic tokens above so charts and badges
+     stay in lockstep across themes. */
+  --qp-chart-grid: rgba(15, 18, 25, 0.07);
+  /* Axis ticks are meaningful text — use the AA-contrast muted ink, not faint. */
+  --qp-chart-axis: #6b6b73;
+  /* Categorical accent kept distinct from blue/violet for chart series. */
+  --qp-chart-teal: #0d9488;
+
   /* Layered elevation: inset top highlight + close + ambient shadow */
   --qp-shadow-sm: 0 1px 2px rgba(15, 23, 42, 0.05), 0 1px 1px rgba(15, 23, 42, 0.04);
   --qp-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.65),
@@ -57,6 +66,10 @@
 
   --qp-glow-1: rgba(76, 157, 255, 0.2);
   --qp-glow-2: rgba(139, 136, 255, 0.16);
+
+  --qp-chart-grid: rgba(255, 255, 255, 0.07);
+  --qp-chart-axis: #9ea2ad;
+  --qp-chart-teal: #2dd4bf;
 
   --qp-shadow-sm: 0 1px 2px rgba(0, 0, 0, 0.45);
   --qp-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.06),

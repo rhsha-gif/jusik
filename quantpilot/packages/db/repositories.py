@@ -11,6 +11,7 @@ from quantpilot.packages.core.schemas import (
     PortfolioPlan,
     Signal,
     StrategyRecipe,
+    TradeApprovalTicket,
     UserPolicy,
 )
 
@@ -82,6 +83,7 @@ class RepositoryRegistry:
         self.fills = InMemoryRepository[Fill](lambda item: item.fill_id)
         self.audit_logs = InMemoryRepository[AuditLogEvent](lambda item: item.event_id)
         self.operation_reports = InMemoryRepository[OperationReport](lambda item: item.report_id)
+        self.approval_tickets = InMemoryRepository[TradeApprovalTicket](lambda item: item.ticket_id)
 
     def clear(self) -> None:
         self.policies.clear()
@@ -93,3 +95,4 @@ class RepositoryRegistry:
         self.fills.clear()
         self.audit_logs.clear()
         self.operation_reports.clear()
+        self.approval_tickets.clear()

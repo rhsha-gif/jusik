@@ -2,6 +2,11 @@
 
 **Status: live trading is NOT implemented and NOT planned in this repository.** This checklist exists so that any future attempt to connect a real broker has a documented, human-gated path. Nothing below is satisfied today, and the code intentionally has no live broker mode (`BrokerMode` has no live value; `live_disabled` raises).
 
+The approval-ticket rails can label a pending decision as `live_trading_candidate`,
+but approval of that ticket must still block with `live_broker_unavailable` until
+this checklist is completed and a separately reviewed live broker design exists.
+Current Level 1-2 mock execution is `fixture` + `MockBroker` only.
+
 Every item requires a human owner and recorded evidence. An AI agent must never check these boxes.
 
 ## Hard prerequisites (all must be complete before writing any live-broker code)

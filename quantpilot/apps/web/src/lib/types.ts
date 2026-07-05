@@ -12,6 +12,8 @@ export interface HealthResponse {
   default_broker: string;
   data_mode: string;
   data_mode_safe: boolean;
+  /** Present when the configured data mode is unsafe/unsupported (explains why). */
+  data_mode_error?: string | null;
 }
 
 export interface SmokeOrder {
@@ -196,6 +198,151 @@ export interface Level12RunResponse {
   };
   daily_report: OperationReport;
   order_submission_enabled: boolean;
+}
+
+export interface OrderIntent {
+  intent_id: string;
+  symbol: string;
+  side: "buy" | "sell";
+  order_type: string;
+  quantity: number;
+  limit_price: number | null;
+  notional: number;
+  target_weight: number;
+  reason: string;
+  quote_time: string;
+}
+
+export interface OrderPlan {
+  order_plan_id: string;
+  policy_id: string;
+  policy_version: number;
+  intent: OrderIntent;
+  status: string;
+  idempotency_key: string;
+  risk_check_id: string | null;
+  risk_check_expires_at: string | null;
+  blocked_reason: string | null;
+  approved_by: string | null;
+  created_at: string;
+  updated_at: string;
+}
+
+export interface BrokerOrder {
+  broker_order_id: string;
+  order_plan_id: string;
+  broker_mode: string;
+  status: string;
+  accepted_at: string;
+  broker_reference: string | null;
+}
+
+export interface Fill {
+  fill_id: string;
+  broker_order_id: string;
+  order_plan_id: string;
+  symbol: string;
+  quantity: number;
+  price: number;
+  notional: number;
+  filled_at: string;
+}
+
+/**
+ * One per-symbol timing decision the program made during a Level 1-2 auto-trade
+ * run. `decision: "executed"` means the MockBroker filled it; `"blocked"` means a
+ * risk/guardrail gate stopped it. Mirrors `_build_auto_execution_summary` in
+ * quantpilot/packages/core/harness_service.py.
+ */
+export interface AutoExecutionDecision {
+  order_plan_id: string;
+  symbol: string;
+  side: "buy" | "sell";
+  action: SignalActionValue | null;
+  strength: number | null;
+  quantity: number;
+  notional: number;
+  decision: "executed" | "blocked";
+  reason: string;
+  broker_order_id: string | null;
+  blocked_reason: string | null;
+}
+
+export interface AutoExecutionSummary {
+  mode: "program_auto_trade";
+  executed: boolean;
+  signals_evaluated: number;
+  proposals: number;
+  auto_submitted: number;
+  filled: number;
+  blocked: number;
+  filled_notional: number;
+  decisions: AutoExecutionDecision[];
+  live_trading_enabled: boolean;
+}
+
+export interface Level12MockExecutionResponse extends Level12RunResponse {
+  portfolio_plan: Record<string, unknown>;
+  proposals: OrderPlan[];
+  submitted_order_plans: OrderPlan[];
+  broker_orders: BrokerOrder[];
+  fills: Fill[];
+  blocked_proposals: { order_plan_id: string; reason: string }[];
+  auto_execution: AutoExecutionSummary;
+  data_mode: "fixture";
+  broker: "mock";
+  live_trading_enabled: boolean;
+}
+
+export type ApprovalDataMode = "fixture" | "paper_trading" | "live_trading_candidate";
+export type ApprovalTicketStatus =
+  | "pending"
+  | "approved"
+  | "rejected"
+  | "expired"
+  | "submitted"
+  | "blocked";
+
+export interface TradeApprovalTicket {
+  ticket_id: string;
+  user_id: string;
+  policy_id: string;
+  policy_version: number;
+  order_plan_id: string;
+  data_mode: ApprovalDataMode;
+  status: ApprovalTicketStatus;
+  symbol: string;
+  side: "buy" | "sell";
+  quantity: number;
+  limit_price: number | null;
+  notional: number;
+  reason: string;
+  requested_at: string;
+  expires_at: string;
+  approved_at: string | null;
+  approved_by: string | null;
+  rejected_at: string | null;
+  rejection_reason: string | null;
+  submitted_at: string | null;
+  submitted_order_plan_id: string | null;
+  broker_order_id: string | null;
+  blocked_reason: string | null;
+  live_trading_enabled: boolean;
+}
+
+export interface ApprovalTicketGenerateRequest {
+  policy_id?: string | null;
+  portfolio_plan_id?: string | null;
+  data_mode?: ApprovalDataMode;
+  partial_allow?: boolean;
+}
+
+export interface ApprovalTicketDecisionResult {
+  ticket: TradeApprovalTicket;
+  order_plan: OrderPlan;
+  broker_order: BrokerOrder | null;
+  fills: Fill[];
+  live_trading_enabled: boolean;
 }
 
 /* ---------------------------------------------------------------------------

@@ -1,14 +1,47 @@
-import { CheckCircle2, CircleDashed, PlayCircle, XCircle } from "lucide-react";
+import {
+  Ban,
+  Bot,
+  CheckCircle2,
+  CircleDashed,
+  Coins,
+  FileBarChart,
+  FlaskConical,
+  ListChecks,
+  PlayCircle,
+  Radar,
+  Scale,
+  ScrollText,
+  XCircle,
+} from "lucide-react";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
+import { Stat } from "@/components/ui/stat";
+import { WeightsBars } from "@/components/charts";
 import { JsonViewer } from "@/components/json-viewer";
 import { ErrorState } from "@/components/states";
 import { PageHeader } from "@/components/page-header";
-import { useHealth, useLevel12Run } from "@/lib/queries";
+import { useHealth, useLevel12MockExecute, useLevel12Run } from "@/lib/queries";
 import { useWorkingPolicy } from "@/lib/working-policy";
-import type { Level12RunResponse, RebalanceSuggestion } from "@/lib/types";
-import { cn, formatPercent } from "@/lib/utils";
+import type {
+  AutoExecutionDecision,
+  AutoExecutionSummary,
+  Level12MockExecutionResponse,
+  Level12RunResponse,
+  RebalanceSuggestion,
+  SignalActionValue,
+} from "@/lib/types";
+import { cn, formatKRW, formatPercent } from "@/lib/utils";
+
+const ACTION_LABEL: Record<SignalActionValue, string> = {
+  buy_ready: "매수 준비",
+  buy_wait: "매수 대기",
+  hold: "보유",
+  trim: "축소",
+  exit: "정리",
+  watch: "관찰",
+  blocked: "차단",
+};
 
 const SUGGESTED_ACTION_META: Record<
   RebalanceSuggestion["suggested_action"],
@@ -24,6 +57,7 @@ export function RunPage() {
   const health = useHealth();
   const workingPolicy = useWorkingPolicy();
   const run = useLevel12Run();
+  const mockExecute = useLevel12MockExecute();
 
   const backendOk = health.isSuccess && health.data.status === "ok";
   const mockMode = health.isSuccess && health.data.default_broker === "mock";
@@ -34,17 +68,27 @@ export function RunPage() {
   return (
     <>
       <PageHeader
-        eyebrow="Level 1-2"
-        title="Level 1-2 실행"
-        description="유니버스 → 지표 → 신호 → 리밸런스 제안 → 일일 리포트까지 모의 파이프라인 전체를 실행합니다. 주문 제출은 비활성화되어 있습니다."
+        eyebrow="Level 1-2 · 프로그램 자동매매"
+        title="Level 1-2 자동매매"
+        description="모의 단계에서는 프로그램이 매매 타이밍을 스스로 판단하고 모의 계좌(MockBroker)에 자동으로 주문을 제출합니다. 사람이 일일이 승인하지 않습니다. 실거래는 별도의 승인 알림 단계를 거칩니다."
         actions={
-          <Button
-            size="lg"
-            onClick={() => run.mutate(requestBody())}
-            disabled={run.isPending || !backendOk}
-          >
-            <PlayCircle /> {run.isPending ? "실행 중…" : "모의 Level 1-2 실행"}
-          </Button>
+          <div className="flex flex-wrap items-center gap-2">
+            <Button
+              size="lg"
+              onClick={() => mockExecute.mutate(requestBody())}
+              disabled={run.isPending || mockExecute.isPending || !backendOk || !mockMode}
+            >
+              <Bot /> {mockExecute.isPending ? "자동매매 중…" : "모의 자동매매 실행"}
+            </Button>
+            <Button
+              variant="secondary"
+              size="lg"
+              onClick={() => run.mutate(requestBody())}
+              disabled={run.isPending || mockExecute.isPending || !backendOk}
+            >
+              <ListChecks /> {run.isPending ? "실행 중…" : "제안만 보기 (체결 안 함)"}
+            </Button>
+          </div>
         }
       />
 
@@ -62,7 +106,7 @@ export function RunPage() {
               warnOnly
               label={workingPolicy ? "작업 정책 선택됨" : "작업 정책 없음 (최근/기본 정책 사용)"}
             />
-            <PreflightItem ok={true} label="주문 제출 비활성 (안전)" />
+            <PreflightItem ok={true} label="실거래 차단 · 모의 계좌만 자동 체결" />
           </ul>
         </CardContent>
       </Card>
@@ -74,9 +118,17 @@ export function RunPage() {
           onRetry={() => run.mutate(requestBody())}
         />
       )}
+      {mockExecute.isError && (
+        <ErrorState
+          error={mockExecute.error}
+          context="Level 1-2 모의체결에 실패했습니다"
+          onRetry={() => mockExecute.mutate(requestBody())}
+        />
+      )}
 
+      {mockExecute.isSuccess && <MockExecutionResult result={mockExecute.data} />}
       {run.isSuccess && <RunResult result={run.data} />}
-      {run.isPending && <RunTimeline activeIndex={2} failed={false} />}
+      {(run.isPending || mockExecute.isPending) && <RunTimeline activeIndex={2} failed={false} />}
     </>
   );
 }
@@ -152,17 +204,28 @@ function RunResult({ result }: { result: Level12RunResponse }) {
       <RunTimeline activeIndex={TIMELINE_STEPS.length - 1} failed={false} />
 
       <div className="grid grid-cols-2 gap-3 lg:grid-cols-5">
-        <RunStat label="후보 종목" value={summary.candidate_count ?? result.universe.length} />
-        <RunStat
+        <Stat
+          label="후보 종목"
+          value={summary.candidate_count ?? result.universe.length}
+          icon={FlaskConical}
+        />
+        <Stat
           label="애널리스트 리포트"
           value={summary.analyst_report_count ?? result.analyst_reports.length}
+          icon={FileBarChart}
         />
-        <RunStat label="신호" value={summary.signal_count ?? result.signals.length} />
-        <RunStat
+        <Stat
+          label="신호"
+          value={summary.signal_count ?? result.signals.length}
+          icon={Radar}
+          tone="accent"
+        />
+        <Stat
           label="리밸런스 제안"
           value={summary.rebalance_suggestion_count ?? result.rebalance.suggestions.length}
+          icon={Scale}
         />
-        <RunStat label="감사 이벤트" value={result.daily_report.audit_event_count} />
+        <Stat label="감사 이벤트" value={result.daily_report.audit_event_count} icon={ScrollText} />
       </div>
 
       <div className="flex flex-wrap items-center gap-2">
@@ -180,43 +243,66 @@ function RunResult({ result }: { result: Level12RunResponse }) {
             {String(result.rebalance.order_submission_enabled)}
           </CardDescription>
         </CardHeader>
-        <CardContent>
+        <CardContent className="flex flex-col gap-5">
           {result.rebalance.suggestions.length === 0 ? (
             <p className="text-[13px] text-muted">생성된 제안이 없습니다.</p>
           ) : (
-            <div className="overflow-x-auto">
-              <table className="w-full min-w-[560px] text-left text-[13px]">
-                <thead>
-                  <tr className="border-b border-hairline text-[12px] text-muted">
-                    <th className="py-2.5 pr-4 font-medium">종목</th>
-                    <th className="py-2.5 pr-4 font-medium">현재 비중</th>
-                    <th className="py-2.5 pr-4 font-medium">목표 비중</th>
-                    <th className="py-2.5 pr-4 font-medium">제안</th>
-                    <th className="py-2.5 font-medium">리스크 사유</th>
-                  </tr>
-                </thead>
-                <tbody>
-                  {result.rebalance.suggestions.map((item) => {
-                    const meta = SUGGESTED_ACTION_META[item.suggested_action];
-                    return (
-                      <tr key={item.ticker} className="h-12 border-b border-hairline/60">
-                        <td className="pr-4 font-mono font-semibold">{item.ticker}</td>
-                        <td className="pr-4 tabular-nums">
-                          {formatPercent(item.current_weight)}
-                        </td>
-                        <td className="pr-4 tabular-nums">
-                          {formatPercent(item.target_weight_suggestion)}
-                        </td>
-                        <td className="pr-4">
-                          <Badge variant={meta.variant}>{meta.label}</Badge>
-                        </td>
-                        <td className="text-[12.5px] text-muted">{item.risk_reason}</td>
-                      </tr>
-                    );
-                  })}
-                </tbody>
-              </table>
-            </div>
+            <>
+              {/* Visual summary only — the table below is the accessible source. */}
+              <div aria-hidden>
+                <div className="mb-3 flex items-center gap-4 text-[12px] text-muted">
+                  <span className="inline-flex items-center gap-1.5">
+                    <span className="size-2.5 rounded-full bg-faint" /> 현재 비중
+                  </span>
+                  <span className="inline-flex items-center gap-1.5">
+                    <span className="size-2.5 rounded-full bg-accent" /> 목표 비중 (제안)
+                  </span>
+                </div>
+                <WeightsBars
+                  data={result.rebalance.suggestions.map((item) => ({
+                    label: item.ticker,
+                    current: item.current_weight,
+                    target: item.target_weight_suggestion,
+                  }))}
+                />
+              </div>
+              <div className="overflow-x-auto">
+                <table className="w-full min-w-[560px] text-left text-[13px]">
+                  <thead>
+                    <tr className="border-b border-hairline text-[12px] text-muted">
+                      <th className="py-2.5 pr-4 font-medium">종목</th>
+                      <th className="py-2.5 pr-4 font-medium">현재 비중</th>
+                      <th className="py-2.5 pr-4 font-medium">목표 비중</th>
+                      <th className="py-2.5 pr-4 font-medium">제안</th>
+                      <th className="py-2.5 font-medium">리스크 사유</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {result.rebalance.suggestions.map((item) => {
+                      const meta = SUGGESTED_ACTION_META[item.suggested_action];
+                      return (
+                        <tr
+                          key={item.ticker}
+                          className="h-12 border-b border-hairline/60 transition-colors hover:bg-surface-solid/70"
+                        >
+                          <td className="pr-4 font-mono font-semibold">{item.ticker}</td>
+                          <td className="pr-4 tabular-nums">
+                            {formatPercent(item.current_weight)}
+                          </td>
+                          <td className="pr-4 tabular-nums">
+                            {formatPercent(item.target_weight_suggestion)}
+                          </td>
+                          <td className="pr-4">
+                            <Badge variant={meta.variant}>{meta.label}</Badge>
+                          </td>
+                          <td className="text-[12.5px] text-muted">{item.risk_reason}</td>
+                        </tr>
+                      );
+                    })}
+                  </tbody>
+                </table>
+              </div>
+            </>
           )}
         </CardContent>
       </Card>
@@ -249,13 +335,185 @@ function RunResult({ result }: { result: Level12RunResponse }) {
   );
 }
 
-function RunStat({ label, value }: { label: string; value: number }) {
+function MockExecutionResult({ result }: { result: Level12MockExecutionResponse }) {
   return (
-    <div className="rounded-xl border border-hairline bg-surface-raised px-4 py-3 shadow-sm">
-      <p className="text-[11.5px] font-medium uppercase tracking-wide text-faint">{label}</p>
-      <p className="mt-1 text-[24px] font-semibold leading-none tabular-nums tracking-tight">
-        {value}
-      </p>
+    <div className="flex flex-col gap-5">
+      <AutoExecutionPanel summary={result.auto_execution} />
+      <Card>
+      <CardHeader>
+        <CardTitle>상세 체결 내역</CardTitle>
+        <CardDescription>
+          MockBroker에만 제출된 결과입니다. KIS 모의투자와 실거래 브로커는 아직 연결하지 않습니다.
+        </CardDescription>
+      </CardHeader>
+      <CardContent className="flex flex-col gap-5">
+        <div className="flex flex-wrap items-center gap-2">
+          <Badge variant="safe">live_trading_enabled: {String(result.live_trading_enabled)}</Badge>
+          <Badge variant="safe">broker: {result.broker}</Badge>
+          <Badge variant="neutral">data_mode: {result.data_mode}</Badge>
+          <Badge variant={result.order_submission_enabled ? "warn" : "neutral"}>
+            order_submission_enabled: {String(result.order_submission_enabled)}
+          </Badge>
+        </div>
+
+        <div className="grid grid-cols-2 gap-3 lg:grid-cols-4">
+          <Stat label="제안 주문" value={result.proposals.length} icon={ListChecks} />
+          <Stat label="제출 주문" value={result.submitted_order_plans.length} icon={PlayCircle} tone="accent" />
+          <Stat label="브로커 주문" value={result.broker_orders.length} icon={Scale} />
+          <Stat label="체결" value={result.fills.length} icon={CheckCircle2} tone="safe" />
+        </div>
+
+        {result.submitted_order_plans.length === 0 ? (
+          <p className="text-[13px] text-muted">제출된 mock 주문이 없습니다.</p>
+        ) : (
+          <div className="overflow-x-auto">
+            <table className="w-full min-w-[720px] text-left text-[13px]">
+              <thead>
+                <tr className="border-b border-hairline text-[12px] text-muted">
+                  <th className="py-2.5 pr-4 font-medium">주문 계획</th>
+                  <th className="py-2.5 pr-4 font-medium">종목</th>
+                  <th className="py-2.5 pr-4 font-medium">방향</th>
+                  <th className="py-2.5 pr-4 font-medium">금액</th>
+                  <th className="py-2.5 pr-4 font-medium">상태</th>
+                  <th className="py-2.5 font-medium">브로커 주문</th>
+                </tr>
+              </thead>
+              <tbody>
+                {result.submitted_order_plans.map((order) => {
+                  const brokerOrder = result.broker_orders.find((item) => item.order_plan_id === order.order_plan_id);
+                  return (
+                    <tr
+                      key={order.order_plan_id}
+                      className="h-12 border-b border-hairline/60 transition-colors hover:bg-surface-solid/70"
+                    >
+                      <td className="pr-4 font-mono text-[12px]">{order.order_plan_id}</td>
+                      <td className="pr-4 font-mono font-semibold">{order.intent.symbol}</td>
+                      <td className="pr-4">
+                        <Badge variant={order.intent.side === "buy" ? "safe" : "warn"}>
+                          {order.intent.side}
+                        </Badge>
+                      </td>
+                      <td className="pr-4 tabular-nums">{formatKRW(order.intent.notional)}</td>
+                      <td className="pr-4">
+                        <Badge variant={order.status === "filled" ? "safe" : "neutral"}>{order.status}</Badge>
+                      </td>
+                      <td className="font-mono text-[12px] text-muted">
+                        {brokerOrder?.broker_order_id ?? "-"}
+                      </td>
+                    </tr>
+                  );
+                })}
+              </tbody>
+            </table>
+          </div>
+        )}
+
+        {result.blocked_proposals.length > 0 && (
+          <div className="rounded-xl border border-warn/40 bg-warn-soft px-3.5 py-3 text-[12.5px] text-warn">
+            차단된 제안 {result.blocked_proposals.length}건:{" "}
+            {result.blocked_proposals.map((item) => `${item.order_plan_id}(${item.reason})`).join(", ")}
+          </div>
+        )}
+
+        <JsonViewer data={result} title="Raw JSON (mock execution)" />
+      </CardContent>
+      </Card>
     </div>
+  );
+}
+
+/**
+ * The hero of a Level 1-2 auto-trade run: makes the "program judged the timing
+ * and traded for you" narrative explicit, with a per-symbol decision table.
+ * `executed` decisions were filled on the mock account; `blocked` decisions were
+ * stopped by a risk/guardrail gate.
+ */
+function AutoExecutionPanel({ summary }: { summary: AutoExecutionSummary }) {
+  const blockedTone = summary.blocked > 0 ? "warn" : "default";
+  return (
+    <Card className="border-accent/30 bg-accent-soft/30">
+      <CardHeader>
+        <CardTitle className="flex items-center gap-2">
+          <Bot className="size-4.5 text-accent" /> 프로그램 자동 매매 판단
+        </CardTitle>
+        <CardDescription>
+          신호에서 매매 타이밍을 스스로 판단하고 모의 계좌에 자동으로 주문을 제출했습니다 — 사람의 승인 없이
+          프로그램이 직접 체결합니다.
+        </CardDescription>
+      </CardHeader>
+      <CardContent className="flex flex-col gap-5">
+        <div className="flex flex-wrap items-center gap-2">
+          <Badge variant={summary.executed ? "safe" : "neutral"}>
+            {summary.executed ? "자동 체결됨" : "체결된 주문 없음"}
+          </Badge>
+          <Badge variant="neutral">mode: {summary.mode}</Badge>
+          <Badge variant="safe">live_trading_enabled: {String(summary.live_trading_enabled)}</Badge>
+        </div>
+
+        <div className="grid grid-cols-2 gap-3 lg:grid-cols-4">
+          <Stat label="타이밍 평가 신호" value={summary.signals_evaluated} icon={Radar} />
+          <Stat label="자동 체결 주문" value={summary.auto_submitted} icon={PlayCircle} tone="accent" />
+          <Stat label="체결 금액" value={formatKRW(summary.filled_notional)} icon={Coins} tone="safe" />
+          <Stat label="차단" value={summary.blocked} icon={Ban} tone={blockedTone} />
+        </div>
+
+        {summary.decisions.length === 0 ? (
+          <p className="text-[13px] text-muted">
+            이번 실행에서는 프로그램이 매매할 타이밍이라고 판단한 종목이 없습니다.
+          </p>
+        ) : (
+          <div className="overflow-x-auto">
+            <table className="w-full min-w-[680px] text-left text-[13px]">
+              <thead>
+                <tr className="border-b border-hairline text-[12px] text-muted">
+                  <th className="py-2.5 pr-4 font-medium">종목</th>
+                  <th className="py-2.5 pr-4 font-medium">신호</th>
+                  <th className="py-2.5 pr-4 font-medium">방향</th>
+                  <th className="py-2.5 pr-4 font-medium">수량 · 금액</th>
+                  <th className="py-2.5 pr-4 font-medium">프로그램 결정</th>
+                  <th className="py-2.5 font-medium">판단 근거</th>
+                </tr>
+              </thead>
+              <tbody>
+                {summary.decisions.map((decision) => (
+                  <DecisionRow key={decision.order_plan_id} decision={decision} />
+                ))}
+              </tbody>
+            </table>
+          </div>
+        )}
+      </CardContent>
+    </Card>
+  );
+}
+
+function DecisionRow({ decision }: { decision: AutoExecutionDecision }) {
+  const executed = decision.decision === "executed";
+  return (
+    <tr className="h-12 border-b border-hairline/60 transition-colors hover:bg-surface-solid/70">
+      <td className="pr-4 font-mono font-semibold">{decision.symbol}</td>
+      <td className="pr-4 text-[12.5px] text-muted">
+        {decision.action ? ACTION_LABEL[decision.action] : "—"}
+        {decision.strength != null && (
+          <span className="ml-1 tabular-nums text-faint">{formatPercent(decision.strength, 0)}</span>
+        )}
+      </td>
+      <td className="pr-4">
+        <Badge variant={decision.side === "buy" ? "safe" : "warn"}>
+          {decision.side === "buy" ? "매수" : "매도"}
+        </Badge>
+      </td>
+      <td className="pr-4 tabular-nums">
+        {decision.quantity.toLocaleString()}주 · {formatKRW(decision.notional)}
+      </td>
+      <td className="pr-4">
+        <Badge variant={executed ? "safe" : "warn"}>
+          {executed ? "자동 체결" : "차단"}
+        </Badge>
+      </td>
+      <td className="text-[12.5px] text-muted">
+        {executed ? decision.reason : decision.blocked_reason ?? decision.reason}
+      </td>
+    </tr>
   );
 }

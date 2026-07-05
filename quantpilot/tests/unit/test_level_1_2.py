@@ -164,3 +164,53 @@ def test_level_1_2_research_flow_cannot_submit_broker_orders() -> None:
     assert service.repositories.order_plans.list() == []
     assert service.repositories.broker_orders.list() == []
     assert service.repositories.fills.list() == []
+
+
+def test_level_1_2_mock_execution_submits_only_mock_orders() -> None:
+    service = HarnessService()
+    policy = service.parse_policy("fixture")
+
+    result = service.run_level_1_2_mock_execution(policy_id=policy.policy_id)
+
+    broker_orders = service.repositories.broker_orders.list()
+    fills = service.repositories.fills.list()
+    audit_actions = [event.action for event in service.repositories.audit_logs.list()]
+    assert result["order_submission_enabled"] is True
+    assert result["data_mode"] == "fixture"
+    assert result["broker"] == "mock"
+    assert result["live_trading_enabled"] is False
+    assert broker_orders
+    assert fills
+    assert all(order.broker_mode.value == "mock" for order in broker_orders)
+    assert "level_1_2_mock_order_authorized" in audit_actions
+    assert "proposal_approved" not in audit_actions
+
+
+def test_level_1_2_mock_execution_reports_program_trade_timing_decisions() -> None:
+    service = HarnessService()
+    policy = service.parse_policy("fixture")
+
+    result = service.run_level_1_2_mock_execution(policy_id=policy.policy_id)
+
+    summary = result["auto_execution"]
+    assert isinstance(summary, dict)
+    submitted = list(result["submitted_order_plans"])  # type: ignore[arg-type]
+    proposals = list(result["proposals"])  # type: ignore[arg-type]
+    fills = list(result["fills"])  # type: ignore[arg-type]
+    decisions = summary["decisions"]
+    assert isinstance(decisions, list)
+
+    assert summary["mode"] == "program_auto_trade"
+    assert summary["live_trading_enabled"] is False
+    # The program acted on its own timing judgement: proposals were auto-submitted.
+    assert summary["auto_submitted"] == len(submitted)
+    assert summary["proposals"] == len(proposals)
+    assert summary["executed"] is (len(submitted) > 0)
+    assert len(decisions) == len(proposals)
+    for decision in decisions:
+        assert decision["decision"] in {"executed", "blocked"}
+        assert decision["symbol"]
+        assert decision["side"] in {"buy", "sell"}
+    # Filled notional reconciles with the recorded mock fills.
+    assert summary["filled"] == len(fills)
+    assert summary["filled_notional"] == round(sum(fill.notional for fill in fills), 2)

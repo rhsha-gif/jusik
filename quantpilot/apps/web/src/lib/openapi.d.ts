@@ -106,6 +106,23 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/level-1-2/mock-execute": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Run Level 1 2 Mock Execute */
+        post: operations["run_level_1_2_mock_execute_api_level_1_2_mock_execute_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/research/universe": {
         parameters: {
             query?: never;
@@ -463,6 +480,74 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/execution/approval-tickets/generate": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Generate Approval Tickets */
+        post: operations["generate_approval_tickets_api_execution_approval_tickets_generate_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/execution/approval-tickets/pending": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Pending Approval Tickets */
+        get: operations["pending_approval_tickets_api_execution_approval_tickets_pending_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/execution/approval-tickets/{ticket_id}/approve-and-submit": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Approve And Submit Approval Ticket */
+        post: operations["approve_and_submit_approval_ticket_api_execution_approval_tickets__ticket_id__approve_and_submit_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/execution/approval-tickets/{ticket_id}/reject": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Reject Approval Ticket */
+        post: operations["reject_approval_ticket_api_execution_approval_tickets__ticket_id__reject_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/operator/run-once": {
         parameters: {
             query?: never;
@@ -535,6 +620,42 @@ export interface paths {
 export type webhooks = Record<string, never>;
 export interface components {
     schemas: {
+        /** ApprovalTicketDecisionRequest */
+        ApprovalTicketDecisionRequest: {
+            /**
+             * Approved By
+             * @default user
+             */
+            approved_by: string;
+            /**
+             * Reason
+             * @default user_rejected
+             */
+            reason: string;
+        };
+        /** ApprovalTicketGenerateRequest */
+        ApprovalTicketGenerateRequest: {
+            /** Policy Id */
+            policy_id?: string | null;
+            /** Portfolio Plan Id */
+            portfolio_plan_id?: string | null;
+            /**
+             * Data Mode
+             * @default live_trading_candidate
+             * @enum {string}
+             */
+            data_mode: "fixture" | "paper_trading" | "live_trading_candidate";
+            /**
+             * Partial Allow
+             * @default false
+             */
+            partial_allow: boolean;
+        };
+        /**
+         * ApprovalTicketStatus
+         * @enum {string}
+         */
+        ApprovalTicketStatus: "pending" | "approved" | "rejected" | "expired" | "submitted" | "blocked";
         /** AutopilotPolicyRequest */
         AutopilotPolicyRequest: {
             /** Policy Id */
@@ -611,6 +732,26 @@ export interface components {
              * @default user_requested
              */
             reason: string;
+        };
+        /** Level12MockExecuteRequest */
+        Level12MockExecuteRequest: {
+            /** Policy Id */
+            policy_id?: string | null;
+            /**
+             * Text
+             * @default KR stock moderate risk weekly rebalance, approval required, mock broker, limit orders only.
+             */
+            text: string;
+            /**
+             * User Id
+             * @default fixture-user
+             */
+            user_id: string;
+            /**
+             * Partial Allow
+             * @default false
+             */
+            partial_allow: boolean;
         };
         /** Level12Request */
         Level12Request: {
@@ -1063,6 +1204,76 @@ export interface components {
             /** Reason */
             reason: string;
         };
+        /** TradeApprovalTicket */
+        TradeApprovalTicket: {
+            /** Ticket Id */
+            ticket_id?: string;
+            /**
+             * User Id
+             * @default fixture-user
+             */
+            user_id: string;
+            /** Policy Id */
+            policy_id: string;
+            /** Policy Version */
+            policy_version: number;
+            /** Order Plan Id */
+            order_plan_id: string;
+            /**
+             * Data Mode
+             * @default live_trading_candidate
+             * @enum {string}
+             */
+            data_mode: "fixture" | "paper_trading" | "live_trading_candidate";
+            /** @default pending */
+            status: components["schemas"]["ApprovalTicketStatus"];
+            /** Symbol */
+            symbol: string;
+            /**
+             * Side
+             * @enum {string}
+             */
+            side: "buy" | "sell";
+            /** Quantity */
+            quantity: number;
+            /** Limit Price */
+            limit_price?: number | null;
+            /** Notional */
+            notional: number;
+            /** Reason */
+            reason: string;
+            /**
+             * Requested At
+             * Format: date-time
+             */
+            requested_at?: string;
+            /**
+             * Expires At
+             * Format: date-time
+             */
+            expires_at?: string;
+            /** Approved At */
+            approved_at?: string | null;
+            /** Approved By */
+            approved_by?: string | null;
+            /** Rejected At */
+            rejected_at?: string | null;
+            /** Rejection Reason */
+            rejection_reason?: string | null;
+            /** Submitted At */
+            submitted_at?: string | null;
+            /** Submitted Order Plan Id */
+            submitted_order_plan_id?: string | null;
+            /** Broker Order Id */
+            broker_order_id?: string | null;
+            /** Blocked Reason */
+            blocked_reason?: string | null;
+            /**
+             * Live Trading Enabled
+             * @default false
+             */
+            live_trading_enabled: boolean;
+        };
         /** UserPolicy */
         UserPolicy: {
             /** Policy Id */
@@ -1380,6 +1591,41 @@ export interface operations {
         requestBody: {
             content: {
                 "application/json": components["schemas"]["Level12Request"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        [key: string]: unknown;
+                    };
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    run_level_1_2_mock_execute_api_level_1_2_mock_execute_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["Level12MockExecuteRequest"];
             };
         };
         responses: {
@@ -2079,6 +2325,131 @@ export interface operations {
                     "application/json": {
                         [key: string]: unknown;
                     };
+                };
+            };
+        };
+    };
+    generate_approval_tickets_api_execution_approval_tickets_generate_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["ApprovalTicketGenerateRequest"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["TradeApprovalTicket"][];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    pending_approval_tickets_api_execution_approval_tickets_pending_get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["TradeApprovalTicket"][];
+                };
+            };
+        };
+    };
+    approve_and_submit_approval_ticket_api_execution_approval_tickets__ticket_id__approve_and_submit_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                ticket_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["ApprovalTicketDecisionRequest"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        [key: string]: unknown;
+                    };
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    reject_approval_ticket_api_execution_approval_tickets__ticket_id__reject_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                ticket_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["ApprovalTicketDecisionRequest"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["TradeApprovalTicket"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
                 };
             };
         };

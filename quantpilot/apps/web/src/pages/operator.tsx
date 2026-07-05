@@ -241,7 +241,10 @@ function RegistryTable({ entries }: { entries: OperatorStatusResponse["registry"
         </thead>
         <tbody>
           {entries.map((entry) => (
-            <tr key={`${entry.strategy_id}@${entry.version}`} className="h-11 border-b border-hairline/60">
+            <tr
+              key={`${entry.strategy_id}@${entry.version}`}
+              className="h-11 border-b border-hairline/60 transition-colors hover:bg-surface-solid/70"
+            >
               <td className="pr-4 font-mono font-semibold">{entry.strategy_id}</td>
               <td className="pr-4 font-mono">{entry.version}</td>
               <td className="pr-4">
@@ -505,7 +508,10 @@ function DecisionsTable({ decisions }: { decisions: OperatorDecision[] }) {
         </thead>
         <tbody>
           {decisions.map((decision) => (
-            <tr key={decision.decision_id} className="border-b border-hairline/60 align-top">
+            <tr
+              key={decision.decision_id}
+              className="border-b border-hairline/60 align-top transition-colors hover:bg-surface-solid/70"
+            >
               <td className="py-2.5 pr-4">
                 <Badge variant={DECISION_VARIANT[decision.action]}>{decision.action}</Badge>
               </td>

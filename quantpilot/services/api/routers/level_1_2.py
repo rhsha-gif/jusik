@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from fastapi import APIRouter, Depends
+from fastapi import APIRouter, Depends, HTTPException
 from pydantic import BaseModel
 
 from quantpilot.packages.core.harness_service import HarnessService
@@ -18,6 +18,10 @@ class Level12Request(BaseModel):
     user_id: str = "fixture-user"
 
 
+class Level12MockExecuteRequest(Level12Request):
+    partial_allow: bool = False
+
+
 def _policy_id_for_request(request: Level12Request, service: HarnessService) -> str:
     if request.policy_id is not None:
         return request.policy_id
@@ -33,6 +37,20 @@ def run_level_1_2(
     service: HarnessService = Depends(get_harness_service),
 ) -> dict[str, object]:
     return service.run_level_1_2(policy_id=_policy_id_for_request(request, service))
+
+
+@router.post("/level-1-2/mock-execute")
+def run_level_1_2_mock_execute(
+    request: Level12MockExecuteRequest,
+    service: HarnessService = Depends(get_harness_service),
+) -> dict[str, object]:
+    try:
+        return service.run_level_1_2_mock_execution(
+            policy_id=_policy_id_for_request(request, service),
+            partial_allow=request.partial_allow,
+        )
+    except RuntimeError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
 
 
 @router.post("/research/universe")

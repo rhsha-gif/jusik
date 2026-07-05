@@ -2,6 +2,16 @@
 
 Fixture-only operating harness for QuantPilot Operator. Live broker trading is not implemented or enabled.
 
+Level 1-2 has two separate paths:
+
+- `POST /api/level-1-2/run` keeps the research/signal/rebalance suggestion contract and never creates orders.
+- `POST /api/level-1-2/mock-execute` converts fixture timing signals into order plans and submits them only through `MockBroker`.
+
+Approval tickets for future paper/live-candidate stages are available under
+`/api/execution/approval-tickets/*`. `live_trading_candidate` tickets can be
+approved by a user, but the system blocks before broker submission because no
+live broker adapter exists.
+
 ## Safe Defaults
 
 ```text

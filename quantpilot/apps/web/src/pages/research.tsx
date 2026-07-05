@@ -226,7 +226,7 @@ export function ResearchPage() {
 
 function UniverseRow({ item }: { item: CandidateUniverseItem }) {
   return (
-    <tr className="h-12 border-b border-hairline/60">
+    <tr className="h-12 border-b border-hairline/60 transition-colors hover:bg-surface-solid/70">
       <td className="pr-4">
         <span className="font-mono text-[13px] font-semibold">{item.ticker}</span>
         <span className="ml-2 text-muted">{item.name}</span>

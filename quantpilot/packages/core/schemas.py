@@ -50,6 +50,15 @@ class OrderStatus(str, Enum):
     failed = "failed"
 
 
+class ApprovalTicketStatus(str, Enum):
+    pending = "pending"
+    approved = "approved"
+    rejected = "rejected"
+    expired = "expired"
+    submitted = "submitted"
+    blocked = "blocked"
+
+
 class BrokerMode(str, Enum):
     mock = "mock"
     paper = "paper"
@@ -451,6 +460,33 @@ class OrderPlan(HarnessModel):
         if not self.idempotency_key.strip():
             raise ValueError("idempotency_key is required")
         return self
+
+
+class TradeApprovalTicket(HarnessModel):
+    ticket_id: str = Field(default_factory=lambda: new_id("atkt"))
+    user_id: str = "fixture-user"
+    policy_id: str
+    policy_version: int
+    order_plan_id: str
+    data_mode: Literal["fixture", "paper_trading", "live_trading_candidate"] = "live_trading_candidate"
+    status: ApprovalTicketStatus = ApprovalTicketStatus.pending
+    symbol: str
+    side: Literal["buy", "sell"]
+    quantity: float = Field(gt=0)
+    limit_price: float | None = Field(default=None, gt=0)
+    notional: float = Field(gt=0)
+    reason: str
+    requested_at: datetime = Field(default_factory=utc_now)
+    expires_at: datetime = Field(default_factory=lambda: utc_now() + timedelta(minutes=30))
+    approved_at: datetime | None = None
+    approved_by: str | None = None
+    rejected_at: datetime | None = None
+    rejection_reason: str | None = None
+    submitted_at: datetime | None = None
+    submitted_order_plan_id: str | None = None
+    broker_order_id: str | None = None
+    blocked_reason: str | None = None
+    live_trading_enabled: bool = False
 
 
 class BrokerOrder(HarnessModel):

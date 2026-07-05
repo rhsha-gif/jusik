@@ -2,24 +2,42 @@ import { Link } from "react-router-dom";
 import {
   Activity,
   ArrowRight,
+  BellRing,
   Bot,
+  Database,
+  FileCheck2,
   FlaskConical,
+  Layers,
   ListChecks,
   Lock,
   PlayCircle,
   Radar,
+  Receipt,
   RefreshCw,
+  Server,
   ShieldCheck,
+  Signal,
 } from "lucide-react";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
+import { Stat } from "@/components/ui/stat";
 import { Skeleton } from "@/components/ui/misc";
 import { JsonViewer } from "@/components/json-viewer";
 import { OfflineState } from "@/components/states";
 import { PageHeader } from "@/components/page-header";
 import { useHealth, useRunSmoke } from "@/lib/queries";
-import { formatDuration } from "@/lib/utils";
+import type { HealthResponse } from "@/lib/types";
+import { cn, formatDuration } from "@/lib/utils";
+
+const DATA_MODE_LABELS: Record<string, string> = {
+  fixture: "Fixture",
+  local_historical: "로컬 히스토리",
+  external_historical: "외부 히스토리",
+  realtime_market_data: "실시간",
+  paper_trading: "페이퍼",
+  live_trading: "실거래 차단",
+};
 
 const SAFETY_DEFAULTS = [
   { key: "LIVE_TRADING_ENABLED", value: "false", label: "실거래 비활성" },
@@ -50,8 +68,14 @@ const WORKFLOWS = [
   {
     to: "/run",
     icon: Activity,
-    title: "Level 1-2 실행",
-    description: "모의 파이프라인 전체를 실행하고 결과 리뷰",
+    title: "Level 1-2 자동매매",
+    description: "프로그램이 타이밍을 판단해 모의 계좌에서 자동 체결",
+  },
+  {
+    to: "/execution",
+    icon: BellRing,
+    title: "승인 알림",
+    description: "실거래 타이밍 포착 시 알림 → 승인 → 시스템 집행",
   },
   {
     to: "/operator",
@@ -87,6 +111,9 @@ export function OverviewPage() {
       {health.isError ? (
         <OfflineState onRetry={() => void health.refetch()} />
       ) : (
+        <>
+        {health.isSuccess && <OverviewKpis health={health.data} />}
+        <TradingModes />
         <div className="grid gap-5 md:grid-cols-2">
           <Card>
             <CardHeader>
@@ -100,16 +127,10 @@ export function OverviewPage() {
                 <Skeleton className="h-20" />
               ) : (
                 <>
-                  <div className="flex flex-wrap items-center gap-2">
-                    <Badge variant={health.data?.status === "ok" ? "safe" : "warn"}>
-                      status: {health.data?.status}
-                    </Badge>
-                    <Badge variant={health.data?.live_trading_enabled ? "danger" : "safe"}>
-                      live_trading_enabled: {String(health.data?.live_trading_enabled)}
-                    </Badge>
-                    <Badge variant="neutral">broker: {health.data?.default_broker}</Badge>
-                  </div>
-                  <JsonViewer data={health.data} title="Raw JSON (health)" />
+                  <p className="text-[13px] leading-relaxed text-muted">
+                    핵심 상태는 위 요약 줄에 표시됩니다. 아래에서 원본 응답 전체를 확인할 수 있습니다.
+                  </p>
+                  <JsonViewer data={health.data} title="Raw JSON (health)" defaultOpen />
                 </>
               )}
             </CardContent>
@@ -139,6 +160,7 @@ export function OverviewPage() {
             </CardContent>
           </Card>
         </div>
+        </>
       )}
 
       <Card>
@@ -165,10 +187,10 @@ export function OverviewPage() {
           {smoke.isSuccess && (
             <>
               <div className="grid grid-cols-2 gap-3 sm:grid-cols-4">
-                <SmokeStat label="신호" value={smoke.data.signals} />
-                <SmokeStat label="주문 플랜" value={smoke.data.orders.length} />
-                <SmokeStat label="모의 체결" value={smoke.data.fills} />
-                <SmokeStat label="감사 이벤트" value={smoke.data.audit_events} />
+                <Stat label="신호" value={smoke.data.signals} icon={Signal} tone="accent" />
+                <Stat label="주문 플랜" value={smoke.data.orders.length} icon={Layers} />
+                <Stat label="모의 체결" value={smoke.data.fills} icon={FileCheck2} />
+                <Stat label="감사 이벤트" value={smoke.data.audit_events} icon={Receipt} />
               </div>
               <div className="flex flex-wrap items-center gap-2">
                 <Badge variant="safe">live_trading_enabled: false</Badge>
@@ -213,13 +235,130 @@ export function OverviewPage() {
   );
 }
 
-function SmokeStat({ label, value }: { label: string; value: number }) {
+/**
+ * The two ways QuantPilot actually executes trades, side by side. This is the
+ * answer to "does it only suggest, or does it trade?" — Level 1-2 trades itself
+ * on the mock account; real trading routes through an approval alert and then the
+ * system (not the user) submits.
+ */
+function TradingModes() {
   return (
-    <div className="rounded-xl border border-hairline bg-surface-raised px-4 py-3 shadow-sm">
-      <p className="text-[11.5px] font-medium uppercase tracking-wide text-faint">{label}</p>
-      <p className="mt-1 text-[24px] font-semibold leading-none tabular-nums tracking-tight">
-        {value}
-      </p>
+    <Card>
+      <CardHeader>
+        <CardTitle className="flex items-center gap-2">
+          <Activity className="size-4.5 text-accent" /> 매매 동작 방식
+        </CardTitle>
+        <CardDescription>단계에 따라 두 가지 방식으로 매매가 집행됩니다.</CardDescription>
+      </CardHeader>
+      <CardContent className="grid gap-4 md:grid-cols-2">
+        <ModeTile
+          icon={Bot}
+          tone="accent"
+          badge="모의 · Level 1-2"
+          title="프로그램 자동매매"
+          body="실제 주식이 아니므로 프로그램이 매매 타이밍을 스스로 판단하고 모의 계좌에 자동으로 체결합니다. 사람의 승인이 필요 없습니다."
+          to="/run"
+          cta="자동매매 실행"
+        />
+        <ModeTile
+          icon={BellRing}
+          tone="warn"
+          badge="실거래"
+          title="알림 → 승인 → 시스템 집행"
+          body="실거래 타이밍이 포착되면 사용자에게 알림을 보냅니다. 사용자가 승인하면, 사용자가 직접 매매하지 않고 시스템이 주문을 직접 집행합니다."
+          to="/execution"
+          cta="승인 알림 열기"
+        />
+      </CardContent>
+    </Card>
+  );
+}
+
+function ModeTile({
+  icon: Icon,
+  tone,
+  badge,
+  title,
+  body,
+  to,
+  cta,
+}: {
+  icon: typeof Bot;
+  tone: "accent" | "warn";
+  badge: string;
+  title: string;
+  body: string;
+  to: string;
+  cta: string;
+}) {
+  return (
+    <div className="flex flex-col gap-3 rounded-xl border border-hairline bg-surface-solid/60 p-4">
+      <div className="flex items-center gap-2.5">
+        <span
+          aria-hidden
+          className={cn(
+            "flex size-9 items-center justify-center rounded-xl",
+            tone === "accent" ? "bg-accent-soft text-accent" : "bg-warn-soft text-warn",
+          )}
+        >
+          <Icon className="size-4.5" />
+        </span>
+        <Badge variant={tone === "accent" ? "accent" : "warn"}>{badge}</Badge>
+      </div>
+      <div>
+        <h3 className="text-[14.5px] font-semibold">{title}</h3>
+        <p className="mt-1 text-[12.5px] leading-relaxed text-muted">{body}</p>
+      </div>
+      <Link
+        to={to}
+        className="mt-auto inline-flex w-fit items-center gap-1.5 text-[12.5px] font-medium text-accent hover:underline"
+      >
+        {cta}
+        <ArrowRight className="size-3.5" />
+      </Link>
+    </div>
+  );
+}
+
+/**
+ * Severity for the data-mode tile, kept in lockstep with the always-on
+ * SafetyBanner: live_trading is the most dangerous config (red), any other
+ * unsafe mode is caution (amber), safe modes are green.
+ */
+function dataModeTone(mode: string, safe: boolean): "safe" | "warn" | "danger" {
+  if (mode === "live_trading") return "danger";
+  if (!safe) return "warn";
+  return "safe";
+}
+
+/** Scannable status ribbon — the at-a-glance command-center line. */
+function OverviewKpis({ health }: { health: HealthResponse }) {
+  const online = health.status === "ok";
+  const dataModeLabel = DATA_MODE_LABELS[health.data_mode] ?? health.data_mode;
+  return (
+    <div className="grid grid-cols-2 gap-3 sm:grid-cols-4">
+      <Stat
+        label="백엔드"
+        value={online ? "연결됨" : "점검 필요"}
+        icon={Server}
+        tone={online ? "safe" : "warn"}
+        hint={`status: ${health.status}`}
+      />
+      <Stat
+        label="데이터 모드"
+        value={dataModeLabel}
+        icon={Database}
+        tone={dataModeTone(health.data_mode, health.data_mode_safe)}
+        hint={health.data_mode_error ?? (health.data_mode_safe ? "안전 모드" : "주의")}
+      />
+      <Stat label="브로커" value={health.default_broker} icon={Bot} hint="모의 브로커" />
+      <Stat
+        label="실거래"
+        value={health.live_trading_enabled ? "활성" : "차단"}
+        icon={Lock}
+        tone={health.live_trading_enabled ? "danger" : "safe"}
+        hint="LIVE_TRADING_ENABLED=false"
+      />
     </div>
   );
 }

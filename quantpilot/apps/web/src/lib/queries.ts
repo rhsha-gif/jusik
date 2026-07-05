@@ -2,8 +2,11 @@ import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { apiFetch } from "./api";
 import type {
   AnalystResponse,
+  ApprovalTicketDecisionResult,
+  ApprovalTicketGenerateRequest,
   HealthResponse,
   Level12Request,
+  Level12MockExecutionResponse,
   Level12RunResponse,
   OperatorReportEnvelope,
   OperatorRunRequest,
@@ -13,6 +16,7 @@ import type {
   PolicyPreviewResponse,
   SignalBoardResponse,
   SmokeResult,
+  TradeApprovalTicket,
   UniverseResponse,
   UserPolicy,
 } from "./types";
@@ -90,6 +94,76 @@ export function useLevel12Run() {
   return useMutation({
     mutationFn: (body: Level12Request) =>
       apiFetch<Level12RunResponse>("/api/level-1-2/run", { method: "POST", body }),
+  });
+}
+
+export function useLevel12MockExecute() {
+  return useMutation({
+    mutationFn: (body: Level12Request & { partial_allow?: boolean }) =>
+      apiFetch<Level12MockExecutionResponse>("/api/level-1-2/mock-execute", {
+        method: "POST",
+        body,
+      }),
+  });
+}
+
+export const APPROVAL_TICKETS_PENDING_KEY = ["execution", "approval-tickets", "pending"] as const;
+
+export function usePendingApprovalTickets() {
+  return useQuery({
+    queryKey: APPROVAL_TICKETS_PENDING_KEY,
+    queryFn: ({ signal }) =>
+      apiFetch<TradeApprovalTicket[]>("/api/execution/approval-tickets/pending", { signal }),
+    retry: 1,
+    staleTime: 5_000,
+    // Poll so the global approval-alert bell in the app shell stays fresh — a
+    // new pending ticket is the "trade timing detected" alarm for real trading.
+    refetchInterval: 20_000,
+  });
+}
+
+export function useGenerateApprovalTickets() {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: (body: ApprovalTicketGenerateRequest) =>
+      apiFetch<TradeApprovalTicket[]>("/api/execution/approval-tickets/generate", {
+        method: "POST",
+        body,
+      }),
+    onSuccess: () => {
+      void queryClient.invalidateQueries({ queryKey: APPROVAL_TICKETS_PENDING_KEY });
+    },
+  });
+}
+
+export function useApproveApprovalTicket() {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: ({ ticketId, approvedBy }: { ticketId: string; approvedBy?: string }) =>
+      apiFetch<ApprovalTicketDecisionResult>(
+        `/api/execution/approval-tickets/${ticketId}/approve-and-submit`,
+        {
+          method: "POST",
+          body: { approved_by: approvedBy ?? "user" },
+        },
+      ),
+    onSuccess: () => {
+      void queryClient.invalidateQueries({ queryKey: APPROVAL_TICKETS_PENDING_KEY });
+    },
+  });
+}
+
+export function useRejectApprovalTicket() {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: ({ ticketId, reason }: { ticketId: string; reason?: string }) =>
+      apiFetch<TradeApprovalTicket>(`/api/execution/approval-tickets/${ticketId}/reject`, {
+        method: "POST",
+        body: { reason: reason ?? "user_rejected" },
+      }),
+    onSuccess: () => {
+      void queryClient.invalidateQueries({ queryKey: APPROVAL_TICKETS_PENDING_KEY });
+    },
   });
 }
 

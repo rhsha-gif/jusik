@@ -20,6 +20,21 @@ python -m quantpilot.jobs.run_smoke
 
 Use `make test` and `make smoke` only where `make` is available.
 
+## Frontend & Local Servers (quantpilot/apps/web)
+
+- Dev server: `npm run dev` (vite, port 5173 — 다른 세션과 충돌 시 죽이지 말고 `--port 5174` 사용)
+- Test / build: `npm run test` (vitest), `npm run build` — 프론트 변경 시 둘 다 필수
+- API 서버: `python -m uvicorn quantpilot.services.api.main:app --port 8010` (충돌 시 8011, 8012)
+- 헬스체크: `curl -s http://127.0.0.1:8010/api/health`
+- `openapi.json` 변경 시 apps/web에서 `npm run generate:api`로 타입 재생성
+
+## User Conventions (learned from past sessions)
+
+- 사용자 보고·요약은 한국어, 코드·커밋 메시지는 영어.
+- 스테이지(단계) 범위를 벗어나는 기능 추가 금지 — 사용자가 명시적으로 범위를 제한한 이력 있음 (예: "KIS websocket, realtime wiring은 이 스테이지에 넣지 말 것").
+- 완료 보고 형식: pytest + run_smoke 실제 출력 근거 제시.
+- 프론트엔드 디자인 작업 시 `design.md`를 먼저 읽을 것.
+
 ## Safety Invariants
 
 - `LIVE_TRADING_ENABLED=false`

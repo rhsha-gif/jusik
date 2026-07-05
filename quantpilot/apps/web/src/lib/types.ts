@@ -351,6 +351,22 @@ export interface ApprovalTicketDecisionResult {
  * StrategyApprovalTicket verbatim.
  * ------------------------------------------------------------------------- */
 
+export interface OperatorNotification {
+  notification_id: string;
+  user_id: string;
+  severity: "info" | "warning" | "critical";
+  event_type:
+    | "strategy_drift_expired"
+    | "strategy_ticket_expired"
+    | "strategy_ticket_revoked"
+    | "kill_switch_engaged";
+  strategy_id: string | null;
+  ticket_id: string | null;
+  message: string;
+  created_at: string;
+  acknowledged_at: string | null;
+}
+
 export type StrategyDraftStatus = "drafted" | "validated" | "validation_failed";
 
 export interface StrategyDraft {

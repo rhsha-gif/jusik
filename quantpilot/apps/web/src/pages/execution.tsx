@@ -16,8 +16,10 @@ import { JsonViewer } from "@/components/json-viewer";
 import { ErrorState } from "@/components/states";
 import { PageHeader } from "@/components/page-header";
 import {
+  useAcknowledgeNotification,
   useApproveApprovalTicket,
   useGenerateApprovalTickets,
+  useNotifications,
   usePendingApprovalTickets,
   useRejectApprovalTicket,
 } from "@/lib/queries";
@@ -28,6 +30,61 @@ import {
 import { useWorkingPolicy } from "@/lib/working-policy";
 import type { ApprovalDataMode, TradeApprovalTicket } from "@/lib/types";
 import { cn, formatKRW, formatTime } from "@/lib/utils";
+
+const NOTIFICATION_EVENT_LABEL: Record<string, string> = {
+  strategy_drift_expired: "드리프트 초과 — 전략 승인 만료",
+  strategy_ticket_expired: "유효기간 경과 — 전략 승인 만료",
+  strategy_ticket_revoked: "전략 승인 폐기",
+  kill_switch_engaged: "킬스위치 발동",
+};
+
+function NotificationInbox() {
+  const notifications = useNotifications();
+  const acknowledge = useAcknowledgeNotification();
+  const items = notifications.data ?? [];
+  if (items.length === 0) return null;
+  return (
+    <Card>
+      <CardHeader>
+        <CardTitle className="flex items-center gap-2">
+          <ShieldAlert className="size-4" /> 안전 통지 인박스
+        </CardTitle>
+        <CardDescription>
+          자동 운용 중 발생한 안전 이벤트입니다. 확인 전까지 계속 표시됩니다.
+        </CardDescription>
+      </CardHeader>
+      <CardContent className="flex flex-col gap-2">
+        {items.map((item) => (
+          <div
+            key={item.notification_id}
+            className="flex flex-wrap items-center justify-between gap-2 rounded-xl border border-hairline bg-surface-solid px-3.5 py-3"
+          >
+            <div className="flex flex-col gap-1">
+              <div className="flex flex-wrap items-center gap-2">
+                <Badge variant={item.severity === "critical" ? "warn" : "neutral"}>
+                  {item.severity}
+                </Badge>
+                <span className="text-[13px] font-medium">
+                  {NOTIFICATION_EVENT_LABEL[item.event_type] ?? item.event_type}
+                </span>
+                {item.strategy_id && <Badge variant="neutral">{item.strategy_id}</Badge>}
+              </div>
+              <p className="text-[12.5px] text-muted">{item.message}</p>
+            </div>
+            <Button
+              variant="secondary"
+              size="sm"
+              onClick={() => acknowledge.mutate(item.notification_id)}
+              disabled={acknowledge.isPending}
+            >
+              <CheckCircle2 /> 확인
+            </Button>
+          </div>
+        ))}
+      </CardContent>
+    </Card>
+  );
+}
 
 const DATA_MODE_LABEL: Record<ApprovalDataMode, string> = {
   fixture: "Fixture mock",
@@ -89,6 +146,8 @@ export function ExecutionPage() {
       />
 
       <FlowSteps />
+
+      <NotificationInbox />
 
       <Card>
         <CardHeader>

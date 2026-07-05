@@ -8,6 +8,7 @@ import type {
   Level12Request,
   Level12MockExecutionResponse,
   Level12RunResponse,
+  OperatorNotification,
   OperatorReportEnvelope,
   OperatorRunRequest,
   OperatorRunResult,
@@ -168,6 +169,35 @@ export function useRejectApprovalTicket() {
       }),
     onSuccess: () => {
       void queryClient.invalidateQueries({ queryKey: APPROVAL_TICKETS_PENDING_KEY });
+    },
+  });
+}
+
+export const NOTIFICATIONS_KEY = ["notifications", "unacknowledged"] as const;
+
+export function useNotifications() {
+  return useQuery({
+    queryKey: NOTIFICATIONS_KEY,
+    queryFn: ({ signal }) =>
+      apiFetch<OperatorNotification[]>("/api/notifications?unacknowledged_only=true", { signal }),
+    retry: 1,
+    staleTime: 5_000,
+    // Safety events (drift expiry, kill switch) must surface without a manual
+    // refresh — same cadence as the approval-ticket alarm.
+    refetchInterval: 20_000,
+  });
+}
+
+export function useAcknowledgeNotification() {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: (notificationId: string) =>
+      apiFetch<OperatorNotification>(`/api/notifications/${notificationId}/acknowledge`, {
+        method: "POST",
+        body: {},
+      }),
+    onSuccess: () => {
+      void queryClient.invalidateQueries({ queryKey: NOTIFICATIONS_KEY });
     },
   });
 }

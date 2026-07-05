@@ -81,6 +81,13 @@ Level 1~5 자율화 전 과정을 먼저 완성하고, 사람 승인 게이트�
 - [x] ~~Stage 03 거래비용·세금 가정치~~ → 확정: 한투 실거래 API·일반 개인 기준
   (`backtest/costs.py`; 뱅키스 온라인이 아닌 영업점 계좌면 `--fee-bps 14.7` 오버라이드)
 - [ ] 슬리피지(현 5bps)·체결버퍼 가정치 — 연구용 가정 유지 중, 브로커 확인 전
+- [ ] 승인 기준(acceptance thresholds) 확정 — **제안값 준비됨 (2026-07-06)**:
+  `min_total_return ≥ 0` · `max_drawdown ≤ 0.10` · `min_simplified_sharpe ≥ 0.3` ·
+  `min_filled_trades ≥ 15` (24개월 기준) · `max_turnover ≤ 4.0`.
+  실측: buffer 50bps는 통과, buffer 0bps는 Sharpe 0.144로 탈락 —
+  체결모델 가정이 승인 여부를 가르므로 확정 전 체결버퍼 가정 확인 권장.
+  CLI: `run_local_backtest --min-total-return 0 --max-drawdown 0.10
+  --min-simplified-sharpe 0.3 --min-filled-trades 15 --max-turnover 4.0`
 - [ ] 워크포워드 윈도 정책
 - [ ] 전략 승격(promotion) 승인자·증빙 형식 정책
 - [ ] 라이브 체크리스트 12항목 (전부 사람 서명 필요)

@@ -38,12 +38,20 @@ Level 1~5 자율화 전 과정을 먼저 완성하고, 사람 승인 게이트�
 - `quantpilot/jobs/fetch_krx_local_data.py` 추가 — pykrx로 실 KRX 일봉을 받아
   `local_historical` CSV 생성·자체 검증. 삼성전자/SK하이닉스/NAVER 798봉으로
   `DATA_MODE=local_historical` 스모크 실행 성공 (signals=3, broker=mock, live 비활성 유지)
+- **실 KRX 데이터 첫 백테스트 완료** — `backtest/replay.py` (no-lookahead 신호 리플레이)
+  + `run_local_backtest` 잡 추가. 13개월 실데이터에서 삼성전자 매수→청산 왕복 체결
+  (+5.32%, MDD 2.56%). 상세: `docs/local_data_backtest_validation_report.md`.
+  발견: ① limit=종가 체결모델은 모멘텀 갭업에서 구조적으로 미체결
+  (`--limit-buffer-bps`로 민감도 측정 가능) ② exit 시 잔량 ~0.5주 남는 엔진 특성
+  ③ 대형주 3종목·13개월에 실행신호 5건 — 유니버스 확대 필요
 
 ## 다음 단계 후보 (우선순위 제안)
 
-1. 실 KRX 데이터 기반 백테스트 검증 (Stage 03 프로토콜을 local_historical로 재실행)
-2. KIS 앱키 확보 시: 토큰 발급 헬퍼 구현 → `RUN_KIS_MANUAL_INTEGRATION=1` 수동 통합 테스트
-3. 소소한 부채: `MARKET_ORDERS_ENABLED` 판독 중복 제거, `.env.example` 동기화 코드 가드
+1. 백테스트 유니버스 확대 (pykrx로 종목 추가 후 `run_local_backtest` 재실행) 및
+   수수료·세금·체결버퍼 가정치 확정 (사람 입력)
+2. 엔진 개선 검토: exit 신호의 전량 청산 (잔량 이슈), 체결모델 현실화
+3. KIS 앱키 확보 시: 토큰 발급 헬퍼 구현 → `RUN_KIS_MANUAL_INTEGRATION=1` 수동 통합 테스트
+4. 소소한 부채: `MARKET_ORDERS_ENABLED` 판독 중복 제거, `.env.example` 동기화 코드 가드
 
 ## 사람 입력 대기
 

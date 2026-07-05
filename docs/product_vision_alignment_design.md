@@ -226,7 +226,13 @@ class CapitalAllocationPolicy(BaseModel):
 > 이제 무장된 전략 티켓 전부를 `kill_switch_engaged` 사유로 revoke하고,
 > `strategy_activation_allowed`는 킬스위치 중 무조건 차단. 해제(명시적 확인 문구
 > 필요) 후에도 전략은 재승인 전까지 비활성 — 원버튼 정지 요건 충족.
-> 통지 인박스(`OperatorNotification`)는 미구현.
+>
+> **통지 인박스 구현됨 (2026-07-06)**: `OperatorNotification` 스키마+저장소,
+> 드리프트 만료(critical)·유효기간 만료(warning)·티켓 폐기(킬스위치 시
+> critical)·킬스위치 발동(critical) 이벤트가 자동 적재.
+> `GET /api/notifications`(unacknowledged_only 필터) +
+> `POST /api/notifications/{id}/acknowledge`. 외부 채널(이메일/푸시)
+> 어댑터와 프론트 인박스 UI는 후속.
 
 ```python
 class OperatorNotification(BaseModel):

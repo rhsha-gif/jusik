@@ -114,6 +114,36 @@ def test_kill_switch_revokes_armed_strategies_and_closes_gate() -> None:
     assert service.strategy_activation_allowed("strat_alpha", execution_level="level_3")[0] is False
 
 
+def test_safety_events_land_in_the_notification_inbox() -> None:
+    service = HarnessService()
+    ticket = _approved_ticket(service)
+    service.record_strategy_performance(_performance(mdd=0.05))
+    service.strategy_activation_allowed("strat_alpha", execution_level="level_3")  # fires drift
+
+    inbox = service.list_notifications(unacknowledged_only=True)
+
+    assert [item.event_type for item in inbox] == ["strategy_drift_expired"]
+    drift_note = inbox[0]
+    assert drift_note.severity == "critical"
+    assert drift_note.ticket_id == ticket.ticket_id
+
+    acknowledged = service.acknowledge_notification(drift_note.notification_id)
+    assert acknowledged.acknowledged_at is not None
+    assert service.list_notifications(unacknowledged_only=True) == []
+
+
+def test_kill_switch_emits_critical_notifications() -> None:
+    service = HarnessService()
+    _approved_ticket(service)
+    policy = service.parse_policy("fixture")
+
+    service.engage_kill_switch(policy_id=policy.policy_id, reason="test")
+
+    events = [item.event_type for item in service.list_notifications()]
+    assert "kill_switch_engaged" in events
+    assert "strategy_ticket_revoked" in events
+
+
 def test_no_performance_record_keeps_activation_open() -> None:
     service = HarnessService()
     ticket = _approved_ticket(service)

@@ -516,6 +516,31 @@ class StrategyDraft(HarnessModel):
     validated_at: datetime | None = None
 
 
+class OperatorNotification(HarnessModel):
+    """User-facing inbox entry for safety-relevant strategy events (§4.5).
+
+    In the strategy-level approval model the user does not watch individual
+    trades, so drift expiries, revocations, and kill-switch events must land
+    somewhere visible. Delivery channels beyond this inbox are adapters to be
+    added later.
+    """
+
+    notification_id: str = Field(default_factory=lambda: new_id("noti"))
+    user_id: str = "fixture-user"
+    severity: Literal["info", "warning", "critical"] = "warning"
+    event_type: Literal[
+        "strategy_drift_expired",
+        "strategy_ticket_expired",
+        "strategy_ticket_revoked",
+        "kill_switch_engaged",
+    ]
+    strategy_id: str | None = None
+    ticket_id: str | None = None
+    message: str
+    created_at: datetime = Field(default_factory=utc_now)
+    acknowledged_at: datetime | None = None
+
+
 class StrategyPerformanceRecord(HarnessModel):
     """Point-in-time realized performance snapshot for an armed strategy.
 

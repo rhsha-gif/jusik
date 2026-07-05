@@ -670,6 +670,40 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/notifications": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** List Notifications */
+        get: operations["list_notifications_api_notifications_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/notifications/{notification_id}/acknowledge": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Acknowledge Notification */
+        post: operations["acknowledge_notification_api_notifications__notification_id__acknowledge_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/strategy-studio/draft": {
         parameters: {
             query?: never;
@@ -1022,6 +1056,48 @@ export interface components {
              * Format: date-time
              */
             created_at?: string;
+        };
+        /**
+         * OperatorNotification
+         * @description User-facing inbox entry for safety-relevant strategy events (§4.5).
+         *
+         *     In the strategy-level approval model the user does not watch individual
+         *     trades, so drift expiries, revocations, and kill-switch events must land
+         *     somewhere visible. Delivery channels beyond this inbox are adapters to be
+         *     added later.
+         */
+        OperatorNotification: {
+            /** Notification Id */
+            notification_id?: string;
+            /**
+             * User Id
+             * @default fixture-user
+             */
+            user_id: string;
+            /**
+             * Severity
+             * @default warning
+             * @enum {string}
+             */
+            severity: "info" | "warning" | "critical";
+            /**
+             * Event Type
+             * @enum {string}
+             */
+            event_type: "strategy_drift_expired" | "strategy_ticket_expired" | "strategy_ticket_revoked" | "kill_switch_engaged";
+            /** Strategy Id */
+            strategy_id?: string | null;
+            /** Ticket Id */
+            ticket_id?: string | null;
+            /** Message */
+            message: string;
+            /**
+             * Created At
+             * Format: date-time
+             */
+            created_at?: string;
+            /** Acknowledged At */
+            acknowledged_at?: string | null;
         };
         /** OperatorReport */
         OperatorReport: {
@@ -3085,6 +3161,68 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["StrategyPerformanceRecord"][];
+                };
+            };
+        };
+    };
+    list_notifications_api_notifications_get: {
+        parameters: {
+            query?: {
+                unacknowledged_only?: boolean;
+            };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["OperatorNotification"][];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    acknowledge_notification_api_notifications__notification_id__acknowledge_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                notification_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["OperatorNotification"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
                 };
             };
         };

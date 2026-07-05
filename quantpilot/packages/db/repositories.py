@@ -8,6 +8,7 @@ from quantpilot.packages.core.schemas import (
     BrokerOrder,
     Fill,
     OperationReport,
+    OperatorNotification,
     OrderPlan,
     PortfolioPlan,
     Signal,
@@ -92,6 +93,7 @@ class RepositoryRegistry:
         self.backtest_results = InMemoryRepository[BacktestResult](lambda item: item.result_id)
         self.strategy_drafts = InMemoryRepository[StrategyDraft](lambda item: item.draft_id)
         self.strategy_performance = InMemoryRepository[StrategyPerformanceRecord](lambda item: item.record_id)
+        self.notifications = InMemoryRepository[OperatorNotification](lambda item: item.notification_id)
 
     def clear(self) -> None:
         self.policies.clear()
@@ -108,3 +110,4 @@ class RepositoryRegistry:
         self.backtest_results.clear()
         self.strategy_drafts.clear()
         self.strategy_performance.clear()
+        self.notifications.clear()

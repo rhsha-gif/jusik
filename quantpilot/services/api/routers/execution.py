@@ -8,6 +8,7 @@ from pydantic import BaseModel
 from quantpilot.packages.core.execution.state_machine import ApprovalRequired, InvalidOrderTransition, RiskCheckRequired
 from quantpilot.packages.core.harness_service import HarnessService
 from quantpilot.packages.core.schemas import (
+    OperatorNotification,
     StrategyApprovalTicket,
     StrategyDraft,
     StrategyPerformanceRecord,
@@ -201,6 +202,25 @@ def refresh_strategy_performance(
 ) -> list[StrategyPerformanceRecord]:
     """Recompute realized performance from attributed fills (auto feed)."""
     return service.run_strategy_performance_feed()
+
+
+@router.get("/notifications")
+def list_notifications(
+    unacknowledged_only: bool = False,
+    service: HarnessService = Depends(get_harness_service),
+) -> list[OperatorNotification]:
+    return service.list_notifications(unacknowledged_only=unacknowledged_only)
+
+
+@router.post("/notifications/{notification_id}/acknowledge")
+def acknowledge_notification(
+    notification_id: str,
+    service: HarnessService = Depends(get_harness_service),
+) -> OperatorNotification:
+    try:
+        return service.acknowledge_notification(notification_id)
+    except (RepositoryError, RuntimeError) as exc:
+        raise HTTPException(status_code=404, detail=str(exc)) from exc
 
 
 class StrategyDraftRequest(BaseModel):

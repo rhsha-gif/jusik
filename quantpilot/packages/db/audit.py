@@ -110,6 +110,8 @@ AUDIT_EVENT_ACTIONS = {
     "strategy_ticket_drift_expired",
     "strategy_ticket_revoked",
     "strategy_performance_recorded",
+    "notification_emitted",
+    "notification_acknowledged",
     "strategy_demoted",
     "strategy_disabled",
     "strategy_lifecycle_registered",

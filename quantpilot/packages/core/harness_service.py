@@ -32,6 +32,7 @@ from quantpilot.packages.core.schemas import (
     Fill,
     GuardrailState,
     OperationReport,
+    OperatorNotification,
     OrderIntent,
     OrderPlan,
     OrderStatus,
@@ -1311,6 +1312,60 @@ class HarnessService:
     # multiple of the backtest evidence MDD forces re-approval.
     DRIFT_MDD_MULTIPLIER = 1.5
 
+    def _notify(
+        self,
+        *,
+        event_type: str,
+        message: str,
+        severity: str = "warning",
+        strategy_id: str | None = None,
+        ticket_id: str | None = None,
+        user_id: str = "fixture-user",
+    ) -> OperatorNotification:
+        notification = OperatorNotification(
+            user_id=user_id,
+            severity=severity,  # type: ignore[arg-type]
+            event_type=event_type,  # type: ignore[arg-type]
+            strategy_id=strategy_id,
+            ticket_id=ticket_id,
+            message=message,
+        )
+        self.repositories.notifications.add(notification)
+        self.audit.emit(
+            user_id=user_id,
+            entity_type="notification",
+            entity_id=notification.notification_id,
+            action="notification_emitted",
+            after_state=notification,
+            source="notification_service",
+        )
+        return notification
+
+    def list_notifications(self, *, unacknowledged_only: bool = False) -> list[OperatorNotification]:
+        notifications = sorted(
+            self.repositories.notifications.list(), key=lambda item: item.created_at, reverse=True
+        )
+        if unacknowledged_only:
+            notifications = [item for item in notifications if item.acknowledged_at is None]
+        return notifications
+
+    def acknowledge_notification(self, notification_id: str) -> OperatorNotification:
+        notification = self.repositories.notifications.require(notification_id)
+        if notification.acknowledged_at is None:
+            before = notification.model_copy(deep=True)
+            notification.acknowledged_at = utc_now()
+            self.repositories.notifications.update(notification)
+            self.audit.emit(
+                user_id=notification.user_id,
+                entity_type="notification",
+                entity_id=notification.notification_id,
+                action="notification_acknowledged",
+                before_state=before,
+                after_state=notification,
+                source="notification_service",
+            )
+        return notification
+
     def record_strategy_performance(self, record: StrategyPerformanceRecord) -> StrategyPerformanceRecord:
         self.repositories.strategy_performance.add(record)
         self.audit.emit(
@@ -1443,6 +1498,17 @@ class HarnessService:
             after_state=ticket,
             source="strategy_ticket_service",
         )
+        self._notify(
+            event_type="strategy_drift_expired",
+            severity="critical",
+            strategy_id=ticket.strategy_id,
+            ticket_id=ticket.ticket_id,
+            message=(
+                f"strategy {ticket.strategy_id} v{ticket.strategy_version} exceeded its "
+                f"drawdown limit ({fired}); approval expired and re-approval is required"
+            ),
+            user_id=ticket.user_id,
+        )
         return ticket
 
     def _expire_strategy_ticket_if_needed(self, ticket: StrategyApprovalTicket) -> StrategyApprovalTicket:
@@ -1460,6 +1526,17 @@ class HarnessService:
                 before_state=before,
                 after_state=ticket,
                 source="strategy_ticket_service",
+            )
+            self._notify(
+                event_type="strategy_ticket_expired",
+                severity="warning",
+                strategy_id=ticket.strategy_id,
+                ticket_id=ticket.ticket_id,
+                message=(
+                    f"approval for strategy {ticket.strategy_id} v{ticket.strategy_version} "
+                    f"passed valid_until and expired; re-approval is required"
+                ),
+                user_id=ticket.user_id,
             )
         return ticket
 
@@ -1542,6 +1619,14 @@ class HarnessService:
             before_state=before,
             after_state=ticket,
             source="strategy_ticket_service",
+        )
+        self._notify(
+            event_type="strategy_ticket_revoked",
+            severity="critical" if reason == "kill_switch_engaged" else "warning",
+            strategy_id=ticket.strategy_id,
+            ticket_id=ticket.ticket_id,
+            message=f"approval for strategy {ticket.strategy_id} was revoked ({reason})",
+            user_id=ticket.user_id,
         )
         return ticket
 
@@ -1872,6 +1957,12 @@ class HarnessService:
             source="autopilot_service",
         )
         self.repositories.policies.update(policy)
+        self._notify(
+            event_type="kill_switch_engaged",
+            severity="critical",
+            message=f"kill switch engaged ({reason}); all armed strategies are being revoked",
+            user_id=policy.user_id,
+        )
         # Strategy-level approvals are armed authority; the kill switch must
         # revoke them too (design doc §4.5). They stay revoked after release —
         # re-arming requires a fresh approval ticket.

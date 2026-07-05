@@ -1455,6 +1455,29 @@
         }
       }
     },
+    "/api/execution/strategy-performance/refresh": {
+      "post": {
+        "summary": "Refresh Strategy Performance",
+        "description": "Recompute realized performance from attributed fills (auto feed).",
+        "operationId": "refresh_strategy_performance_api_execution_strategy_performance_refresh_post",
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "items": {
+                    "$ref": "#/components/schemas/StrategyPerformanceRecord"
+                  },
+                  "type": "array",
+                  "title": "Response Refresh Strategy Performance Api Execution Strategy Performance Refresh Post"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
     "/api/strategy-studio/draft": {
       "post": {
         "summary": "Create Strategy Draft",

@@ -83,10 +83,14 @@ Level 1~5 자율화 전 과정을 먼저 완성하고, 사람 승인 게이트�
 > 전체 로드맵: `docs/product_vision_alignment_design.md`
 
 1. 승인 기준(acceptance thresholds) 확정 — 표본이 생겼으므로 이제 논의 가능 (사람 입력)
-2. DriftMonitor 성과 피드 배선 — 평가기는 ✅ 완료 (실현 MDD > 백테스트 MDD×1.5 시
-   티켓 자동 만료 + 감사 로그; 1.5배 값은 사람 확정 대기). 남은 것: mock 체결/
-   operator run 결과에서 `StrategyPerformanceRecord` 자동 생성하는 피드
-3. 라우터 분리 부채: strategy-studio·strategy-tickets 엔드포인트가 execution.py에 동거
+2. ~~DriftMonitor~~ ✅ 평가기+자동 피드 완료 (실현 MDD > 백테스트 MDD×1.5 시 티켓
+   자동 만료; 피드는 Fill→OrderPlan.explanation 귀속으로 체결 시퀀스 PnL 적산,
+   `/api/execution/strategy-performance/refresh`). 1.5배 값은 사람 확정 대기.
+   개선 여지: 일별 종가 재평가, 수수료 반영
+3. 자본 배분 정책 (설계 §4.4 CapitalAllocationPolicy) 또는 통지 인박스+킬스위치
+   (설계 §4.5; `GuardrailState.kill_switch_engaged`가 이미 존재 — 전략 티켓
+   일괄 revoke와 연결 필요)
+4. 라우터 분리 부채: strategy-studio·strategy-tickets 엔드포인트가 execution.py에 동거
    (main.py에 타 세션 미커밋 CORS 변경 있음 — 커밋 전 주의)
 4. KIS 앱키 확보 시: 토큰 발급 헬퍼 구현 → `RUN_KIS_MANUAL_INTEGRATION=1` 수동 통합 테스트
 5. 소소한 부채: `MARKET_ORDERS_ENABLED` 판독 중복 제거, `.env.example` 동기화 코드 가드

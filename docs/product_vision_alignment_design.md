@@ -166,11 +166,13 @@ class StrategyApprovalTicket(BaseModel):
 > 활성화 게이트 차단. 증빙 MDD가 0이면 어떤 실현 낙폭도 트리거 발화 (fail-closed).
 > 수동/잡 피드용 `POST /api/execution/strategy-performance` 제공.
 >
-> **자동 피드 설계 (미구현)**: mock 체결이 전략별 실현 성과가 되려면
-> ① OrderPlan→Signal→strategy_id 역추적으로 체결을 전략에 귀속,
-> ② 전략별 일별 에쿼티 커브 적산(체결 원장 + 종가), ③ 커브에서 MDD 계산 후
-> `record_strategy_performance` 호출하는 일일 잡. ①의 귀속 체인이 현재
-> OrderPlan 스키마에 없어 `strategy_id` 필드 추가가 선행 과제.
+> **자동 피드 구현됨 (2026-07-06)**: 스키마 변경 없이 해결 — 귀속 체인은
+> Fill → OrderPlan.explanation(strategy_id/version)이 이미 보유.
+> `compute_strategy_performance`가 체결 시퀀스 PnL 커브(체결가 마킹,
+> 수수료 제외, research-only 근사)에서 누적 매수원금 대비 MDD·수익률을 적산,
+> `run_strategy_performance_feed`가 체결 있는 전략 전부를 기록.
+> `POST /api/execution/strategy-performance/refresh`로 트리거.
+> 향후 개선: 일별 종가 재평가 커브(현재는 체결 시점 마킹), 수수료 반영.
 
 운영자 사이클마다 활성 전략별로 §3.2 트리거를 평가하고, 발화 시:
 

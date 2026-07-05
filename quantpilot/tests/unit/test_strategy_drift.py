@@ -70,6 +70,30 @@ def _performance(mdd: float) -> StrategyPerformanceRecord:
     )
 
 
+def test_auto_feed_attributes_fills_and_records_performance() -> None:
+    service = HarnessService()
+    policy = service.parse_policy("fixture")
+    for ticket in service.generate_approval_tickets(policy_id=policy.policy_id, data_mode="fixture"):
+        service.approve_and_submit_approval_ticket(ticket.ticket_id)
+    assert service.repositories.fills.list(), "expected mock fills to attribute"
+
+    records = service.run_strategy_performance_feed()
+
+    assert records, "expected at least one strategy performance record"
+    for record in records:
+        assert record.source == "auto_feed"
+        assert record.observation_days >= 1
+        assert record.realized_max_drawdown >= 0
+        stored = service.repositories.strategy_performance.require(record.record_id)
+        assert stored.strategy_id == record.strategy_id
+
+
+def test_auto_feed_is_empty_without_fills() -> None:
+    service = HarnessService()
+
+    assert service.run_strategy_performance_feed() == []
+
+
 def test_no_performance_record_keeps_activation_open() -> None:
     service = HarnessService()
     ticket = _approved_ticket(service)

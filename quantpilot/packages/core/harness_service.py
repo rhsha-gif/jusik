@@ -1323,6 +1323,82 @@ class HarnessService:
         )
         return record
 
+    def compute_strategy_performance(
+        self, strategy_id: str, strategy_version: str
+    ) -> StrategyPerformanceRecord | None:
+        """Accumulate a fill-sequence PnL curve for one strategy.
+
+        Fills attribute to a strategy through OrderPlan.explanation. The curve
+        marks open positions at each fill's trade price (research-only
+        approximation: fees excluded, no daily close revaluation), and MDD /
+        return are expressed against the cumulative buy notional. Returns
+        ``None`` when the strategy has no attributed buy fills yet.
+        """
+        plans_by_id = {plan.order_plan_id: plan for plan in self.repositories.order_plans.list()}
+        attributed: list[tuple[Fill, str]] = []
+        for fill in self.repositories.fills.list():
+            plan = plans_by_id.get(fill.order_plan_id)
+            if plan is None or plan.explanation is None:
+                continue
+            if (
+                plan.explanation.strategy_id == strategy_id
+                and plan.explanation.strategy_version == strategy_version
+            ):
+                attributed.append((fill, plan.intent.side))
+        attributed.sort(key=lambda item: item[0].filled_at)
+
+        cash = 0.0
+        invested = 0.0
+        positions: dict[str, float] = {}
+        last_price: dict[str, float] = {}
+        curve: list[float] = []
+        for fill, side in attributed:
+            last_price[fill.symbol] = fill.price
+            if side == "buy":
+                cash -= fill.notional
+                invested += fill.notional
+                positions[fill.symbol] = positions.get(fill.symbol, 0.0) + fill.quantity
+            else:
+                cash += fill.notional
+                positions[fill.symbol] = positions.get(fill.symbol, 0.0) - fill.quantity
+            equity = cash + sum(
+                quantity * last_price[symbol]
+                for symbol, quantity in positions.items()
+                if quantity > 0
+            )
+            curve.append(equity)
+        if not curve or invested <= 0:
+            return None
+
+        peak = 0.0
+        drawdown_abs = 0.0
+        for value in curve:
+            peak = max(peak, value)
+            drawdown_abs = max(drawdown_abs, peak - value)
+        observation_days = len({fill.filled_at.date() for fill, _ in attributed})
+        return StrategyPerformanceRecord(
+            strategy_id=strategy_id,
+            strategy_version=strategy_version,
+            realized_max_drawdown=drawdown_abs / invested,
+            realized_total_return=curve[-1] / invested,
+            observation_days=observation_days,
+            source="auto_feed",
+        )
+
+    def run_strategy_performance_feed(self) -> list[StrategyPerformanceRecord]:
+        """Compute and record performance for every strategy with fills."""
+        pairs: set[tuple[str, str]] = set()
+        plans_with_fills = {fill.order_plan_id for fill in self.repositories.fills.list()}
+        for plan in self.repositories.order_plans.list():
+            if plan.order_plan_id in plans_with_fills and plan.explanation is not None:
+                pairs.add((plan.explanation.strategy_id, plan.explanation.strategy_version))
+        records: list[StrategyPerformanceRecord] = []
+        for strategy_id, strategy_version in sorted(pairs):
+            record = self.compute_strategy_performance(strategy_id, strategy_version)
+            if record is not None:
+                records.append(self.record_strategy_performance(record))
+        return records
+
     def _latest_strategy_performance(
         self, strategy_id: str, strategy_version: str
     ) -> StrategyPerformanceRecord | None:

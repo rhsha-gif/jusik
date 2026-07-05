@@ -195,6 +195,14 @@ def record_strategy_performance(
         raise HTTPException(status_code=400, detail=str(exc)) from exc
 
 
+@router.post("/execution/strategy-performance/refresh")
+def refresh_strategy_performance(
+    service: HarnessService = Depends(get_harness_service),
+) -> list[StrategyPerformanceRecord]:
+    """Recompute realized performance from attributed fills (auto feed)."""
+    return service.run_strategy_performance_feed()
+
+
 class StrategyDraftRequest(BaseModel):
     symbols: list[str] = []
     sectors: list[str] = []

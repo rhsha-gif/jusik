@@ -97,7 +97,8 @@ Level 1~5 자율화 전 과정을 먼저 완성하고, 사람 승인 게이트�
 4. 라우터 분리 부채: strategy-studio·strategy-tickets·notifications 엔드포인트가
    execution.py에 동거 (main.py에 타 세션 미커밋 CORS 변경 있음 — 커밋 전 주의)
 5. KIS 앱키 확보 시: `RUN_KIS_MANUAL_INTEGRATION=1` 수동 통합 테스트 (토큰 헬퍼는 ✅ 준비됨)
-6. 소소한 부채: `MARKET_ORDERS_ENABLED` 판독 중복 제거, `.env.example` 동기화 코드 가드
+6. 소소한 부채: ~~`MARKET_ORDERS_ENABLED` 판독 중복 제거~~ ✅ (gatekeeper 단일화),
+   `.env.example` 동기화 코드 가드 (파일에 타 세션 미커밋 변경 있어 보류)
 
 ## 사람 입력 대기
 

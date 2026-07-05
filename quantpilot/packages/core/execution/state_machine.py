@@ -5,6 +5,7 @@ from datetime import datetime, time
 from zoneinfo import ZoneInfo
 
 from quantpilot.packages.core.risk.gatekeeper import run_risk_check
+from quantpilot.packages.core.risk.gatekeeper import market_orders_enabled
 from quantpilot.packages.core.strategies.registry import StrategyRegistryEntry
 from quantpilot.packages.core.schemas import (
     AuthorityCheckResult,
@@ -111,10 +112,6 @@ def live_trading_flag_enabled() -> bool:
     return os.getenv("LIVE_TRADING_ENABLED", "false").lower() == "true"
 
 
-def _market_orders_enabled() -> bool:
-    return os.getenv("MARKET_ORDERS_ENABLED", "false").lower() == "true"
-
-
 def authorize_level4(
     *,
     order_plan: OrderPlan,
@@ -175,7 +172,7 @@ def authorize_level4(
         return result
 
     order_type_allowed = order_plan.intent.order_type in policy.allowed_order_types
-    if order_plan.intent.order_type == OrderType.market and not _market_orders_enabled():
+    if order_plan.intent.order_type == OrderType.market and not market_orders_enabled():
         order_type_allowed = False
     if result := record("order_type_allowed", order_type_allowed, "market orders require MARKET_ORDERS_ENABLED=true"):
         return result
@@ -287,7 +284,7 @@ def authorize_level5(
         return result
 
     order_type_allowed = order_plan.intent.order_type in policy.allowed_order_types
-    if order_plan.intent.order_type == OrderType.market and not _market_orders_enabled():
+    if order_plan.intent.order_type == OrderType.market and not market_orders_enabled():
         order_type_allowed = False
     if result := record("order_type_allowed", order_type_allowed, "market orders require MARKET_ORDERS_ENABLED=true"):
         return result

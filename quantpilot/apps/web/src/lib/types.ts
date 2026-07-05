@@ -346,6 +346,87 @@ export interface ApprovalTicketDecisionResult {
 }
 
 /* ---------------------------------------------------------------------------
+ * Strategy Studio (design doc §4.3) + strategy-level approval tickets (§4.1).
+ * Mirrors quantpilot/packages/core/schemas.py StrategyDraft /
+ * StrategyApprovalTicket verbatim.
+ * ------------------------------------------------------------------------- */
+
+export type StrategyDraftStatus = "drafted" | "validated" | "validation_failed";
+
+export interface StrategyDraft {
+  draft_id: string;
+  user_id: string;
+  strategy_id: string;
+  strategy_version: string;
+  spec_hash: string;
+  universe_symbols: string[];
+  requested_sectors: string[];
+  rationale: string;
+  status: StrategyDraftStatus;
+  backtest_report_id: string | null;
+  created_at: string;
+  validated_at: string | null;
+}
+
+export interface StrategyDraftRequest {
+  symbols?: string[];
+  sectors?: string[];
+  note?: string;
+}
+
+export interface StrategyDraftValidation {
+  draft: StrategyDraft;
+  backtest_report_id: string;
+  replayed_signals: number;
+  metrics: Record<string, number>;
+  warnings: string[];
+  ticket_ready: boolean;
+}
+
+export type StrategyTicketStatus =
+  | "pending"
+  | "approved"
+  | "rejected"
+  | "expired"
+  | "revoked"
+  | "superseded";
+
+export interface StrategyApprovalTicket {
+  ticket_id: string;
+  user_id: string;
+  ticket_type: "strategy_activation";
+  strategy_id: string;
+  strategy_version: string;
+  spec_hash: string;
+  backtest_report_id: string;
+  requested_execution_level: "level_3" | "level_4";
+  capital_budget_pct: number;
+  status: StrategyTicketStatus;
+  requested_at: string;
+  valid_until: string;
+  reapproval_triggers: string[];
+  approved_at: string | null;
+  approved_by: string | null;
+  rejected_at: string | null;
+  rejection_reason: string | null;
+  revoked_at: string | null;
+  revoked_reason: string | null;
+  superseded_by: string | null;
+  live_trading_enabled: boolean;
+}
+
+export interface StrategyTicketCreateRequest {
+  strategy_id: string;
+  strategy_version: string;
+  spec_hash: string;
+  backtest_report_id: string;
+  requested_execution_level?: "level_3" | "level_4";
+  capital_budget_pct?: number;
+  valid_days?: number;
+  reapproval_triggers?: string[];
+}
+
+/* ---------------------------------------------------------------------------
  * Level 5 Operator (fully-automated operator harness).
  *
  * Level 5 is NOT live trading. Runs default to `dry_run`; `mock_submit` and

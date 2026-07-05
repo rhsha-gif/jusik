@@ -11,6 +11,7 @@ import {
   ScrollText,
   Settings,
   ShieldCheck,
+  Sparkles,
 } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { getApiBase } from "@/lib/api";
@@ -25,6 +26,7 @@ const NAV_ITEMS = [
   { to: "/policies", label: "정책 스튜디오", icon: ListChecks },
   { to: "/signals", label: "신호 보드", icon: Radar },
   { to: "/run", label: "Level 1-2 실행", icon: Activity },
+  { to: "/studio", label: "전략 스튜디오", icon: Sparkles },
   { to: "/execution", label: "승인 알림", icon: BellRing },
   { to: "/operator", label: "Level 5 운영자", icon: Bot },
   { to: "/jobs", label: "작업 & 로그", icon: ScrollText },

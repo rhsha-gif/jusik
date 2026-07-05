@@ -16,6 +16,11 @@ import type {
   PolicyPreviewResponse,
   SignalBoardResponse,
   SmokeResult,
+  StrategyApprovalTicket,
+  StrategyDraft,
+  StrategyDraftRequest,
+  StrategyDraftValidation,
+  StrategyTicketCreateRequest,
   TradeApprovalTicket,
   UniverseResponse,
   UserPolicy,
@@ -163,6 +168,63 @@ export function useRejectApprovalTicket() {
       }),
     onSuccess: () => {
       void queryClient.invalidateQueries({ queryKey: APPROVAL_TICKETS_PENDING_KEY });
+    },
+  });
+}
+
+export const STRATEGY_TICKETS_PENDING_KEY = ["execution", "strategy-tickets", "pending"] as const;
+
+export function useCreateStrategyDraft() {
+  return useMutation({
+    mutationFn: (body: StrategyDraftRequest) =>
+      apiFetch<StrategyDraft>("/api/strategy-studio/draft", { method: "POST", body }),
+  });
+}
+
+export function useValidateStrategyDraft() {
+  return useMutation({
+    mutationFn: (draftId: string) =>
+      apiFetch<StrategyDraftValidation>(`/api/strategy-studio/drafts/${draftId}/validate`, {
+        method: "POST",
+        body: {},
+      }),
+  });
+}
+
+export function usePendingStrategyTickets() {
+  return useQuery({
+    queryKey: STRATEGY_TICKETS_PENDING_KEY,
+    queryFn: ({ signal }) =>
+      apiFetch<StrategyApprovalTicket[]>("/api/execution/strategy-tickets/pending", { signal }),
+    retry: 1,
+    staleTime: 5_000,
+  });
+}
+
+export function useCreateStrategyTicket() {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: (body: StrategyTicketCreateRequest) =>
+      apiFetch<StrategyApprovalTicket>("/api/execution/strategy-tickets/create", {
+        method: "POST",
+        body,
+      }),
+    onSuccess: () => {
+      void queryClient.invalidateQueries({ queryKey: STRATEGY_TICKETS_PENDING_KEY });
+    },
+  });
+}
+
+export function useApproveStrategyTicket() {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: ({ ticketId, approvedBy }: { ticketId: string; approvedBy?: string }) =>
+      apiFetch<StrategyApprovalTicket>(`/api/execution/strategy-tickets/${ticketId}/approve`, {
+        method: "POST",
+        body: { approved_by: approvedBy ?? "user" },
+      }),
+    onSuccess: () => {
+      void queryClient.invalidateQueries({ queryKey: STRATEGY_TICKETS_PENDING_KEY });
     },
   });
 }

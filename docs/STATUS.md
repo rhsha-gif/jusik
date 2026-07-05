@@ -69,7 +69,13 @@ Level 1~5 자율화 전 과정을 먼저 완성하고, 사람 승인 게이트�
   (선택→초안→검증→승인→활성화 게이트)가 테스트로 엔드투엔드 검증됨.
   `/api/strategy-studio/*` 3개 엔드포인트. 검증: pytest 309개 중 308 passed·
   1 skipped (junit), run_smoke OK, vitest 20 passed, build OK. 남은 것:
-  studio 프론트 페이지(§4.3 UI), 라우터 파일 분리(현재 execution.py에 동거)
+  라우터 파일 분리(현재 execution.py에 동거)
+- **전략 스튜디오 프론트 페이지** — `/studio` 라우트 + 사이드바 진입점.
+  4단계 카드 플로우(초안 입력 → 초안 검토 → 백테스트 검증 리포트 → 전략 승인)
+  + arming 원칙 문구. 브라우저 실검증 완료: 초안→검증→티켓→승인 전 과정을
+  프리뷰에서 클릭으로 통과 (`approved`, `live_trading_enabled: false` 표시,
+  콘솔 에러 0). vitest 20 passed, build OK. 참고: 8010의 구버전 API 서버는
+  새 엔드포인트가 없어 404 — 재시작 필요 (검증은 8011 신규 서버로 수행)
 
 ## 다음 단계 후보 (우선순위 제안)
 

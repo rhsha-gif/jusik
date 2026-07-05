@@ -144,6 +144,33 @@ def test_kill_switch_emits_critical_notifications() -> None:
     assert "strategy_ticket_revoked" in events
 
 
+def test_capital_budget_check_passes_without_strategy_ticket() -> None:
+    service = HarnessService()
+
+    allowed, detail = service.strategy_capital_budget_check(
+        "strat_alpha", proposed_notional=1_000_000, equity=10_000_000
+    )
+
+    assert allowed is True
+    assert detail == "no_strategy_budget"
+
+
+def test_capital_budget_blocks_when_proposed_exceeds_ticket_budget() -> None:
+    service = HarnessService()
+    _approved_ticket(service)  # capital_budget_pct defaults to 0.2
+
+    within, _ = service.strategy_capital_budget_check(
+        "strat_alpha", proposed_notional=1_999_999, equity=10_000_000
+    )
+    over, detail = service.strategy_capital_budget_check(
+        "strat_alpha", proposed_notional=2_000_001, equity=10_000_000
+    )
+
+    assert within is True
+    assert over is False
+    assert "strategy_capital_budget_exceeded" in detail
+
+
 def test_no_performance_record_keeps_activation_open() -> None:
     service = HarnessService()
     ticket = _approved_ticket(service)

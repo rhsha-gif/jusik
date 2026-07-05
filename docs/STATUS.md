@@ -91,9 +91,9 @@ Level 1~5 자율화 전 과정을 먼저 완성하고, 사람 승인 게이트�
 > 전체 로드맵: `docs/product_vision_alignment_design.md`
 
 1. 승인 기준(acceptance thresholds) 확정 — 표본이 생겼으므로 이제 논의 가능 (사람 입력)
-2. 자본 배분 정책 (설계 §4.4 CapitalAllocationPolicy) — 다중 전략 승인 시 전략별
-   예산·충돌 규칙. 티켓의 `capital_budget_pct`는 이미 저장됨, 집행 게이트가 없음
-3. 프론트 후속: 통지 인박스 UI(API 준비됨), DriftMonitor 개선(일별 종가 재평가·수수료 반영)
+2. §4.4 잔여: 동일 종목 충돌 규칙(`conflict_rule`)·상관 예산 — 다중 전략 동시
+   운용 시작 시 (예산 게이트 자체는 ✅ 제출 경로에서 강제됨)
+3. DriftMonitor 개선: 일별 종가 재평가·수수료 반영 (통지 인박스 UI는 ✅ 완료)
 4. 라우터 분리 부채: strategy-studio·strategy-tickets·notifications 엔드포인트가
    execution.py에 동거 (main.py에 타 세션 미커밋 CORS 변경 있음 — 커밋 전 주의)
 5. KIS 앱키 확보 시: 토큰 발급 헬퍼 구현 → `RUN_KIS_MANUAL_INTEGRATION=1` 수동 통합 테스트

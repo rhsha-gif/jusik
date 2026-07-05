@@ -1152,6 +1152,15 @@ class HarnessService:
         if ticket.data_mode == "paper_trading" and policy.broker != BrokerMode.paper:
             blocked = self._block_approval_ticket(ticket, reason="paper_broker_required")
             return {"ticket": blocked, "order_plan": order_plan, "broker_order": None, "fills": [], "live_trading_enabled": False}
+        if order_plan.intent.side == "buy" and order_plan.explanation is not None:
+            budget_ok, budget_detail = self.strategy_capital_budget_check(
+                order_plan.explanation.strategy_id,
+                proposed_notional=order_plan.intent.notional,
+                equity=fixture_portfolio_snapshot().equity,
+            )
+            if not budget_ok:
+                blocked = self._block_approval_ticket(ticket, reason=budget_detail)
+                return {"ticket": blocked, "order_plan": order_plan, "broker_order": None, "fills": [], "live_trading_enabled": False}
 
         transition_order_plan(
             order_plan=order_plan,
@@ -1629,6 +1638,53 @@ class HarnessService:
             user_id=ticket.user_id,
         )
         return ticket
+
+    def _active_strategy_ticket(self, strategy_id: str) -> StrategyApprovalTicket | None:
+        for ticket in self.repositories.strategy_approval_tickets.list():
+            refreshed = self._expire_strategy_ticket_if_needed(ticket)
+            if (
+                refreshed.strategy_id == strategy_id
+                and refreshed.status == StrategyApprovalTicketStatus.approved
+            ):
+                return refreshed
+        return None
+
+    def _strategy_deployed_notional(self, strategy_id: str) -> float:
+        """Net capital currently deployed by a strategy (buys minus sells)."""
+        plans_by_id = {plan.order_plan_id: plan for plan in self.repositories.order_plans.list()}
+        deployed = 0.0
+        for fill in self.repositories.fills.list():
+            plan = plans_by_id.get(fill.order_plan_id)
+            if plan is None or plan.explanation is None:
+                continue
+            if plan.explanation.strategy_id != strategy_id:
+                continue
+            deployed += fill.notional if plan.intent.side == "buy" else -fill.notional
+        return max(0.0, deployed)
+
+    def strategy_capital_budget_check(
+        self, strategy_id: str, *, proposed_notional: float, equity: float
+    ) -> tuple[bool, str]:
+        """Enforce the approved ticket's capital budget (design doc §4.4).
+
+        Strategies without an active strategy-level approval are not governed
+        by a budget (the per-trade approval rail is the control there), so the
+        check passes with an explanatory detail.
+        """
+        ticket = self._active_strategy_ticket(strategy_id)
+        if ticket is None:
+            return True, "no_strategy_budget"
+        if equity <= 0:
+            return False, "no_equity"
+        budget = ticket.capital_budget_pct * equity
+        deployed = self._strategy_deployed_notional(strategy_id)
+        if deployed + proposed_notional > budget:
+            return False, (
+                f"strategy_capital_budget_exceeded: deployed {deployed:.0f} + "
+                f"proposed {proposed_notional:.0f} > budget {budget:.0f} "
+                f"({ticket.capital_budget_pct:.0%} of equity)"
+            )
+        return True, f"within_budget: {deployed + proposed_notional:.0f} <= {budget:.0f}"
 
     def strategy_activation_allowed(
         self, strategy_id: str, *, execution_level: str

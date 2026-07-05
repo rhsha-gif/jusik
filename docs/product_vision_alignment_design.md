@@ -206,6 +206,14 @@ GET  /api/strategy-studio/drafts/{id}  # 초안 + 리포트 + 승인 가능 여�
 
 ### 4.4 CapitalAllocationPolicy (다중 전략 자본 배분)
 
+> **예산 게이트 구현됨 (2026-07-06)**: `strategy_capital_budget_check` —
+> 전략의 순 투입 원금(귀속 체결 매수−매도) + 신규 주문 노셔널이 활성 승인
+> 티켓의 `capital_budget_pct` × 스냅샷 equity를 초과하면 매매 티켓 제출을
+> `strategy_capital_budget_exceeded`로 차단 (approve-and-submit 경로에 삽입).
+> 전략 티켓이 없는 전략은 per-trade 승인 레일이 통제하므로 게이트 통과.
+> 아래 초안의 `conflict_rule`(동일 종목 반대 신호)·`correlation_budget`은
+> 다중 전략 동시 운용이 실제로 시작될 때 구현.
+
 ```python
 class CapitalAllocationPolicy(BaseModel):
     policy_id: str

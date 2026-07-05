@@ -109,6 +109,48 @@ Observations:
    plus 5 bps slippage — the old 15 bps fee placeholder materially overstated
    commission drag.
 
+## Engine fixes: exit liquidation + marketable risk exits (2026-07-06, later)
+
+Both findings 1-2 from the first run are now fixed in the engine:
+
+1. **Exit sells the full held quantity.** Sizing sells from the signal-price
+   notional left a residual when the fill price moved (finding 2). `exit`
+   signals now liquidate `available_quantity`; `trim` keeps notional sizing.
+   After the fix both real-data runs end with zero residual positions.
+2. **Risk exits are marketable.** A gap through the limit used to block an
+   `exit` silently (`limit_not_touched`) — a stop-loss that never executes.
+   New `BacktestAssumptions.exit_fill_policy` (default `marketable_next_open`)
+   fills exits at the next open with slippage; `limit_touch` restores the old
+   strict behavior. Trims still respect the limit (opportunistic rebalances
+   may miss; risk exits must not). Regression tests cover residual-free
+   exits, gap-down exit fills, and trim blocking.
+
+Real-data impact (15 symbols / 24 months, KIS cost basis):
+
+| Run | Total return | Max DD | Sharpe* | Final residual |
+|---|---|---|---|---|
+| buffer 0, before | +1.11% | 3.44% | 0.20 | 2 symbols left over |
+| buffer 0, after | +0.78% | 3.65% | 0.14 | none |
+| buffer 50, before | +6.09% | 3.58% | 0.79 | 3 symbols left over |
+| buffer 50, after | +4.86% | 3.94% | 0.65 | none |
+
+Returns dropped because forced gap-down exits realize worse prices — the
+previous numbers were flattered by stranded positions riding the market and
+by stop-losses that silently failed. The new numbers are the honest baseline.
+
+### Exposure decomposition (why ~5-6%)
+
+- Per-position weight is 12% (strength 0.8 × 0.15 engine fallback; replay
+  emits no `target_weight_hint` for buys) — not the bottleneck.
+- The bottleneck is signal concurrency: 11 buys over 24 months, max 3
+  concurrent positions, 283/488 days in market.
+- Weight sensitivity (hint override, buffer 50): 10% → +4.08% / MDD 3.30%,
+  20% → +7.85% / 6.49%, 30% → +11.29% / 9.58%; Sharpe stays ~0.63-0.65
+  throughout. Scaling weight is pure risk scaling, not alpha.
+- Conclusion: raising per-position weight is a risk-appetite decision (human
+  input); the engineering lever for exposure is more concurrent setups
+  (wider universe and/or additional entry rules).
+
 ## Validation
 
 - `python -m pytest quantpilot/tests -p no:cacheprovider --basetemp=.pytest_tmp`

@@ -58,9 +58,7 @@ Level 1~5 자율화 전 과정을 먼저 완성하고, 사람 승인 게이트�
 > 제품 구상(대화형 전략 수립 → 전략 단위 승인 → 자동 운용)과의 정렬 설계 및
 > 전체 로드맵: `docs/product_vision_alignment_design.md`
 
-1. 엔진 개선 검토: exit 신호의 전량 청산 (잔량 이슈), 체결모델 현실화
-   (buffer 0↔50bps 격차 +5%p), 낮은 평균 노출도(~5-6%) 해소를 위한 포지션 사이징
-2. 승인 기준(acceptance thresholds) 확정 — 표본이 생겼으므로 이제 논의 가능 (사람 입력)
+1. 승인 기준(acceptance thresholds) 확정 — 표본이 생겼으므로 이제 논의 가능 (사람 입력)
 3. 전략 단위 승인 티켓 + DriftMonitor (설계 문서 §4.1–4.2)
 4. KIS 앱키 확보 시: 토큰 발급 헬퍼 구현 → `RUN_KIS_MANUAL_INTEGRATION=1` 수동 통합 테스트
 5. 소소한 부채: `MARKET_ORDERS_ENABLED` 판독 중복 제거, `.env.example` 동기화 코드 가드

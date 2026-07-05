@@ -169,6 +169,129 @@ def test_blocked_and_unfilled_trades_do_not_change_positions_or_cash() -> None:
     assert result.metrics.final_gross_exposure == 0
 
 
+def test_exit_liquidates_entire_position_without_residual() -> None:
+    request = BacktestRequest(
+        strategy_id="test_strategy",
+        recipe_version="1.0",
+        initial_cash=10_000,
+        assumptions=BacktestAssumptions(sell_tax_bps=10.0),
+        signals=[
+            BacktestSignal(
+                symbol="AAA",
+                signal_date=date(2026, 1, 1),
+                action=SignalAction.buy_ready,
+                target_weight_hint=0.50,
+                reason="deterministic buy",
+            ),
+            # Price keeps rising, so the old signal-price notional sizing
+            # would sell less than the held quantity and leave a residual.
+            BacktestSignal(
+                symbol="AAA",
+                signal_date=date(2026, 1, 3),
+                action=SignalAction.exit,
+                reason="risk exit",
+            ),
+        ],
+    )
+
+    result = run_backtest(request, PriceHistoryOnlyProvider(_rows()))
+
+    sells = [t for t in result.trades if t.side == "sell" and t.status == "filled"]
+    assert len(sells) == 1
+    assert result.metrics.final_gross_exposure == 0
+    assert result.equity_curve[-1].positions == {}
+
+
+def _gap_down_rows() -> list[dict[str, Any]]:
+    rows = _rows(days=5)
+    # Session 4 gaps down through any sell limit set near session-3 close (104).
+    rows[3]["open"] = 95.0
+    rows[3]["high"] = 96.0
+    rows[3]["low"] = 90.0
+    rows[3]["close"] = 92.0
+    rows[4]["open"] = 92.0
+    rows[4]["high"] = 94.0
+    rows[4]["low"] = 89.0
+    rows[4]["close"] = 93.0
+    return rows
+
+
+def test_exit_fills_at_next_open_through_a_gap_down() -> None:
+    signals = [
+        BacktestSignal(
+            symbol="AAA",
+            signal_date=date(2026, 1, 1),
+            action=SignalAction.buy_ready,
+            target_weight_hint=0.50,
+            reason="deterministic buy",
+        ),
+        BacktestSignal(
+            symbol="AAA",
+            signal_date=date(2026, 1, 3),
+            action=SignalAction.exit,
+            reason="risk exit through gap",
+        ),
+    ]
+    request = BacktestRequest(
+        strategy_id="test_strategy",
+        recipe_version="1.0",
+        initial_cash=10_000,
+        assumptions=BacktestAssumptions(sell_tax_bps=10.0),
+        signals=signals,
+    )
+
+    result = run_backtest(request, PriceHistoryOnlyProvider(_gap_down_rows()))
+
+    sells = [t for t in result.trades if t.side == "sell"]
+    assert len(sells) == 1
+    assert sells[0].status == "filled"
+    assert sells[0].fill_price == pytest.approx(95.0 * (1 - 5 / 10_000))
+    assert result.metrics.final_gross_exposure == 0
+
+    strict = request.model_copy(
+        update={
+            "assumptions": BacktestAssumptions(
+                sell_tax_bps=10.0, exit_fill_policy="limit_touch"
+            )
+        }
+    )
+    strict_result = run_backtest(strict, PriceHistoryOnlyProvider(_gap_down_rows()))
+    strict_sells = [t for t in strict_result.trades if t.side == "sell"]
+    assert strict_sells[0].status == "blocked"
+    assert strict_sells[0].blocked_reason == "limit_not_touched"
+
+
+def test_trim_still_respects_limit_in_a_gap_down() -> None:
+    request = BacktestRequest(
+        strategy_id="test_strategy",
+        recipe_version="1.0",
+        initial_cash=10_000,
+        assumptions=BacktestAssumptions(sell_tax_bps=10.0),
+        signals=[
+            BacktestSignal(
+                symbol="AAA",
+                signal_date=date(2026, 1, 1),
+                action=SignalAction.buy_ready,
+                target_weight_hint=0.50,
+                reason="deterministic buy",
+            ),
+            BacktestSignal(
+                symbol="AAA",
+                signal_date=date(2026, 1, 3),
+                action=SignalAction.trim,
+                target_weight_hint=0.25,
+                reason="opportunistic trim",
+            ),
+        ],
+    )
+
+    result = run_backtest(request, PriceHistoryOnlyProvider(_gap_down_rows()))
+
+    trims = [t for t in result.trades if t.side == "sell"]
+    assert trims[0].status == "blocked"
+    assert trims[0].blocked_reason == "limit_not_touched"
+
+
 def test_backtest_never_calls_broker_adapters(monkeypatch: pytest.MonkeyPatch) -> None:
     def fail_submit(*args: object, **kwargs: object) -> None:
         raise AssertionError("backtest must not submit broker orders")

@@ -177,6 +177,7 @@ def _schedule_signal(
     cash: float,
     min_trade_notional: float,
     slippage_bps: float,
+    exit_fill_policy: str,
 ) -> _PendingExecution | BacktestTrade | None:
     if signal.action == SignalAction.blocked:
         return _blocked_trade(signal, reason="blocked_signal")
@@ -242,6 +243,11 @@ def _schedule_signal(
             )
         reference_price = min(float(next_bar["open"]), limit_price)
         fill_price = reference_price * (1 + slippage_bps / 10_000)
+    elif signal.action == SignalAction.exit and exit_fill_policy == "marketable_next_open":
+        # A risk exit is submitted as a marketable order: it fills at the next
+        # open regardless of the limit so a gap-down cannot strand the position.
+        reference_price = float(next_bar["open"])
+        fill_price = reference_price * (1 - slippage_bps / 10_000)
     else:
         if float(next_bar["high"]) < limit_price:
             return _blocked_trade(
@@ -323,7 +329,12 @@ def _execute_pending(
                 fill_date=pending.fill_date,
                 target_weight=pending.target_weight,
             )
-        quantity = min(available_quantity, pending.target_notional / pending.fill_price)
+        if pending.signal.action == SignalAction.exit:
+            # Full exits liquidate the held quantity; sizing from the
+            # signal-price notional leaves a residual when the price moved.
+            quantity = available_quantity
+        else:
+            quantity = min(available_quantity, pending.target_notional / pending.fill_price)
         notional = quantity * pending.fill_price
         if notional < min_trade_notional:
             return cash, _blocked_trade(
@@ -391,7 +402,10 @@ def _build_warnings(
         warnings.append("unrealistic_cost_assumption: fee_bps and slippage_bps should be positive")
     if assumptions.sell_tax_bps == 0:
         warnings.append("sell_tax_omitted: sell_tax_bps is zero")
-    warnings.append("simplified_fill_model: next_open_limit_touch is deterministic research-only")
+    warnings.append(
+        "simplified_fill_model: next_open_limit_touch is deterministic research-only"
+        f" (exit_fill_policy={assumptions.exit_fill_policy})"
+    )
     warnings.extend(overfit_warnings(filled_trades=filled_trades, tested_variants=request.tested_variants))
     return warnings
 
@@ -513,6 +527,7 @@ def run_backtest(
                 cash=cash,
                 min_trade_notional=request.assumptions.min_trade_notional,
                 slippage_bps=request.assumptions.slippage_bps,
+                exit_fill_policy=request.assumptions.exit_fill_policy,
             )
             if scheduled is None:
                 continue

@@ -13,6 +13,9 @@ class BacktestAssumptions(HarnessModel):
     slippage_bps: float = Field(default=5.0, ge=0)
     sell_tax_bps: float = Field(default=0.0, ge=0)
     fill_model: Literal["next_open_limit_touch"] = "next_open_limit_touch"
+    # Risk exits must not be silently dropped by a gap through the limit; the
+    # default models them as marketable orders filling at the next open.
+    exit_fill_policy: Literal["marketable_next_open", "limit_touch"] = "marketable_next_open"
     allow_fractional_shares: bool = True
     min_trade_notional: float = Field(default=1.0, ge=0)
     annualization_days: int = Field(default=252, gt=0)

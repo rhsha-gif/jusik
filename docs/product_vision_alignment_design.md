@@ -160,6 +160,18 @@ class StrategyApprovalTicket(BaseModel):
 
 ### 4.2 재승인 트리거 평가기 (DriftMonitor)
 
+> **평가기 구현됨 (2026-07-06)**: `StrategyPerformanceRecord`(실현 MDD·수익률
+> 스냅샷) + 드리프트 체크 — 실현 MDD가 티켓 증빙 백테스트 MDD × 1.5(사람 확정
+> 대기 상수)를 초과하면 티켓 자동 만료(`strategy_ticket_drift_expired` 감사) 후
+> 활성화 게이트 차단. 증빙 MDD가 0이면 어떤 실현 낙폭도 트리거 발화 (fail-closed).
+> 수동/잡 피드용 `POST /api/execution/strategy-performance` 제공.
+>
+> **자동 피드 설계 (미구현)**: mock 체결이 전략별 실현 성과가 되려면
+> ① OrderPlan→Signal→strategy_id 역추적으로 체결을 전략에 귀속,
+> ② 전략별 일별 에쿼티 커브 적산(체결 원장 + 종가), ③ 커브에서 MDD 계산 후
+> `record_strategy_performance` 호출하는 일일 잡. ①의 귀속 체인이 현재
+> OrderPlan 스키마에 없어 `strategy_id` 필드 추가가 선행 과제.
+
 운영자 사이클마다 활성 전략별로 §3.2 트리거를 평가하고, 발화 시:
 
 1. `PolicyReviewRequest` 생성 (`blocks_automatic_submission=True`)

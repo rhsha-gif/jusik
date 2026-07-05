@@ -175,7 +175,8 @@ class StrategyApprovalTicket(BaseModel):
 > (fail-closed 유니버스 매칭) + `validate_strategy_draft`(리플레이 백테스트,
 > KIS 비용 기준, 증빙 자동 저장) + `/api/strategy-studio/draft`,
 > `/drafts/{id}`, `/drafts/{id}/validate`. 초안→검증→티켓→승인→게이트
-> 전체 경로가 테스트로 검증됨. 남은 것: 프론트 페이지, validate 통과 기준
+> 전체 경로가 테스트로 검증됨. **프론트 페이지도 구현됨** (`/studio`,
+> 4단계 카드 플로우, 브라우저 실검증 완료). 남은 것: validate 통과 기준
 > 연동(§7 사람 확정 대기), LLM 기반 레시피 다변화(현재는 기본 룰 레시피 고정).
 
 ```text

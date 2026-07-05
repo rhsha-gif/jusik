@@ -73,6 +73,108 @@ class UrllibJsonTransport:
         return parsed
 
 
+@runtime_checkable
+class JsonPostTransport(Protocol):
+    def post_json(
+        self,
+        url: str,
+        *,
+        headers: dict[str, str],
+        body: dict[str, Any],
+        timeout_seconds: float,
+    ) -> dict[str, Any]: ...
+
+
+class UrllibJsonPostTransport:
+    def post_json(
+        self,
+        url: str,
+        *,
+        headers: dict[str, str],
+        body: dict[str, Any],
+        timeout_seconds: float,
+    ) -> dict[str, Any]:
+        payload = json.dumps(body).encode("utf-8")
+        merged_headers = {"content-type": "application/json", **headers}
+        request = urllib.request.Request(url, data=payload, headers=merged_headers, method="POST")
+        try:
+            with urllib.request.urlopen(request, timeout=timeout_seconds) as response:
+                raw = response.read().decode("utf-8")
+        except urllib.error.HTTPError as exc:
+            raise ProviderError(f"KIS HTTP {exc.code}: {exc.reason}")
+        except urllib.error.URLError as exc:
+            raise ProviderError(f"KIS request failed: {exc.reason}")
+        try:
+            parsed = json.loads(raw)
+        except json.JSONDecodeError as exc:
+            raise ProviderError(f"KIS response was not valid JSON: {exc.msg}")
+        if not isinstance(parsed, dict):
+            raise ProviderError("KIS response JSON must be an object")
+        return parsed
+
+
+KIS_TOKEN_ENDPOINT = "/oauth2/tokenP"
+
+
+@dataclass(frozen=True)
+class KisAccessToken:
+    """Access token from /oauth2/tokenP. Never log or persist the token value."""
+
+    access_token: str
+    token_type: str
+    expires_in_seconds: int
+
+
+def request_access_token(
+    *,
+    app_key: str,
+    app_secret: str,
+    base_url: str = "https://openapi.koreainvestment.com:9443",
+    transport: JsonPostTransport | None = None,
+    timeout_seconds: float = 10.0,
+) -> KisAccessToken:
+    """Issue a KIS access token (client_credentials grant, 24h validity).
+
+    Replaces the manual KIS_ACCESS_TOKEN injection: callers can mint a token
+    from the app key/secret at process start instead of pasting one by hand.
+    """
+    if not app_key.strip():
+        raise ProviderError("KIS app key is required")
+    if not app_secret.strip():
+        raise ProviderError("KIS app secret is required")
+    active_transport = transport or UrllibJsonPostTransport()
+    response = active_transport.post_json(
+        f"{base_url.rstrip('/')}{KIS_TOKEN_ENDPOINT}",
+        headers={},
+        body={"grant_type": "client_credentials", "appkey": app_key, "appsecret": app_secret},
+        timeout_seconds=timeout_seconds,
+    )
+    token = str(response.get("access_token", "")).strip()
+    if not token:
+        detail = str(response.get("msg1", response.get("error_description", "no access_token in response")))
+        raise ProviderError(f"KIS token request rejected: {detail}")
+    try:
+        expires_in = int(response.get("expires_in", 0) or 0)
+    except (TypeError, ValueError):
+        expires_in = 0
+    return KisAccessToken(
+        access_token=token,
+        token_type=str(response.get("token_type", "Bearer")),
+        expires_in_seconds=expires_in,
+    )
+
+
+def request_access_token_from_env(
+    *, transport: JsonPostTransport | None = None
+) -> KisAccessToken:
+    return request_access_token(
+        app_key=_required_env("KIS_APP_KEY"),
+        app_secret=_required_env("KIS_APP_SECRET"),
+        base_url=_optional_env("KIS_BASE_URL", "https://openapi.koreainvestment.com:9443"),
+        transport=transport,
+    )
+
+
 @dataclass(frozen=True)
 class KisOpenApiConfig:
     app_key: str

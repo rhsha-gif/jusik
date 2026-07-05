@@ -43,6 +43,7 @@ from quantpilot.packages.core.schemas import (
     StrategyApprovalTicketStatus,
     StrategyDraft,
     StrategyDraftStatus,
+    StrategyPerformanceRecord,
     StrategyRecipe,
     TradeApprovalTicket,
     UserPolicy,
@@ -1306,7 +1307,70 @@ class HarnessService:
         )
         return ticket
 
+    # Pending human confirmation (design doc §3.2): realized MDD beyond this
+    # multiple of the backtest evidence MDD forces re-approval.
+    DRIFT_MDD_MULTIPLIER = 1.5
+
+    def record_strategy_performance(self, record: StrategyPerformanceRecord) -> StrategyPerformanceRecord:
+        self.repositories.strategy_performance.add(record)
+        self.audit.emit(
+            user_id="fixture-user",
+            entity_type="strategy_performance",
+            entity_id=record.record_id,
+            action="strategy_performance_recorded",
+            after_state=record,
+            source="strategy_ticket_service",
+        )
+        return record
+
+    def _latest_strategy_performance(
+        self, strategy_id: str, strategy_version: str
+    ) -> StrategyPerformanceRecord | None:
+        records = [
+            record
+            for record in self.repositories.strategy_performance.list()
+            if record.strategy_id == strategy_id and record.strategy_version == strategy_version
+        ]
+        return max(records, key=lambda record: record.as_of) if records else None
+
+    def _drift_trigger_fired(self, ticket: StrategyApprovalTicket) -> str | None:
+        record = self._latest_strategy_performance(ticket.strategy_id, ticket.strategy_version)
+        if record is None:
+            return None
+        evidence = self.repositories.backtest_results.get(ticket.backtest_report_id)
+        if evidence is None:
+            return "backtest_evidence_missing"
+        # Zero-MDD evidence means the backtest never drew down, so ANY realized
+        # drawdown exceeds the tolerated multiple — fail closed by design.
+        limit = evidence.metrics.max_drawdown * self.DRIFT_MDD_MULTIPLIER
+        if record.realized_max_drawdown > limit:
+            return "mdd_exceeds_backtest_1_5x"
+        return None
+
+    def _drift_expire_ticket_if_needed(self, ticket: StrategyApprovalTicket) -> StrategyApprovalTicket:
+        if ticket.status != StrategyApprovalTicketStatus.approved:
+            return ticket
+        fired = self._drift_trigger_fired(ticket)
+        if fired is None:
+            return ticket
+        before = ticket.model_copy(deep=True)
+        ticket.status = StrategyApprovalTicketStatus.expired
+        if fired not in ticket.reapproval_triggers:
+            ticket.reapproval_triggers = [*ticket.reapproval_triggers, fired]
+        self.repositories.strategy_approval_tickets.update(ticket)
+        self.audit.emit(
+            user_id=ticket.user_id,
+            entity_type="strategy_approval_ticket",
+            entity_id=ticket.ticket_id,
+            action="strategy_ticket_drift_expired",
+            before_state=before,
+            after_state=ticket,
+            source="strategy_ticket_service",
+        )
+        return ticket
+
     def _expire_strategy_ticket_if_needed(self, ticket: StrategyApprovalTicket) -> StrategyApprovalTicket:
+        ticket = self._drift_expire_ticket_if_needed(ticket)
         active = {StrategyApprovalTicketStatus.pending, StrategyApprovalTicketStatus.approved}
         if ticket.status in active and ticket.valid_until <= utc_now():
             before = ticket.model_copy(deep=True)

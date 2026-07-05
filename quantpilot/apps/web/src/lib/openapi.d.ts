@@ -633,6 +633,23 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/execution/strategy-performance": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Record Strategy Performance */
+        post: operations["record_strategy_performance_api_execution_strategy_performance_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/strategy-studio/draft": {
         parameters: {
             query?: never;
@@ -1481,6 +1498,56 @@ export interface components {
          * @enum {string}
          */
         StrategyDraftStatus: "drafted" | "validated" | "validation_failed";
+        /**
+         * StrategyPerformanceRecord
+         * @description Point-in-time realized performance snapshot for an armed strategy.
+         *
+         *     Fed from mock-execution fills or operator runs; the DriftMonitor (design
+         *     doc §4.2) compares these realized figures against the backtest evidence
+         *     attached to the strategy's approval ticket to fire reapproval triggers.
+         */
+        StrategyPerformanceRecord: {
+            /** Record Id */
+            record_id?: string;
+            /** Strategy Id */
+            strategy_id: string;
+            /** Strategy Version */
+            strategy_version: string;
+            /**
+             * As Of
+             * Format: date-time
+             */
+            as_of?: string;
+            /** Realized Max Drawdown */
+            realized_max_drawdown: number;
+            /** Realized Total Return */
+            realized_total_return: number;
+            /** Observation Days */
+            observation_days: number;
+            /**
+             * Source
+             * @default mock_execution
+             */
+            source: string;
+        };
+        /** StrategyPerformanceRequest */
+        StrategyPerformanceRequest: {
+            /** Strategy Id */
+            strategy_id: string;
+            /** Strategy Version */
+            strategy_version: string;
+            /** Realized Max Drawdown */
+            realized_max_drawdown: number;
+            /** Realized Total Return */
+            realized_total_return: number;
+            /** Observation Days */
+            observation_days: number;
+            /**
+             * Source
+             * @default manual
+             */
+            source: string;
+        };
         /** StrategySelectionDecision */
         StrategySelectionDecision: {
             /** Selected Strategy Id */
@@ -2936,6 +3003,39 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["StrategyApprovalTicket"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    record_strategy_performance_api_execution_strategy_performance_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["StrategyPerformanceRequest"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["StrategyPerformanceRecord"];
                 };
             };
             /** @description Validation Error */

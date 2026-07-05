@@ -1417,6 +1417,44 @@
         }
       }
     },
+    "/api/execution/strategy-performance": {
+      "post": {
+        "summary": "Record Strategy Performance",
+        "operationId": "record_strategy_performance_api_execution_strategy_performance_post",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/StrategyPerformanceRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/StrategyPerformanceRecord"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
     "/api/strategy-studio/draft": {
       "post": {
         "summary": "Create Strategy Draft",
@@ -3448,6 +3486,95 @@
           "validation_failed"
         ],
         "title": "StrategyDraftStatus"
+      },
+      "StrategyPerformanceRecord": {
+        "properties": {
+          "record_id": {
+            "type": "string",
+            "title": "Record Id"
+          },
+          "strategy_id": {
+            "type": "string",
+            "title": "Strategy Id"
+          },
+          "strategy_version": {
+            "type": "string",
+            "title": "Strategy Version"
+          },
+          "as_of": {
+            "type": "string",
+            "format": "date-time",
+            "title": "As Of"
+          },
+          "realized_max_drawdown": {
+            "type": "number",
+            "minimum": 0.0,
+            "title": "Realized Max Drawdown"
+          },
+          "realized_total_return": {
+            "type": "number",
+            "title": "Realized Total Return"
+          },
+          "observation_days": {
+            "type": "integer",
+            "exclusiveMinimum": 0.0,
+            "title": "Observation Days"
+          },
+          "source": {
+            "type": "string",
+            "title": "Source",
+            "default": "mock_execution"
+          }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "required": [
+          "strategy_id",
+          "strategy_version",
+          "realized_max_drawdown",
+          "realized_total_return",
+          "observation_days"
+        ],
+        "title": "StrategyPerformanceRecord",
+        "description": "Point-in-time realized performance snapshot for an armed strategy.\n\nFed from mock-execution fills or operator runs; the DriftMonitor (design\ndoc §4.2) compares these realized figures against the backtest evidence\nattached to the strategy's approval ticket to fire reapproval triggers."
+      },
+      "StrategyPerformanceRequest": {
+        "properties": {
+          "strategy_id": {
+            "type": "string",
+            "title": "Strategy Id"
+          },
+          "strategy_version": {
+            "type": "string",
+            "title": "Strategy Version"
+          },
+          "realized_max_drawdown": {
+            "type": "number",
+            "title": "Realized Max Drawdown"
+          },
+          "realized_total_return": {
+            "type": "number",
+            "title": "Realized Total Return"
+          },
+          "observation_days": {
+            "type": "integer",
+            "title": "Observation Days"
+          },
+          "source": {
+            "type": "string",
+            "title": "Source",
+            "default": "manual"
+          }
+        },
+        "type": "object",
+        "required": [
+          "strategy_id",
+          "strategy_version",
+          "realized_max_drawdown",
+          "realized_total_return",
+          "observation_days"
+        ],
+        "title": "StrategyPerformanceRequest"
       },
       "StrategySelectionDecision": {
         "properties": {

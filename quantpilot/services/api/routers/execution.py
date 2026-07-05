@@ -7,7 +7,12 @@ from pydantic import BaseModel
 
 from quantpilot.packages.core.execution.state_machine import ApprovalRequired, InvalidOrderTransition, RiskCheckRequired
 from quantpilot.packages.core.harness_service import HarnessService
-from quantpilot.packages.core.schemas import StrategyApprovalTicket, StrategyDraft, TradeApprovalTicket
+from quantpilot.packages.core.schemas import (
+    StrategyApprovalTicket,
+    StrategyDraft,
+    StrategyPerformanceRecord,
+    TradeApprovalTicket,
+)
 from quantpilot.packages.db.repositories import RepositoryError
 from quantpilot.services.api.dependencies import get_harness_service, require_latest
 
@@ -158,6 +163,35 @@ def revoke_strategy_ticket(
     try:
         return service.revoke_strategy_ticket(ticket_id, reason=request.reason)
     except (RepositoryError, RuntimeError) as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+
+
+class StrategyPerformanceRequest(BaseModel):
+    strategy_id: str
+    strategy_version: str
+    realized_max_drawdown: float
+    realized_total_return: float
+    observation_days: int
+    source: str = "manual"
+
+
+@router.post("/execution/strategy-performance")
+def record_strategy_performance(
+    request: StrategyPerformanceRequest,
+    service: HarnessService = Depends(get_harness_service),
+) -> StrategyPerformanceRecord:
+    try:
+        return service.record_strategy_performance(
+            StrategyPerformanceRecord(
+                strategy_id=request.strategy_id,
+                strategy_version=request.strategy_version,
+                realized_max_drawdown=request.realized_max_drawdown,
+                realized_total_return=request.realized_total_return,
+                observation_days=request.observation_days,
+                source=request.source,
+            )
+        )
+    except (RepositoryError, RuntimeError, ValueError) as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc
 
 

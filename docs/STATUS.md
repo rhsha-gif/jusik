@@ -44,19 +44,33 @@ Level 1~5 자율화 전 과정을 먼저 완성하고, 사람 승인 게이트�
   발견: ① limit=종가 체결모델은 모멘텀 갭업에서 구조적으로 미체결
   (`--limit-buffer-bps`로 민감도 측정 가능) ② exit 시 잔량 ~0.5주 남는 엔진 특성
   ③ 대형주 3종목·13개월에 실행신호 5건 — 유니버스 확대 필요
+- **거래비용 가정 확정 + 유니버스 확대 백테스트** — 비용 기준을 사용자 결정으로 확정:
+  한투 실거래 오픈API·일반 개인 (`backtest/costs.py`, 수수료 1.40527bps/편도
+  뱅키스 온라인, 매도세 20bps 2026년 KRX 세율, 양도세 없음). 유니버스 15종목·
+  24개월(7,320봉)로 확대 재실행: buffer 0bps → 체결 19건 +1.11% (Sharpe 0.20),
+  buffer 50bps → 체결 21건 +6.09% (MDD 3.58%, Sharpe 0.79). 관찰: 평균 노출도
+  ~5-6%로 현금 유휴가 최대 병목, 체결모델 민감도 여전. 검증: pytest 294개
+  중 293 passed·1 skipped (junit), run_smoke OK. 상세: 같은 리포트의
+  "Universe expansion + confirmed cost basis run" 섹션
 
 ## 다음 단계 후보 (우선순위 제안)
 
-1. 백테스트 유니버스 확대 (pykrx로 종목 추가 후 `run_local_backtest` 재실행) 및
-   수수료·세금·체결버퍼 가정치 확정 (사람 입력)
-2. 엔진 개선 검토: exit 신호의 전량 청산 (잔량 이슈), 체결모델 현실화
-3. KIS 앱키 확보 시: 토큰 발급 헬퍼 구현 → `RUN_KIS_MANUAL_INTEGRATION=1` 수동 통합 테스트
-4. 소소한 부채: `MARKET_ORDERS_ENABLED` 판독 중복 제거, `.env.example` 동기화 코드 가드
+> 제품 구상(대화형 전략 수립 → 전략 단위 승인 → 자동 운용)과의 정렬 설계 및
+> 전체 로드맵: `docs/product_vision_alignment_design.md`
+
+1. 엔진 개선 검토: exit 신호의 전량 청산 (잔량 이슈), 체결모델 현실화
+   (buffer 0↔50bps 격차 +5%p), 낮은 평균 노출도(~5-6%) 해소를 위한 포지션 사이징
+2. 승인 기준(acceptance thresholds) 확정 — 표본이 생겼으므로 이제 논의 가능 (사람 입력)
+3. 전략 단위 승인 티켓 + DriftMonitor (설계 문서 §4.1–4.2)
+4. KIS 앱키 확보 시: 토큰 발급 헬퍼 구현 → `RUN_KIS_MANUAL_INTEGRATION=1` 수동 통합 테스트
+5. 소소한 부채: `MARKET_ORDERS_ENABLED` 판독 중복 제거, `.env.example` 동기화 코드 가드
 
 ## 사람 입력 대기
 
 - [ ] KIS 오픈API 앱키/시크릿 (계좌 개설 필요; 모의투자 도메인 `openapivts.koreainvestment.com:29443`)
-- [ ] Stage 03 거래비용·슬리피지 가정치
+- [x] ~~Stage 03 거래비용·세금 가정치~~ → 확정: 한투 실거래 API·일반 개인 기준
+  (`backtest/costs.py`; 뱅키스 온라인이 아닌 영업점 계좌면 `--fee-bps 14.7` 오버라이드)
+- [ ] 슬리피지(현 5bps)·체결버퍼 가정치 — 연구용 가정 유지 중, 브로커 확인 전
 - [ ] 워크포워드 윈도 정책
 - [ ] 전략 승격(promotion) 승인자·증빙 형식 정책
 - [ ] 라이브 체크리스트 12항목 (전부 사람 서명 필요)

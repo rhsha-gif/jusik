@@ -64,11 +64,60 @@ on 2026-06-24 stayed blocked (`limit_not_touched`) even with the buffer.
    setups; real-data strategy evaluation needs a wider universe and/or longer
    window before acceptance thresholds are meaningful.
 
+## Universe expansion + confirmed cost basis run (2026-07-06, same day, later)
+
+Cost assumptions are no longer placeholders. Basis confirmed by user decision:
+**KIS real-trading open API, retail individual investor.**
+
+- Commission `fee_bps=1.40527` per side — KIS BanKIS online rate 0.0140527%;
+  the open API charges the same commission as HTS with no separate API fee.
+  (Branch-opened accounts: 0.147% — pass `--fee-bps 14.7`.)
+- Sell tax `sell_tax_bps=20` — from 2026-01-01 the KRX transaction tax
+  reverted to the 2023 schedule: KOSPI 0.05% + rural special tax 0.15%,
+  KOSDAQ 0.20%; both 0.20% of sell notional, so one rate covers both markets.
+- No capital-gains term: on-exchange sales by minority individual holders are
+  untaxed (financial investment income tax repealed). Dividends out of scope
+  (price-return engine).
+- `slippage_bps=5` stays a research assumption (not broker-confirmed).
+
+Encoded in `quantpilot/packages/core/backtest/costs.py` and used as
+`run_local_backtest` defaults; result JSON now carries `cost_basis`
+(`kis_bankis_online_api+krx_tax_2026` vs `custom_override`).
+
+Universe expanded 3 → 15 symbols (14 KOSPI + 1 KOSDAQ 247540, sector-spread)
+and window 13 → 24 months (2024-07-01 → 2026-07-03), 7,320 bars fetched via
+`fetch_krx_local_data` and provider-validated.
+
+| Run | Signals | Filled | Blocked | Total return | Ann. return | Max DD | Sharpe* | Hit rate | Avg exposure |
+|---|---|---|---|---|---|---|---|---|---|
+| buffer 0 bps | 29 | 19 | 10 | +1.11% | +0.57% | 3.44% | 0.20 | 58.3% | 4.8% |
+| buffer 50 bps | 29 | 21 | 8 | +6.09% | +3.10% | 3.58% | 0.79 | 61.5% | 6.6% |
+
+Walk-forward: 21 windows, 15 with signals (previously most windows were empty).
+
+Observations:
+
+1. Signal scarcity is resolved at this scale: 29 signals / 19-21 fills vs
+   5 / 0-2 before. Acceptance-threshold discussion is now meaningful.
+2. Fill sensitivity persists but is no longer all-or-nothing: with the wider
+   universe the buffer-0 run fills 19 trades (was 0). The 50 bps buffer still
+   adds ~5%p total return — fill-model realism remains the top engine issue.
+3. Average exposure is only ~5-6%: the strategy leaves >90% of cash idle.
+   Position sizing / portfolio-level deployment is the next lever to evaluate,
+   ahead of raw signal quality.
+4. With commission at 1.4 bps, costs are dominated by the 20 bps sell tax
+   plus 5 bps slippage — the old 15 bps fee placeholder materially overstated
+   commission drag.
+
 ## Validation
 
 - `python -m pytest quantpilot/tests -p no:cacheprovider --basetemp=.pytest_tmp`
   → 288 collected: 287 passed, 1 skipped, 0 failures (junit-verified).
 - Real-data job runs shown above; smoke unaffected.
+- Expanded run (2026-07-06 later): 294 collected: 293 passed, 1 skipped,
+  0 failures (junit-verified; includes 3 new cost-preset tests) and
+  `run_smoke` OK. Note: when another session holds `.pytest_tmp` open
+  (e.g. a uvicorn log), point `--basetemp` at any other writable directory.
 
 ## Safety
 

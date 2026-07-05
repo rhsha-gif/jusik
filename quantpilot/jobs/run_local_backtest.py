@@ -21,6 +21,12 @@ import os
 from pathlib import Path
 from typing import Any
 
+from quantpilot.packages.core.backtest.costs import (
+    KIS_BANKIS_ONLINE_FEE_BPS,
+    KRX_SELL_TAX_BPS_FROM_2026,
+    RESEARCH_SLIPPAGE_BPS,
+    cost_basis_label,
+)
 from quantpilot.packages.core.backtest.engine import run_backtest
 from quantpilot.packages.core.backtest.replay import replay_signals
 from quantpilot.packages.core.backtest.schemas import (
@@ -48,13 +54,25 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
         help="directory with securities.csv/ohlcv.csv (default: LOCAL_DATA_DIR)",
     )
     parser.add_argument("--initial-cash", type=float, default=10_000_000.0)
-    parser.add_argument("--fee-bps", type=float, default=15.0)
-    parser.add_argument("--slippage-bps", type=float, default=5.0)
+    parser.add_argument(
+        "--fee-bps",
+        type=float,
+        default=KIS_BANKIS_ONLINE_FEE_BPS,
+        help="per-side commission in bps (default: KIS BanKIS online 0.0140527%%; "
+        "branch-opened accounts should pass 14.7)",
+    )
+    parser.add_argument(
+        "--slippage-bps",
+        type=float,
+        default=RESEARCH_SLIPPAGE_BPS,
+        help="research slippage assumption in bps (not broker-confirmed)",
+    )
     parser.add_argument(
         "--sell-tax-bps",
         type=float,
-        default=20.0,
-        help="sell-side transaction tax in bps (research assumption; default 20)",
+        default=KRX_SELL_TAX_BPS_FROM_2026,
+        help="sell-side transaction tax in bps (default: KRX 2026 schedule, "
+        "KOSPI 0.05%%+rural 0.15%% / KOSDAQ 0.20%%)",
     )
     parser.add_argument("--warmup-bars", type=int, default=20)
     parser.add_argument(
@@ -173,6 +191,7 @@ def run_local_backtest(args: argparse.Namespace) -> dict[str, Any]:
         "replayed_signals": len(signals),
         "limit_buffer_bps": args.limit_buffer_bps,
         "assumptions": assumptions.model_dump(mode="json"),
+        "cost_basis": cost_basis_label(assumptions),
         "full_period": {
             "metrics": _metrics_summary(full_result),
             "warnings": list(full_result.warnings),

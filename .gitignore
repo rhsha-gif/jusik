@@ -12,6 +12,9 @@ build/
 
 .pytest_tmp/
 
+# Local historical market data (user-fetched, not source)
+local_data/
+
 # Local browser/preview test artifacts
 .playwright-mcp/
 *baseline*.png

@@ -19,6 +19,23 @@ guessing.
 - Risk gates, the order state machine, idempotency, kill switches, and audit
   logging are untouched.
 
+## 0. Optional: fetch real KRX data automatically
+
+If you have `pykrx` installed (`python -m pip install pykrx`), a helper job can
+download real KRX daily bars and write both CSV files in the correct schema,
+then self-validate them through the same fail-closed providers:
+
+```powershell
+python -m quantpilot.jobs.fetch_krx_local_data `
+  --symbols 005930,000660,035420 `
+  --start 2025-06-02 --end 2026-07-03 `
+  --out-dir local_data `
+  --sectors "005930=technology,000660=technology,035420=internet"
+```
+
+This fetches public historical data only — no broker calls, no credentials,
+no order-path changes. `local_data/` is gitignored.
+
 ## 1. Create a data directory
 
 Put two CSV files in a directory of your choice, e.g. `C:\quant-data\` or

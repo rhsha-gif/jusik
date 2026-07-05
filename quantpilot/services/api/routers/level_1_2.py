@@ -7,6 +7,7 @@ from quantpilot.packages.core.harness_service import HarnessService
 from quantpilot.packages.core.policy.parser import DEFAULT_POLICY_TEXT
 from quantpilot.packages.core.universe.builder import build_candidate_universe
 from quantpilot.services.api.dependencies import get_harness_service
+from quantpilot.services.briefing import BriefingCard, daily_briefing
 
 
 router = APIRouter()
@@ -51,6 +52,12 @@ def run_level_1_2_mock_execute(
         )
     except RuntimeError as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc
+
+
+@router.get("/briefing/daily")
+def briefing_daily() -> list[BriefingCard]:
+    """Read-only curated briefing (design doc §4.7); never a signal input."""
+    return daily_briefing()
 
 
 @router.post("/research/universe")

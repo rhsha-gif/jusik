@@ -275,6 +275,12 @@ validated_l4 ─[KIS 모의투자 M주 무사고 + 라이브 체크리스트 12�
 
 ### 4.7 뉴스 브리핑 모듈 (최후순위, 읽기 전용)
 
+> **골격 구현됨 (2026-07-06)**: `quantpilot/services/briefing/` —
+> `BriefingCard` + 결정적 fixture 카드 3종, `GET /api/briefing/daily`.
+> 격리 원칙을 정적 import-guard 테스트로 강제 (신호·포트폴리오·집행·브로커
+> 모듈 참조 시 테스트 실패). `signal_input: false` 상수 필드로 계약에 명시.
+> 남은 것: 실제 수집기(웹/RSS) 어댑터, 프론트 브리핑 페이지.
+
 - 별도 서비스 경계 (`quantpilot/services/briefing/` 예정) — 신호·주문 코드와 import 관계 금지.
 - 산출물: 일간 브리핑 카드(출처·시각·요약·관련 종목 태그). 매매 신호 미생성.
 - 전략 입력 승격은 별도 설계 문서에서 look-ahead 방지 프로토콜과 함께 다룬다.

@@ -239,6 +239,29 @@
         }
       }
     },
+    "/api/briefing/daily": {
+      "get": {
+        "summary": "Briefing Daily",
+        "description": "Read-only curated briefing (design doc §4.7); never a signal input.",
+        "operationId": "briefing_daily_api_briefing_daily_get",
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "items": {
+                    "$ref": "#/components/schemas/BriefingCard"
+                  },
+                  "type": "array",
+                  "title": "Response Briefing Daily Api Briefing Daily Get"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
     "/api/research/universe": {
       "post": {
         "summary": "Research Universe",
@@ -1940,6 +1963,59 @@
         },
         "type": "object",
         "title": "AutopilotPolicyRequest"
+      },
+      "BriefingCard": {
+        "properties": {
+          "card_id": {
+            "type": "string",
+            "title": "Card Id"
+          },
+          "source": {
+            "type": "string",
+            "title": "Source"
+          },
+          "published_at": {
+            "type": "string",
+            "format": "date-time",
+            "title": "Published At"
+          },
+          "headline": {
+            "type": "string",
+            "title": "Headline"
+          },
+          "summary": {
+            "type": "string",
+            "title": "Summary"
+          },
+          "related_symbols": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array",
+            "title": "Related Symbols"
+          },
+          "tags": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array",
+            "title": "Tags"
+          },
+          "signal_input": {
+            "type": "boolean",
+            "title": "Signal Input",
+            "default": false
+          }
+        },
+        "type": "object",
+        "required": [
+          "card_id",
+          "source",
+          "published_at",
+          "headline",
+          "summary"
+        ],
+        "title": "BriefingCard"
       },
       "BrokerMode": {
         "type": "string",

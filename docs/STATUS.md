@@ -23,6 +23,7 @@ Level 1~5 자율화 전 과정을 먼저 완성하고, 사람 승인 게이트�
 | 데이터: local_historical (CSV) | ✅ 완료 + **실데이터 검증됨** | `fetch_krx_local_data` 잡으로 pykrx→CSV, 실 KRX 일봉으로 스모크 통과 |
 | 데이터: external_historical (KIS) | 🟡 코드 완성, 실서버 미검증 | 가짜 transport로 단위 테스트됨; 실 키 확보 시 `RUN_KIS_MANUAL_INTEGRATION=1` 수동 테스트 준비됨 |
 | KIS 토큰 발급 (`/oauth2/tokenP`) | ✅ 헬퍼 구현 (실서버 미검증) | `request_access_token(_from_env)` — 앱키/시크릿으로 발급; fake transport 단위 테스트 완료, 실 키 확보 시 수동 검증 |
+| 뉴스 브리핑 (구상 ①) | 🟡 골격 완료 (fixture) | 읽기 전용 격리 경계 + `GET /api/briefing/daily`; 실제 수집기·프론트 페이지는 후속 |
 | 실시간 시세 / paper trading | ❌ 범위 밖 | 라이브 체크리스트 선행조건 |
 | 라이브 트레이딩 | ❌ 의도적 미구현 | `docs/live_trading_enablement_checklist.md` 12항목 전부 사람 체크 필요 (현재 0/12) |
 

@@ -123,6 +123,26 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/briefing/daily": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Briefing Daily
+         * @description Read-only curated briefing (design doc §4.7); never a signal input.
+         */
+        get: operations["briefing_daily_api_briefing_daily_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/research/universe": {
         parameters: {
             query?: never;
@@ -884,6 +904,31 @@ export interface components {
         AutopilotPolicyRequest: {
             /** Policy Id */
             policy_id?: string | null;
+        };
+        /** BriefingCard */
+        BriefingCard: {
+            /** Card Id */
+            card_id: string;
+            /** Source */
+            source: string;
+            /**
+             * Published At
+             * Format: date-time
+             */
+            published_at: string;
+            /** Headline */
+            headline: string;
+            /** Summary */
+            summary: string;
+            /** Related Symbols */
+            related_symbols?: string[];
+            /** Tags */
+            tags?: string[];
+            /**
+             * Signal Input
+             * @default false
+             */
+            signal_input: boolean;
         };
         /**
          * BrokerMode
@@ -2147,6 +2192,26 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    briefing_daily_api_briefing_daily_get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["BriefingCard"][];
                 };
             };
         };

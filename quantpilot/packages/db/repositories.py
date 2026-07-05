@@ -2,6 +2,7 @@ from __future__ import annotations
 
 from typing import Callable, Generic, Protocol, TypeVar
 
+from quantpilot.packages.core.backtest.schemas import BacktestResult
 from quantpilot.packages.core.schemas import (
     AuditLogEvent,
     BrokerOrder,
@@ -10,6 +11,7 @@ from quantpilot.packages.core.schemas import (
     OrderPlan,
     PortfolioPlan,
     Signal,
+    StrategyApprovalTicket,
     StrategyRecipe,
     TradeApprovalTicket,
     UserPolicy,
@@ -84,6 +86,8 @@ class RepositoryRegistry:
         self.audit_logs = InMemoryRepository[AuditLogEvent](lambda item: item.event_id)
         self.operation_reports = InMemoryRepository[OperationReport](lambda item: item.report_id)
         self.approval_tickets = InMemoryRepository[TradeApprovalTicket](lambda item: item.ticket_id)
+        self.strategy_approval_tickets = InMemoryRepository[StrategyApprovalTicket](lambda item: item.ticket_id)
+        self.backtest_results = InMemoryRepository[BacktestResult](lambda item: item.result_id)
 
     def clear(self) -> None:
         self.policies.clear()
@@ -96,3 +100,5 @@ class RepositoryRegistry:
         self.audit_logs.clear()
         self.operation_reports.clear()
         self.approval_tickets.clear()
+        self.strategy_approval_tickets.clear()
+        self.backtest_results.clear()

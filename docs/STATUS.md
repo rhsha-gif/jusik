@@ -52,6 +52,16 @@ Level 1~5 자율화 전 과정을 먼저 완성하고, 사람 승인 게이트�
   ~5-6%로 현금 유휴가 최대 병목, 체결모델 민감도 여전. 검증: pytest 294개
   중 293 passed·1 skipped (junit), run_smoke OK. 상세: 같은 리포트의
   "Universe expansion + confirmed cost basis run" 섹션
+- **엔진 개선: exit 전량 청산 + 리스크 exit 시장가화** — exit 잔량 제거, 갭다운에서
+  손절이 조용히 차단되던 문제 해결 (`exit_fill_policy=marketable_next_open` 기본,
+  trim은 limit 유지). 정직해진 기준선: buffer 50bps +4.86% (Sharpe 0.65).
+  노출도 분석: 병목은 신호 동시성(2년간 매수 11건, 동시 보유 최대 3종목)이며
+  건당 비중(12%) 아님 — 비중 상향은 순수 리스크 스케일링 (Sharpe 불변)
+- **전략 단위 승인 티켓 구현 (설계 §4.1)** — `StrategyApprovalTicket` + 백테스트
+  증빙 fail-closed 검증 + 만료/대체/폐기 + 레벨별 활성화 게이트 +
+  `/api/execution/strategy-tickets/*` 5개 엔드포인트. 검증: pytest 305개 중
+  304 passed·1 skipped (junit), run_smoke OK, vitest 20 passed, build OK,
+  openapi 타입 재생성. 원칙 추가: 전략 승인 = arming (즉시 매수 아님, §3.0)
 
 ## 다음 단계 후보 (우선순위 제안)
 
@@ -59,7 +69,9 @@ Level 1~5 자율화 전 과정을 먼저 완성하고, 사람 승인 게이트�
 > 전체 로드맵: `docs/product_vision_alignment_design.md`
 
 1. 승인 기준(acceptance thresholds) 확정 — 표본이 생겼으므로 이제 논의 가능 (사람 입력)
-3. 전략 단위 승인 티켓 + DriftMonitor (설계 문서 §4.1–4.2)
+2. DriftMonitor 확장 (설계 §4.2): MDD 기반 재승인 트리거 — 운용 성과 추적 선행 필요
+   (티켓 레일 자체는 ✅ 완료, `valid_until` 만료 게이트 포함)
+3. 대화형 전략 수립 입구 (설계 §4.3 strategy-studio) — 티켓 레일이 생겼으므로 착수 가능
 4. KIS 앱키 확보 시: 토큰 발급 헬퍼 구현 → `RUN_KIS_MANUAL_INTEGRATION=1` 수동 통합 테스트
 5. 소소한 부채: `MARKET_ORDERS_ENABLED` 판독 중복 제거, `.env.example` 동기화 코드 가드
 

@@ -1210,6 +1210,268 @@
         }
       }
     },
+    "/api/execution/strategy-tickets/create": {
+      "post": {
+        "summary": "Create Strategy Ticket",
+        "operationId": "create_strategy_ticket_api_execution_strategy_tickets_create_post",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/StrategyTicketCreateRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/StrategyApprovalTicket"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/execution/strategy-tickets/pending": {
+      "get": {
+        "summary": "Pending Strategy Tickets",
+        "operationId": "pending_strategy_tickets_api_execution_strategy_tickets_pending_get",
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "items": {
+                    "$ref": "#/components/schemas/StrategyApprovalTicket"
+                  },
+                  "type": "array",
+                  "title": "Response Pending Strategy Tickets Api Execution Strategy Tickets Pending Get"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/execution/strategy-tickets/{ticket_id}/approve": {
+      "post": {
+        "summary": "Approve Strategy Ticket",
+        "operationId": "approve_strategy_ticket_api_execution_strategy_tickets__ticket_id__approve_post",
+        "parameters": [
+          {
+            "name": "ticket_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Ticket Id"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/StrategyTicketDecisionRequest"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/StrategyApprovalTicket"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/execution/strategy-tickets/{ticket_id}/reject": {
+      "post": {
+        "summary": "Reject Strategy Ticket",
+        "operationId": "reject_strategy_ticket_api_execution_strategy_tickets__ticket_id__reject_post",
+        "parameters": [
+          {
+            "name": "ticket_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Ticket Id"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/StrategyTicketDecisionRequest"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/StrategyApprovalTicket"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/execution/strategy-tickets/{ticket_id}/revoke": {
+      "post": {
+        "summary": "Revoke Strategy Ticket",
+        "operationId": "revoke_strategy_ticket_api_execution_strategy_tickets__ticket_id__revoke_post",
+        "parameters": [
+          {
+            "name": "ticket_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Ticket Id"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/StrategyTicketDecisionRequest"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/StrategyApprovalTicket"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/execution/strategy-tickets/activation-allowed": {
+      "get": {
+        "summary": "Strategy Activation Allowed",
+        "operationId": "strategy_activation_allowed_api_execution_strategy_tickets_activation_allowed_get",
+        "parameters": [
+          {
+            "name": "strategy_id",
+            "in": "query",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Strategy Id"
+            }
+          },
+          {
+            "name": "execution_level",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "enum": [
+                "level_3",
+                "level_4"
+              ],
+              "type": "string",
+              "default": "level_3",
+              "title": "Execution Level"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "additionalProperties": true,
+                  "title": "Response Strategy Activation Allowed Api Execution Strategy Tickets Activation Allowed Get"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
     "/api/operator/run-once": {
       "post": {
         "summary": "Operator Run Once",
@@ -2768,6 +3030,185 @@
         ],
         "title": "SignalAction"
       },
+      "StrategyApprovalTicket": {
+        "properties": {
+          "ticket_id": {
+            "type": "string",
+            "title": "Ticket Id"
+          },
+          "user_id": {
+            "type": "string",
+            "title": "User Id",
+            "default": "fixture-user"
+          },
+          "ticket_type": {
+            "type": "string",
+            "const": "strategy_activation",
+            "title": "Ticket Type",
+            "default": "strategy_activation"
+          },
+          "strategy_id": {
+            "type": "string",
+            "title": "Strategy Id"
+          },
+          "strategy_version": {
+            "type": "string",
+            "title": "Strategy Version"
+          },
+          "spec_hash": {
+            "type": "string",
+            "title": "Spec Hash"
+          },
+          "backtest_report_id": {
+            "type": "string",
+            "title": "Backtest Report Id"
+          },
+          "requested_execution_level": {
+            "type": "string",
+            "enum": [
+              "level_3",
+              "level_4"
+            ],
+            "title": "Requested Execution Level"
+          },
+          "capital_budget_pct": {
+            "type": "number",
+            "maximum": 1.0,
+            "exclusiveMinimum": 0.0,
+            "title": "Capital Budget Pct"
+          },
+          "status": {
+            "$ref": "#/components/schemas/StrategyApprovalTicketStatus",
+            "default": "pending"
+          },
+          "requested_at": {
+            "type": "string",
+            "format": "date-time",
+            "title": "Requested At"
+          },
+          "valid_until": {
+            "type": "string",
+            "format": "date-time",
+            "title": "Valid Until"
+          },
+          "reapproval_triggers": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array",
+            "title": "Reapproval Triggers"
+          },
+          "approved_at": {
+            "anyOf": [
+              {
+                "type": "string",
+                "format": "date-time"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Approved At"
+          },
+          "approved_by": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Approved By"
+          },
+          "rejected_at": {
+            "anyOf": [
+              {
+                "type": "string",
+                "format": "date-time"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Rejected At"
+          },
+          "rejection_reason": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Rejection Reason"
+          },
+          "revoked_at": {
+            "anyOf": [
+              {
+                "type": "string",
+                "format": "date-time"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Revoked At"
+          },
+          "revoked_reason": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Revoked Reason"
+          },
+          "superseded_by": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Superseded By"
+          },
+          "live_trading_enabled": {
+            "type": "boolean",
+            "title": "Live Trading Enabled",
+            "default": false
+          }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "required": [
+          "strategy_id",
+          "strategy_version",
+          "spec_hash",
+          "backtest_report_id",
+          "requested_execution_level",
+          "capital_budget_pct"
+        ],
+        "title": "StrategyApprovalTicket",
+        "description": "Strategy-level activation approval (product vision design doc §4.1).\n\nThe user approves a strategy once — with validation evidence attached —\ninstead of approving each trade. Creation fails closed without stored\nbacktest evidence for the same strategy/version, and approval expires at\n``valid_until`` or on a reapproval trigger."
+      },
+      "StrategyApprovalTicketStatus": {
+        "type": "string",
+        "enum": [
+          "pending",
+          "approved",
+          "rejected",
+          "expired",
+          "revoked",
+          "superseded"
+        ],
+        "title": "StrategyApprovalTicketStatus"
+      },
       "StrategySelectionDecision": {
         "properties": {
           "selected_strategy_id": {
@@ -2821,6 +3262,77 @@
           "reason"
         ],
         "title": "StrategySelectionDecision"
+      },
+      "StrategyTicketCreateRequest": {
+        "properties": {
+          "strategy_id": {
+            "type": "string",
+            "title": "Strategy Id"
+          },
+          "strategy_version": {
+            "type": "string",
+            "title": "Strategy Version"
+          },
+          "spec_hash": {
+            "type": "string",
+            "title": "Spec Hash"
+          },
+          "backtest_report_id": {
+            "type": "string",
+            "title": "Backtest Report Id"
+          },
+          "requested_execution_level": {
+            "type": "string",
+            "enum": [
+              "level_3",
+              "level_4"
+            ],
+            "title": "Requested Execution Level",
+            "default": "level_3"
+          },
+          "capital_budget_pct": {
+            "type": "number",
+            "title": "Capital Budget Pct",
+            "default": 0.2
+          },
+          "valid_days": {
+            "type": "integer",
+            "title": "Valid Days",
+            "default": 30
+          },
+          "reapproval_triggers": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array",
+            "title": "Reapproval Triggers",
+            "default": []
+          }
+        },
+        "type": "object",
+        "required": [
+          "strategy_id",
+          "strategy_version",
+          "spec_hash",
+          "backtest_report_id"
+        ],
+        "title": "StrategyTicketCreateRequest"
+      },
+      "StrategyTicketDecisionRequest": {
+        "properties": {
+          "approved_by": {
+            "type": "string",
+            "title": "Approved By",
+            "default": "user"
+          },
+          "reason": {
+            "type": "string",
+            "title": "Reason",
+            "default": "user_rejected"
+          }
+        },
+        "type": "object",
+        "title": "StrategyTicketDecisionRequest"
       },
       "TradeApprovalTicket": {
         "properties": {

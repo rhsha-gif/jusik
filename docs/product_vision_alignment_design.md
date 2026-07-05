@@ -41,6 +41,15 @@ Level 구분과 구상의 관계:
 
 ## 3. 구상에서 보완이 필요한 지점 (설계 원칙)
 
+### 3.0 전략 승인 ≠ 즉시 매수 (arming 원칙)
+
+사용자가 섹터/종목을 고르고 전략을 승인하는 것은 **매수 명령이 아니라 감시 상태
+무장(arming)**이다. 진입·이익실현·손절 타이밍 판단은 전략(신호 분류기)의 몫이며,
+승인된 전략은 셋업이 완성될 때만(`buy_ready`) 진입한다 — 승인 직후 며칠간
+아무 매매가 없는 것이 정상 동작이다. 현재 신호 체계(`watch`/`buy_wait`/`buy_ready`/
+`trim`/`exit`)가 이미 이 원칙을 구현하고 있으며, UI는 "승인됨 = 대기 중" 상태를
+명시적으로 보여줘야 한다 (사용자 확인 사항, 2026-07-06).
+
 ### 3.1 LLM은 전략을 즉석 발명하지 않는다
 
 안전 불변식: **LLM/RL 출력에서 직접 주문을 만들지 않는다** (기존 Forbidden Actions).
@@ -114,6 +123,14 @@ KIS 토큰 발급(`/oauth2/tokenP`) 미구현·앱키 사람 입력 대기 상�
 ## 4. 설계 추가분 (신규 계약·컴포넌트)
 
 ### 4.1 StrategyApprovalTicket (승인 티켓 레일 확장)
+
+> **구현됨 (2026-07-06)**: `StrategyApprovalTicket` 스키마(core/schemas.py),
+> 백테스트 증빙 저장소(`backtest_results`), fail-closed 생성/승인/거절/폐기/
+> 만료/대체(supersede), 레벨별 활성화 게이트(`strategy_activation_allowed`),
+> `/api/execution/strategy-tickets/*` 5개 엔드포인트. 아래 초안과 필드가 다소
+> 다른 부분은 구현이 기준 (status에 `rejected` 추가, `valid_days` 파라미터화).
+> DriftMonitor(§4.2)는 `valid_until` 만료만 구현됨 — MDD 기반 트리거는 실적
+> 추적(운용 성과 기록)이 선행되어야 하므로 후속 단계.
 
 기존 `/api/execution/approval-tickets/*` 레일에 전략 단위 티켓 타입을 추가한다.
 

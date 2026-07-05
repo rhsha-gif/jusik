@@ -38,6 +38,8 @@ from quantpilot.packages.core.schemas import (
     PortfolioSnapshot,
     ProposalExplanation,
     Signal,
+    StrategyApprovalTicket,
+    StrategyApprovalTicketStatus,
     StrategyRecipe,
     TradeApprovalTicket,
     UserPolicy,
@@ -45,6 +47,7 @@ from quantpilot.packages.core.schemas import (
     new_id,
     utc_now,
 )
+from quantpilot.packages.core.backtest.schemas import BacktestResult
 from quantpilot.packages.core.data.providers import (
     FixtureMarketDataProvider,
     FixtureSecurityProvider,
@@ -1202,6 +1205,217 @@ class HarnessService:
             source="approval_ticket_service",
         )
         return ticket
+
+    # --- strategy activation tickets (product vision design doc §4.1) ---
+
+    def record_backtest_result(self, result: BacktestResult) -> BacktestResult:
+        self.repositories.backtest_results.add(result)
+        self.audit.emit(
+            user_id="fixture-user",
+            entity_type="backtest_result",
+            entity_id=result.result_id,
+            action="backtest_result_recorded",
+            after_state={
+                "strategy_id": result.strategy_id,
+                "recipe_version": result.recipe_version,
+                "research_only": result.research_only,
+            },
+            source="strategy_ticket_service",
+        )
+        return result
+
+    def _strategy_evidence_error(
+        self, *, backtest_report_id: str, strategy_id: str, strategy_version: str
+    ) -> str | None:
+        result = self.repositories.backtest_results.get(backtest_report_id)
+        if result is None:
+            return f"missing backtest evidence: {backtest_report_id}"
+        if result.strategy_id != strategy_id or result.recipe_version != strategy_version:
+            return "backtest evidence does not match strategy/version"
+        if not result.research_only or result.live_trading_approval:
+            return "backtest evidence must be research_only without live approval"
+        return None
+
+    def create_strategy_approval_ticket(
+        self,
+        *,
+        strategy_id: str,
+        strategy_version: str,
+        spec_hash: str,
+        backtest_report_id: str,
+        requested_execution_level: str = "level_3",
+        capital_budget_pct: float = 0.2,
+        valid_days: int = 30,
+        reapproval_triggers: list[str] | None = None,
+        user_id: str = "fixture-user",
+    ) -> StrategyApprovalTicket:
+        error = self._strategy_evidence_error(
+            backtest_report_id=backtest_report_id,
+            strategy_id=strategy_id,
+            strategy_version=strategy_version,
+        )
+        if error is not None:
+            raise RuntimeError(error)
+
+        ticket = StrategyApprovalTicket(
+            user_id=user_id,
+            strategy_id=strategy_id,
+            strategy_version=strategy_version,
+            spec_hash=spec_hash,
+            backtest_report_id=backtest_report_id,
+            requested_execution_level=requested_execution_level,  # type: ignore[arg-type]
+            capital_budget_pct=capital_budget_pct,
+            valid_until=utc_now() + timedelta(days=valid_days),
+            reapproval_triggers=list(reapproval_triggers or []),
+        )
+        for existing in self.repositories.strategy_approval_tickets.list():
+            if existing.strategy_id != strategy_id:
+                continue
+            if existing.status not in {
+                StrategyApprovalTicketStatus.pending,
+                StrategyApprovalTicketStatus.approved,
+            }:
+                continue
+            before = existing.model_copy(deep=True)
+            existing.status = StrategyApprovalTicketStatus.superseded
+            existing.superseded_by = ticket.ticket_id
+            self.repositories.strategy_approval_tickets.update(existing)
+            self.audit.emit(
+                user_id=existing.user_id,
+                entity_type="strategy_approval_ticket",
+                entity_id=existing.ticket_id,
+                action="strategy_ticket_superseded",
+                before_state=before,
+                after_state=existing,
+                source="strategy_ticket_service",
+            )
+        self.repositories.strategy_approval_tickets.add(ticket)
+        self.audit.emit(
+            user_id=ticket.user_id,
+            entity_type="strategy_approval_ticket",
+            entity_id=ticket.ticket_id,
+            action="strategy_ticket_created",
+            after_state=ticket,
+            source="strategy_ticket_service",
+        )
+        return ticket
+
+    def _expire_strategy_ticket_if_needed(self, ticket: StrategyApprovalTicket) -> StrategyApprovalTicket:
+        active = {StrategyApprovalTicketStatus.pending, StrategyApprovalTicketStatus.approved}
+        if ticket.status in active and ticket.valid_until <= utc_now():
+            before = ticket.model_copy(deep=True)
+            ticket.status = StrategyApprovalTicketStatus.expired
+            self.repositories.strategy_approval_tickets.update(ticket)
+            self.audit.emit(
+                user_id=ticket.user_id,
+                entity_type="strategy_approval_ticket",
+                entity_id=ticket.ticket_id,
+                action="strategy_ticket_expired",
+                before_state=before,
+                after_state=ticket,
+                source="strategy_ticket_service",
+            )
+        return ticket
+
+    def pending_strategy_tickets(self) -> list[StrategyApprovalTicket]:
+        return [
+            refreshed
+            for ticket in self.repositories.strategy_approval_tickets.list()
+            if (refreshed := self._expire_strategy_ticket_if_needed(ticket)).status
+            == StrategyApprovalTicketStatus.pending
+        ]
+
+    def approve_strategy_ticket(self, ticket_id: str, *, approved_by: str = "user") -> StrategyApprovalTicket:
+        ticket = self._expire_strategy_ticket_if_needed(
+            self.repositories.strategy_approval_tickets.require(ticket_id)
+        )
+        if ticket.status != StrategyApprovalTicketStatus.pending:
+            raise RuntimeError(f"strategy ticket is not pending: {ticket.status.value}")
+        error = self._strategy_evidence_error(
+            backtest_report_id=ticket.backtest_report_id,
+            strategy_id=ticket.strategy_id,
+            strategy_version=ticket.strategy_version,
+        )
+        if error is not None:
+            raise RuntimeError(error)
+        before = ticket.model_copy(deep=True)
+        ticket.status = StrategyApprovalTicketStatus.approved
+        ticket.approved_at = utc_now()
+        ticket.approved_by = approved_by
+        self.repositories.strategy_approval_tickets.update(ticket)
+        self.audit.emit(
+            user_id=ticket.user_id,
+            entity_type="strategy_approval_ticket",
+            entity_id=ticket.ticket_id,
+            action="strategy_ticket_approved",
+            before_state=before,
+            after_state=ticket,
+            source="strategy_ticket_service",
+        )
+        return ticket
+
+    def reject_strategy_ticket(self, ticket_id: str, *, reason: str = "user_rejected") -> StrategyApprovalTicket:
+        ticket = self._expire_strategy_ticket_if_needed(
+            self.repositories.strategy_approval_tickets.require(ticket_id)
+        )
+        if ticket.status != StrategyApprovalTicketStatus.pending:
+            raise RuntimeError(f"strategy ticket is not pending: {ticket.status.value}")
+        before = ticket.model_copy(deep=True)
+        ticket.status = StrategyApprovalTicketStatus.rejected
+        ticket.rejected_at = utc_now()
+        ticket.rejection_reason = reason
+        self.repositories.strategy_approval_tickets.update(ticket)
+        self.audit.emit(
+            user_id=ticket.user_id,
+            entity_type="strategy_approval_ticket",
+            entity_id=ticket.ticket_id,
+            action="strategy_ticket_rejected",
+            before_state=before,
+            after_state=ticket,
+            source="strategy_ticket_service",
+        )
+        return ticket
+
+    def revoke_strategy_ticket(self, ticket_id: str, *, reason: str) -> StrategyApprovalTicket:
+        ticket = self.repositories.strategy_approval_tickets.require(ticket_id)
+        if ticket.status not in {
+            StrategyApprovalTicketStatus.pending,
+            StrategyApprovalTicketStatus.approved,
+        }:
+            raise RuntimeError(f"strategy ticket cannot be revoked: {ticket.status.value}")
+        before = ticket.model_copy(deep=True)
+        ticket.status = StrategyApprovalTicketStatus.revoked
+        ticket.revoked_at = utc_now()
+        ticket.revoked_reason = reason
+        self.repositories.strategy_approval_tickets.update(ticket)
+        self.audit.emit(
+            user_id=ticket.user_id,
+            entity_type="strategy_approval_ticket",
+            entity_id=ticket.ticket_id,
+            action="strategy_ticket_revoked",
+            before_state=before,
+            after_state=ticket,
+            source="strategy_ticket_service",
+        )
+        return ticket
+
+    def strategy_activation_allowed(
+        self, strategy_id: str, *, execution_level: str
+    ) -> tuple[bool, str]:
+        """Fail-closed gate: is there an active approval covering this level?"""
+        covered_by_level = {
+            "level_3": {"level_3"},
+            "level_4": {"level_3", "level_4"},
+        }
+        for ticket in self.repositories.strategy_approval_tickets.list():
+            if ticket.strategy_id != strategy_id:
+                continue
+            refreshed = self._expire_strategy_ticket_if_needed(ticket)
+            if refreshed.status != StrategyApprovalTicketStatus.approved:
+                continue
+            if execution_level in covered_by_level.get(refreshed.requested_execution_level, set()):
+                return True, refreshed.ticket_id
+        return False, "no_active_strategy_approval"
 
     def _broker_for_policy(self, policy: UserPolicy):
         if policy.broker == BrokerMode.paper:

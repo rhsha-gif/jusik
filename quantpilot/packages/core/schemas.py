@@ -489,6 +489,47 @@ class TradeApprovalTicket(HarnessModel):
     live_trading_enabled: bool = False
 
 
+class StrategyApprovalTicketStatus(str, Enum):
+    pending = "pending"
+    approved = "approved"
+    rejected = "rejected"
+    expired = "expired"
+    revoked = "revoked"
+    superseded = "superseded"
+
+
+class StrategyApprovalTicket(HarnessModel):
+    """Strategy-level activation approval (product vision design doc §4.1).
+
+    The user approves a strategy once — with validation evidence attached —
+    instead of approving each trade. Creation fails closed without stored
+    backtest evidence for the same strategy/version, and approval expires at
+    ``valid_until`` or on a reapproval trigger.
+    """
+
+    ticket_id: str = Field(default_factory=lambda: new_id("stkt"))
+    user_id: str = "fixture-user"
+    ticket_type: Literal["strategy_activation"] = "strategy_activation"
+    strategy_id: str
+    strategy_version: str
+    spec_hash: str
+    backtest_report_id: str
+    requested_execution_level: Literal["level_3", "level_4"]
+    capital_budget_pct: float = Field(gt=0, le=1)
+    status: StrategyApprovalTicketStatus = StrategyApprovalTicketStatus.pending
+    requested_at: datetime = Field(default_factory=utc_now)
+    valid_until: datetime = Field(default_factory=lambda: utc_now() + timedelta(days=30))
+    reapproval_triggers: list[str] = Field(default_factory=list)
+    approved_at: datetime | None = None
+    approved_by: str | None = None
+    rejected_at: datetime | None = None
+    rejection_reason: str | None = None
+    revoked_at: datetime | None = None
+    revoked_reason: str | None = None
+    superseded_by: str | None = None
+    live_trading_enabled: bool = False
+
+
 class BrokerOrder(HarnessModel):
     broker_order_id: str = Field(default_factory=lambda: new_id("bord"))
     order_plan_id: str

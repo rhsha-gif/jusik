@@ -548,6 +548,108 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/execution/strategy-tickets/create": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Create Strategy Ticket */
+        post: operations["create_strategy_ticket_api_execution_strategy_tickets_create_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/execution/strategy-tickets/pending": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Pending Strategy Tickets */
+        get: operations["pending_strategy_tickets_api_execution_strategy_tickets_pending_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/execution/strategy-tickets/{ticket_id}/approve": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Approve Strategy Ticket */
+        post: operations["approve_strategy_ticket_api_execution_strategy_tickets__ticket_id__approve_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/execution/strategy-tickets/{ticket_id}/reject": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Reject Strategy Ticket */
+        post: operations["reject_strategy_ticket_api_execution_strategy_tickets__ticket_id__reject_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/execution/strategy-tickets/{ticket_id}/revoke": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Revoke Strategy Ticket */
+        post: operations["revoke_strategy_ticket_api_execution_strategy_tickets__ticket_id__revoke_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/execution/strategy-tickets/activation-allowed": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Strategy Activation Allowed */
+        get: operations["strategy_activation_allowed_api_execution_strategy_tickets_activation_allowed_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/operator/run-once": {
         parameters: {
             query?: never;
@@ -1189,6 +1291,83 @@ export interface components {
          * @enum {string}
          */
         SignalAction: "buy_ready" | "buy_wait" | "hold" | "trim" | "exit" | "watch" | "blocked";
+        /**
+         * StrategyApprovalTicket
+         * @description Strategy-level activation approval (product vision design doc §4.1).
+         *
+         *     The user approves a strategy once — with validation evidence attached —
+         *     instead of approving each trade. Creation fails closed without stored
+         *     backtest evidence for the same strategy/version, and approval expires at
+         *     ``valid_until`` or on a reapproval trigger.
+         */
+        StrategyApprovalTicket: {
+            /** Ticket Id */
+            ticket_id?: string;
+            /**
+             * User Id
+             * @default fixture-user
+             */
+            user_id: string;
+            /**
+             * Ticket Type
+             * @default strategy_activation
+             * @constant
+             */
+            ticket_type: "strategy_activation";
+            /** Strategy Id */
+            strategy_id: string;
+            /** Strategy Version */
+            strategy_version: string;
+            /** Spec Hash */
+            spec_hash: string;
+            /** Backtest Report Id */
+            backtest_report_id: string;
+            /**
+             * Requested Execution Level
+             * @enum {string}
+             */
+            requested_execution_level: "level_3" | "level_4";
+            /** Capital Budget Pct */
+            capital_budget_pct: number;
+            /** @default pending */
+            status: components["schemas"]["StrategyApprovalTicketStatus"];
+            /**
+             * Requested At
+             * Format: date-time
+             */
+            requested_at?: string;
+            /**
+             * Valid Until
+             * Format: date-time
+             */
+            valid_until?: string;
+            /** Reapproval Triggers */
+            reapproval_triggers?: string[];
+            /** Approved At */
+            approved_at?: string | null;
+            /** Approved By */
+            approved_by?: string | null;
+            /** Rejected At */
+            rejected_at?: string | null;
+            /** Rejection Reason */
+            rejection_reason?: string | null;
+            /** Revoked At */
+            revoked_at?: string | null;
+            /** Revoked Reason */
+            revoked_reason?: string | null;
+            /** Superseded By */
+            superseded_by?: string | null;
+            /**
+             * Live Trading Enabled
+             * @default false
+             */
+            live_trading_enabled: boolean;
+        };
+        /**
+         * StrategyApprovalTicketStatus
+         * @enum {string}
+         */
+        StrategyApprovalTicketStatus: "pending" | "approved" | "rejected" | "expired" | "revoked" | "superseded";
         /** StrategySelectionDecision */
         StrategySelectionDecision: {
             /** Selected Strategy Id */
@@ -1202,6 +1381,51 @@ export interface components {
                 [key: string]: string;
             };
             /** Reason */
+            reason: string;
+        };
+        /** StrategyTicketCreateRequest */
+        StrategyTicketCreateRequest: {
+            /** Strategy Id */
+            strategy_id: string;
+            /** Strategy Version */
+            strategy_version: string;
+            /** Spec Hash */
+            spec_hash: string;
+            /** Backtest Report Id */
+            backtest_report_id: string;
+            /**
+             * Requested Execution Level
+             * @default level_3
+             * @enum {string}
+             */
+            requested_execution_level: "level_3" | "level_4";
+            /**
+             * Capital Budget Pct
+             * @default 0.2
+             */
+            capital_budget_pct: number;
+            /**
+             * Valid Days
+             * @default 30
+             */
+            valid_days: number;
+            /**
+             * Reapproval Triggers
+             * @default []
+             */
+            reapproval_triggers: string[];
+        };
+        /** StrategyTicketDecisionRequest */
+        StrategyTicketDecisionRequest: {
+            /**
+             * Approved By
+             * @default user
+             */
+            approved_by: string;
+            /**
+             * Reason
+             * @default user_rejected
+             */
             reason: string;
         };
         /** TradeApprovalTicket */
@@ -2441,6 +2665,198 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["TradeApprovalTicket"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    create_strategy_ticket_api_execution_strategy_tickets_create_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["StrategyTicketCreateRequest"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["StrategyApprovalTicket"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    pending_strategy_tickets_api_execution_strategy_tickets_pending_get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["StrategyApprovalTicket"][];
+                };
+            };
+        };
+    };
+    approve_strategy_ticket_api_execution_strategy_tickets__ticket_id__approve_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                ticket_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["StrategyTicketDecisionRequest"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["StrategyApprovalTicket"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    reject_strategy_ticket_api_execution_strategy_tickets__ticket_id__reject_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                ticket_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["StrategyTicketDecisionRequest"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["StrategyApprovalTicket"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    revoke_strategy_ticket_api_execution_strategy_tickets__ticket_id__revoke_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                ticket_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["StrategyTicketDecisionRequest"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["StrategyApprovalTicket"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    strategy_activation_allowed_api_execution_strategy_tickets_activation_allowed_get: {
+        parameters: {
+            query: {
+                strategy_id: string;
+                execution_level?: "level_3" | "level_4";
+            };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        [key: string]: unknown;
+                    };
                 };
             };
             /** @description Validation Error */

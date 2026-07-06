@@ -1,8 +1,12 @@
 from __future__ import annotations
 
-from datetime import date
+from datetime import date, datetime
 from hashlib import sha256
 
+from quantpilot.packages.core.portfolio.calibration_adapter import (
+    CalibrationAdapterConfig,
+    build_calibrated_proxies,
+)
 from quantpilot.packages.core.portfolio.optimizer import DeterministicPortfolioOptimizer
 from quantpilot.packages.core.portfolio.optimizer_types import (
     ExpectedReturnRiskProxy,
@@ -22,6 +26,7 @@ from quantpilot.packages.core.schemas import (
     SignalAction,
     UserPolicy,
 )
+from quantpilot.packages.core.signals.types import CalibratedSignalSet
 
 
 DEFAULT_REBALANCE_BAND = 0.001
@@ -148,15 +153,48 @@ def build_optimization_input(
     signals: list[Signal],
     snapshot: PortfolioSnapshot,
     expected_return_risk_proxies: dict[str, ExpectedReturnRiskProxy] | None = None,
+    calibrated_signal_set: CalibratedSignalSet | None = None,
+    calibration_config: CalibrationAdapterConfig | None = None,
+    calibration_now: datetime | None = None,
     sector_metadata: dict[str, str] | None = None,
     optimizer_constraints: OptimizationConstraints | None = None,
     rebalance_band: float = DEFAULT_REBALANCE_BAND,
 ) -> OptimizationInput:
     snapshot_sectors = {_symbol(position.symbol): position.sector for position in snapshot.positions}
-    proxies = expected_return_risk_proxies or {
-        _symbol(signal.symbol): _uncalibrated_proxy_from_signal(signal)
-        for signal in signals
+    proxy_metadata: dict[str, object] = {
+        "calibrated": False,
+        "source": "planner_adapter_uncalibrated_signal_proxy",
     }
+    if expected_return_risk_proxies is not None:
+        proxies = expected_return_risk_proxies
+    elif calibrated_signal_set is not None:
+        adapter_result = build_calibrated_proxies(
+            calibrated_signal_set,
+            signals=signals,
+            config=calibration_config,
+            now=calibration_now,
+        )
+        # Excluded and fail-closed symbols fall back to the conservative
+        # uncalibrated proxy; calibration can only replace, never remove, a proxy.
+        proxies = {
+            _symbol(signal.symbol): adapter_result.proxies.get(
+                _symbol(signal.symbol),
+                _uncalibrated_proxy_from_signal(signal),
+            )
+            for signal in signals
+        }
+        proxy_metadata = {
+            "calibrated": adapter_result.status in {"applied", "partial"},
+            "source": "planner_calibration_adapter",
+            "calibration_status": adapter_result.status,
+            "calibration_reason_codes": adapter_result.reason_codes,
+            "calibration_excluded_symbols": adapter_result.excluded_symbols,
+        }
+    else:
+        proxies = {
+            _symbol(signal.symbol): _uncalibrated_proxy_from_signal(signal)
+            for signal in signals
+        }
     return OptimizationInput(
         signals=signals,
         proxies=proxies,
@@ -172,10 +210,7 @@ def build_optimization_input(
             "single_order_cash_limit": policy.single_order_cash_limit,
         },
         data_mode=DataMode.fixture,
-        proxy_metadata={
-            "calibrated": False,
-            "source": "planner_adapter_uncalibrated_signal_proxy",
-        },
+        proxy_metadata=proxy_metadata,
     )
 
 
@@ -198,6 +233,9 @@ def build_portfolio_plan(
     snapshot: PortfolioSnapshot,
     quotes: dict[str, float] | None = None,
     expected_return_risk_proxies: dict[str, ExpectedReturnRiskProxy] | None = None,
+    calibrated_signal_set: CalibratedSignalSet | None = None,
+    calibration_config: CalibrationAdapterConfig | None = None,
+    calibration_now: datetime | None = None,
     sector_metadata: dict[str, str] | None = None,
     optimizer_constraints: OptimizationConstraints | None = None,
     rebalance_band: float = DEFAULT_REBALANCE_BAND,
@@ -207,6 +245,9 @@ def build_portfolio_plan(
         signals=signals,
         snapshot=snapshot,
         expected_return_risk_proxies=expected_return_risk_proxies,
+        calibrated_signal_set=calibrated_signal_set,
+        calibration_config=calibration_config,
+        calibration_now=calibration_now,
         sector_metadata=sector_metadata,
         optimizer_constraints=optimizer_constraints,
         rebalance_band=rebalance_band,

@@ -21,27 +21,27 @@ smoke output). Real-data migration steps completed so far:
 | 09 | Walk-forward validation evidence layer | `docs/step_09_walk_forward_validation_report.md` |
 | 10 | Simulator-only execution layer (TWAP/VWAP/POV) | `docs/step_10_execution_simulator_report.md` |
 | 11 | Execution simulation preview endpoint | `docs/step_11_execution_preview_report.md` |
+| 12 | Calibrated proxy → optimizer adapter (fail-closed) | `docs/step_12_calibrated_proxy_optimizer_adapter_report.md` |
 
 Frontend: Level 5 operator page and visual design pass landed (`c15f9be`).
 
 ## Verification snapshot
 
-- `python -m pytest quantpilot/tests` → 283 passed, 1 skipped (2026-07-06).
+- `python -m pytest quantpilot/tests` → 294 passed, 1 skipped (2026-07-06).
 - `python -m quantpilot.jobs.run_smoke` → passed; operator `blocked` /
   `level5_flag_disabled`, `live_trading_enabled=false`.
 
 ## Next steps (in recommended order)
 
-1. **Step 12 — calibrated-proxy → optimizer adapter.** Feed Step 08
-   calibrated expected-return/risk proxies into the portfolio optimizer via an
-   explicit adapter. Tests must prove provider failures, stale data, and
-   low-confidence signals fail closed (carried over from the Step 08
-   recommendation).
-2. **Step 13 — promotion evidence integration.** Surface the Step 09
+1. **Step 13 — wire calibrated sets into harness planning.** Pass the
+   provider-bound signal path's `CalibratedSignalSet` through
+   `HarnessService.create_portfolio_plan` (adapter exists as of Step 12; only
+   the plumbing plus fail-closed integration tests remain).
+2. **Step 14 — promotion evidence integration.** Surface the Step 09
    `PromotionEvidenceReport` through the strategy lifecycle registry so
    promotion review consumes walk-forward evidence (promotion stays
    human-gated; `promotion_allowed=false` by design).
-3. **Step 14 — replace Step 09 diagnostic placeholders.** Implement PBO and
+3. **Step 15 — replace Step 09 diagnostic placeholders.** Implement PBO and
    deflated Sharpe ratio diagnostics behind the existing
    `DiagnosticPlaceholder` schema.
 4. Frontend: expose the `/api/orders/{id}/simulate` preview on the orders UI

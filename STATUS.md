@@ -59,6 +59,12 @@ Frontend: Level 5 operator page and visual design pass landed (`c15f9be`).
   re-checking against `fixture_portfolio_snapshot()`) or abandon them.
 - `origin/codex/step-10-execution-simulator` is now merged into this branch;
   it can be deleted after this branch merges to `main`.
+- **DRAFT roadmap awaiting confirmation:** `docs/real_data_roadmap_draft.md`
+  proposes Step 16–21 (real-time quotes, async paper broker, reconciliation,
+  session scheduler, observability, paper track-record) toward unattended
+  paper trading. Tentative only — NOT confirmed steps; do not promote into the
+  step table above until the user confirms. Live trading stays out of scope
+  (human-gated per `docs/live_trading_enablement_checklist.md`).
 
 ## Feature flags (all default-off / safe)
 

@@ -351,6 +351,17 @@ export interface ApprovalTicketDecisionResult {
  * StrategyApprovalTicket verbatim.
  * ------------------------------------------------------------------------- */
 
+export interface BriefingCard {
+  card_id: string;
+  source: string;
+  published_at: string;
+  headline: string;
+  summary: string;
+  related_symbols: string[];
+  tags: string[];
+  signal_input: boolean;
+}
+
 export interface OperatorNotification {
   notification_id: string;
   user_id: string;

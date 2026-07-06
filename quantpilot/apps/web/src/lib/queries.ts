@@ -8,6 +8,7 @@ import type {
   Level12Request,
   Level12MockExecutionResponse,
   Level12RunResponse,
+  BriefingCard,
   OperatorNotification,
   OperatorReportEnvelope,
   OperatorRunRequest,
@@ -170,6 +171,15 @@ export function useRejectApprovalTicket() {
     onSuccess: () => {
       void queryClient.invalidateQueries({ queryKey: APPROVAL_TICKETS_PENDING_KEY });
     },
+  });
+}
+
+export function useDailyBriefing() {
+  return useQuery({
+    queryKey: ["briefing", "daily"],
+    queryFn: ({ signal }) => apiFetch<BriefingCard[]>("/api/briefing/daily", { signal }),
+    retry: 1,
+    staleTime: 60_000,
   });
 }
 

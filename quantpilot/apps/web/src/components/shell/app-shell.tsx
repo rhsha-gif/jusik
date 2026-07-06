@@ -7,6 +7,7 @@ import {
   FlaskConical,
   Gauge,
   ListChecks,
+  Newspaper,
   Radar,
   ScrollText,
   Settings,
@@ -22,6 +23,7 @@ import { ThemeToggle } from "./theme-toggle";
 
 const NAV_ITEMS = [
   { to: "/", label: "오버뷰", icon: Gauge, end: true },
+  { to: "/briefing", label: "브리핑", icon: Newspaper },
   { to: "/research", label: "리서치", icon: FlaskConical },
   { to: "/policies", label: "정책 스튜디오", icon: ListChecks },
   { to: "/signals", label: "신호 보드", icon: Radar },

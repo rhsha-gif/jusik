@@ -86,6 +86,14 @@ Level 1~5 자율화 전 과정을 먼저 완성하고, 사람 승인 게이트�
   `OperatorNotification` 인박스에 자동 적재 (`GET /api/notifications`).
   검증: pytest 317개 중 316 passed·1 skipped (junit), smoke OK, vitest 20, build OK
 
+- **§4.4 예산 게이트 + KIS 토큰 헬퍼 + 브리핑 골격(§4.7) + 부채 정리** —
+  ① 전략 자본 예산이 매매 티켓 제출 경로에서 강제됨
+  (`strategy_capital_budget_exceeded` 차단) ② `/oauth2/tokenP` 토큰 발급 헬퍼
+  (fake transport 테스트, 실서버는 앱키 대기) ③ 읽기 전용 브리핑 경계
+  (`GET /api/briefing/daily` + `/briefing` 페이지, import-guard 테스트로 격리 강제)
+  ④ `MARKET_ORDERS_ENABLED` 판독 단일화. 검증: pytest 325개 중 324 passed·
+  1 skipped (junit), smoke OK, vitest 20, build OK, 브리핑 페이지 브라우저 실검증
+
 ## 다음 단계 후보 (우선순위 제안)
 
 > 제품 구상(대화형 전략 수립 → 전략 단위 승인 → 자동 운용)과의 정렬 설계 및

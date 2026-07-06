@@ -329,7 +329,12 @@ class OperatorService:
             decide("noop", reason, strategy_id=registry_entry.strategy_id)
             return finish("completed", selection=selection, order_plan_ids=[])
 
-        plan = self.harness.create_portfolio_plan(policy_id=policy.policy_id, signals=signals, snapshot=snapshot)
+        plan = self.harness.create_portfolio_plan(
+            policy_id=policy.policy_id,
+            signals=signals,
+            snapshot=snapshot,
+            calibrated_signal_set=signal_set.calibrated_signal_set,
+        )
         proposals = self.harness.generate_order_proposals(portfolio_plan_id=plan.plan_id, snapshot=snapshot)
 
         if not proposals:

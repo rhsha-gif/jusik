@@ -14,6 +14,8 @@ from quantpilot.packages.core.execution import (
 from quantpilot.packages.core.execution.state_machine import ApprovalRequired, RiskCheckRequired, authorize_level4, transition_order_plan
 from quantpilot.packages.core.marketdata.fixture_provider import FixtureQuoteProvider
 from quantpilot.packages.core.marketdata.providers import L2Provider, QuoteProvider
+from quantpilot.packages.core.portfolio.calibration_adapter import calibrated_planning_flag_enabled
+from quantpilot.packages.core.signals.types import CalibratedSignalSet
 from quantpilot.packages.core.policy.parser import DEFAULT_POLICY_TEXT, parse_policy_text
 from quantpilot.packages.core.analyst.reports import generate_analyst_report
 from quantpilot.packages.core.portfolio.planner import (
@@ -241,16 +243,23 @@ class HarnessService:
         policy_id: str,
         signals: list[Signal] | None = None,
         snapshot: PortfolioSnapshot | None = None,
+        calibrated_signal_set: CalibratedSignalSet | None = None,
     ) -> PortfolioPlan:
         policy = self.repositories.policies.require(policy_id)
         selected_signals = signals or self.repositories.signals.list()
         portfolio_snapshot = snapshot or fixture_portfolio_snapshot()
         quotes = {bar["symbol"]: float(bar["close"]) for bar in self.market_data_provider.get_bars()}
+        # Calibrated proxies feed the optimizer only when the opt-in flag is set.
+        # Default (flag off) keeps planning byte-identical to the uncalibrated path.
+        planning_calibrated_set = (
+            calibrated_signal_set if calibrated_planning_flag_enabled() else None
+        )
         plan = build_portfolio_plan(
             policy=policy,
             signals=selected_signals,
             snapshot=portfolio_snapshot,
             quotes=quotes,
+            calibrated_signal_set=planning_calibrated_set,
         )
         self.repositories.portfolio_plans.add(plan)
         self.audit.emit(

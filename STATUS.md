@@ -1,6 +1,6 @@
 # QuantPilot Status
 
-Last updated: 2026-07-06 (session: claude/status-md-continuation-zshmzd).
+Last updated: 2026-07-06 (session: claude/status-md-continuation-zshmzd, Step 13).
 This file is committed so progress survives ephemeral session containers.
 Update it at the end of every working session.
 
@@ -22,28 +22,29 @@ smoke output). Real-data migration steps completed so far:
 | 10 | Simulator-only execution layer (TWAP/VWAP/POV) | `docs/step_10_execution_simulator_report.md` |
 | 11 | Execution simulation preview endpoint | `docs/step_11_execution_preview_report.md` |
 | 12 | Calibrated proxy → optimizer adapter (fail-closed) | `docs/step_12_calibrated_proxy_optimizer_adapter_report.md` |
+| 13 | Calibrated planning wiring (flag-gated) | `docs/step_13_calibrated_planning_wiring_report.md` |
 
 Frontend: Level 5 operator page and visual design pass landed (`c15f9be`).
 
 ## Verification snapshot
 
-- `python -m pytest quantpilot/tests` → 294 passed, 1 skipped (2026-07-06).
+- `python -m pytest quantpilot/tests` → 298 passed, 1 skipped (2026-07-06).
 - `python -m quantpilot.jobs.run_smoke` → passed; operator `blocked` /
   `level5_flag_disabled`, `live_trading_enabled=false`.
 
 ## Next steps (in recommended order)
 
-1. **Step 13 — wire calibrated sets into harness planning.** Pass the
-   provider-bound signal path's `CalibratedSignalSet` through
-   `HarnessService.create_portfolio_plan` (adapter exists as of Step 12; only
-   the plumbing plus fail-closed integration tests remain).
-2. **Step 14 — promotion evidence integration.** Surface the Step 09
+1. **Step 14 — promotion evidence integration.** Surface the Step 09
    `PromotionEvidenceReport` through the strategy lifecycle registry so
    promotion review consumes walk-forward evidence (promotion stays
    human-gated; `promotion_allowed=false` by design).
-3. **Step 15 — replace Step 09 diagnostic placeholders.** Implement PBO and
+2. **Step 15 — replace Step 09 diagnostic placeholders.** Implement PBO and
    deflated Sharpe ratio diagnostics behind the existing
    `DiagnosticPlaceholder` schema.
+3. **Surface `proxy_metadata` in reports/UI.** Step 13 feeds calibrated
+   proxies into planning behind `CALIBRATED_PLANNING_ENABLED` but does not
+   expose the resulting `PortfolioPlan.proxy_metadata` in the operator run
+   report payload or the frontend — wire it through for observability.
 4. Frontend: expose the `/api/orders/{id}/simulate` preview on the orders UI
    (advisory display only, no submission changes).
 
@@ -58,6 +59,16 @@ Frontend: Level 5 operator page and visual design pass landed (`c15f9be`).
   re-checking against `fixture_portfolio_snapshot()`) or abandon them.
 - `origin/codex/step-10-execution-simulator` is now merged into this branch;
   it can be deleted after this branch merges to `main`.
+
+## Feature flags (all default-off / safe)
+
+- `LIVE_TRADING_ENABLED`, `GUARDED_AUTOPILOT_ENABLED`,
+  `FULLY_AUTOMATED_OPERATOR_ENABLED`, `MARKET_ORDERS_ENABLED` — core safety
+  invariants, must stay `false` by default.
+- `CALIBRATED_PLANNING_ENABLED` (Step 13) — when `true`, the operator feeds the
+  provider-bound `CalibratedSignalSet` into the optimizer via the Step 12
+  fail-closed adapter. Default `false` keeps planning byte-identical to the
+  uncalibrated path. Advisory only; never enables order submission.
 
 ## Session conventions
 

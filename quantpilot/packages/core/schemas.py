@@ -355,6 +355,7 @@ class PortfolioPlan(HarnessModel):
     target_weights: dict[str, float]
     cash_target_weight: float = Field(ge=0, le=1)
     order_intents: list[OrderIntent]
+    proxy_metadata: dict[str, Any] | None = None
     created_at: datetime = Field(default_factory=utc_now)
 
 

@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import os
 from datetime import datetime
 from typing import Any, Literal
 
@@ -11,6 +12,10 @@ from quantpilot.packages.core.signals.types import CalibratedSignal, CalibratedS
 
 
 CalibrationAdapterStatus = Literal["applied", "partial", "fail_closed"]
+
+
+def calibrated_planning_flag_enabled() -> bool:
+    return os.getenv("CALIBRATED_PLANNING_ENABLED", "false").lower() == "true"
 
 
 class CalibrationAdapterConfig(HarnessModel):

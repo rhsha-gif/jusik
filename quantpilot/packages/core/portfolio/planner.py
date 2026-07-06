@@ -319,6 +319,7 @@ def build_portfolio_plan(
         target_weights=target_weights,
         cash_target_weight=cash_target_weight,
         order_intents=order_intents,
+        proxy_metadata=optimization_result.proxy_metadata,
     )
 
 

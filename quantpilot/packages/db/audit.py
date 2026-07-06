@@ -58,6 +58,8 @@ AUDIT_EVENT_ACTIONS = {
     "order_rejected",
     "order_expired",
     "order_failed",
+    "execution_simulation_previewed",
+    "execution_simulation_blocked",
     "duplicate_order_blocked",
     "stale_quote_blocked",
     "autopilot_run_started",

@@ -3,6 +3,7 @@ from __future__ import annotations
 from fastapi import APIRouter, Depends, HTTPException
 from pydantic import BaseModel
 
+from quantpilot.packages.core.execution import ExecutionSimulationResult, ExecutionSimulatorConfig
 from quantpilot.packages.core.execution.state_machine import ApprovalRequired, InvalidOrderTransition, RiskCheckRequired
 from quantpilot.packages.core.harness_service import HarnessService
 from quantpilot.packages.core.schemas import OrderPlan, OrderStatus
@@ -24,6 +25,10 @@ class RejectOrderRequest(BaseModel):
 class ModifyOrderRequest(BaseModel):
     quantity: float
     limit_price: float | None = None
+
+
+class SimulateOrderRequest(BaseModel):
+    config: ExecutionSimulatorConfig | None = None
 
 
 @router.post("/orders/plan")
@@ -96,6 +101,18 @@ def modify_order(
         return service.modify_order_plan(order_plan_id, quantity=request.quantity, limit_price=request.limit_price)
     except (InvalidOrderTransition, RiskCheckRequired, RuntimeError) as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc
+
+
+@router.post("/orders/{order_plan_id}/simulate")
+def simulate_order(
+    order_plan_id: str,
+    request: SimulateOrderRequest | None = None,
+    service: HarnessService = Depends(get_harness_service),
+) -> ExecutionSimulationResult:
+    return service.preview_order_execution(
+        order_plan_id,
+        config=request.config if request is not None else None,
+    )
 
 
 @router.post("/orders/{order_plan_id}/submit")

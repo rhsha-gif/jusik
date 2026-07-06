@@ -4,7 +4,16 @@ from datetime import timedelta
 
 from quantpilot.packages.brokers.mock_broker import MockBroker
 from quantpilot.packages.brokers.paper_broker import PaperBroker
+from quantpilot.packages.core.execution import (
+    ExecutionSimulationRequest,
+    ExecutionSimulationResult,
+    ExecutionSimulator,
+    ExecutionSimulatorConfig,
+    ExecutionStatus,
+)
 from quantpilot.packages.core.execution.state_machine import ApprovalRequired, RiskCheckRequired, authorize_level4, transition_order_plan
+from quantpilot.packages.core.marketdata.fixture_provider import FixtureQuoteProvider
+from quantpilot.packages.core.marketdata.providers import L2Provider, QuoteProvider
 from quantpilot.packages.core.policy.parser import DEFAULT_POLICY_TEXT, parse_policy_text
 from quantpilot.packages.core.analyst.reports import generate_analyst_report
 from quantpilot.packages.core.portfolio.planner import (
@@ -955,6 +964,49 @@ class HarnessService:
         )
         self.repositories.order_plans.update(order_plan)
         return order_plan, broker_order, fills
+
+    def preview_order_execution(
+        self,
+        order_plan_id: str,
+        *,
+        config: ExecutionSimulatorConfig | None = None,
+        quote_provider: QuoteProvider | None = None,
+        l2_provider: L2Provider | None = None,
+    ) -> ExecutionSimulationResult:
+        """Simulator-only execution preview for an already approved order plan.
+
+        The preview never mutates order state, never creates broker orders or
+        fills, and always reports broker_order_sent=False. Non-approved orders,
+        market orders, and unavailable quotes fail closed inside the simulator.
+        """
+        order_plan = self.repositories.order_plans.require(order_plan_id)
+        policy = self.repositories.policies.require(order_plan.policy_id)
+        simulator = ExecutionSimulator(
+            quote_provider=quote_provider or FixtureQuoteProvider(),
+            l2_provider=l2_provider,
+        )
+        request = ExecutionSimulationRequest(
+            order_plan=order_plan.model_copy(deep=True),
+            config=config or ExecutionSimulatorConfig(),
+        )
+        result = simulator.simulate(request)
+        blocked = result.status in {ExecutionStatus.blocked, ExecutionStatus.unavailable}
+        self.audit.emit(
+            user_id=policy.user_id,
+            entity_type="order_plan",
+            entity_id=order_plan.order_plan_id,
+            action="execution_simulation_blocked" if blocked else "execution_simulation_previewed",
+            after_state={
+                "request_id": result.request_id,
+                "status": result.status.value,
+                "broker_order_sent": result.broker_order_sent,
+                "filled_quantity": result.filled_quantity,
+                "remaining_quantity": result.remaining_quantity,
+                "reason_codes": [event.reason_code for event in result.events if event.reason_code],
+            },
+            source="execution_simulator_preview",
+        )
+        return result
 
     def pause_guarded_autopilot(self, *, policy_id: str, reason: str = "user_paused") -> dict[str, object]:
         policy = self.repositories.policies.require(policy_id)

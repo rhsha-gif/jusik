@@ -91,7 +91,7 @@ These paths remain unowned unless a later task explicitly adopts them after Code
 
 ## Active focus
 
-- Codex: `QP-020` — paper-state persistence and managed-position ledger
+- Codex: `idle/review` — QP-020 complete; waiting for QP-110 handoff before QP-030
 - Claude Code: `QP-110 ready` — executable pullback signal engine
 - Next integration gate: `GATE-1` — QP-010 contract accepted; QP-020 and QP-110 ready in parallel
 
@@ -101,7 +101,7 @@ These paths remain unowned unless a later task explicitly adopts them after Code
 |---|---|---|---|---|---|---|
 | QP-000 | codex | none | workboard, `AGENTS.md`, `CLAUDE.md` | done | Both agents have read-first and ownership rules; fresh baseline recorded | backend 324/1; smoke mock/default-blocked; frontend 20/build passed |
 | QP-010 | codex | QP-000 | operator decision contract, contract tests, fixtures | done | Exact pure-function inputs/outputs and fail-closed tests exist without implementing the engine | targeted: 3 passed, 16 xfailed; full suite after initial rails: 325 passed, 1 skipped, 8 xfailed |
-| QP-020 | codex | QP-010 | repository and managed-position persistence modules/tests | in_progress | Paper-mode state survives restart; idempotency remains unique; fixture defaults unchanged | claimed by Codex |
+| QP-020 | codex | QP-010 | repository and managed-position persistence modules/tests | done | Paper-mode state survives restart; idempotency remains unique; fixture defaults unchanged | 8 focused tests passed; SQLite WAL/full-sync, restart recovery, stale-write and secret-field guards verified |
 | QP-110 | claude | QP-010 | technical indicators, pure pullback signal module, focused tests/fixtures | ready | Selected strategy emits deterministic, no-lookahead actions using the locked thresholds | contract and xfail targets ready |
 | QP-030 | codex | QP-020, QP-110 | schemas, signal adapter, portfolio optimizer/planner, operator integration | blocked | Selected strategy alone drives plans; max positions and existing safety gates are enforced | pending |
 | QP-120 | claude | QP-110 | pure position-risk evaluator and focused tests | blocked | 8%/2ATR stop and technical exit/trim precedence are deterministic and broker-free | pending |
@@ -145,3 +145,5 @@ These paths remain unowned unless a later task explicitly adopts them after Code
 - 2026-07-10 KST — Codex — QP-010 done. Added broker-free pullback and position-risk contracts, Wilder
   indicator definitions, deterministic fixtures, import-boundary checks, and 16 executable xfail targets.
   Independent audit integration findings were recorded. QP-020 claimed and QP-110 released to Claude Code.
+- 2026-07-10 KST — Codex — QP-020 done in parallel with Claude QP-110. Added opt-in SQLite paper-state
+  persistence and a secret-free managed-position/run-checkpoint ledger. Focused verification: `8 passed`.

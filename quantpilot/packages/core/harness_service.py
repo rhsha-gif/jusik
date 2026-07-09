@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 import hashlib
-from datetime import timedelta
+from datetime import datetime, timedelta
 
 from quantpilot.packages.brokers.mock_broker import MockBroker
 from quantpilot.packages.brokers.paper_broker import PaperBroker
@@ -431,16 +431,31 @@ class HarnessService:
         policy_id: str,
         signals: list[Signal] | None = None,
         snapshot: PortfolioSnapshot | None = None,
+        quotes: dict[str, float] | None = None,
+        quote_times: dict[str, datetime] | None = None,
+        require_explicit_quotes: bool = False,
+        rebalance_band: float | None = None,
     ) -> PortfolioPlan:
         policy = self.repositories.policies.require(policy_id)
-        selected_signals = signals or self.repositories.signals.list()
+        selected_signals = signals if signals is not None else self.repositories.signals.list()
         portfolio_snapshot = snapshot or fixture_portfolio_snapshot()
-        quotes = {bar["symbol"]: float(bar["close"]) for bar in self.market_data_provider.get_bars()}
+        selected_quotes = quotes
+        if selected_quotes is None:
+            selected_quotes = {
+                bar["symbol"]: float(bar["close"])
+                for bar in self.market_data_provider.get_bars()
+            }
+        planner_options = {}
+        if rebalance_band is not None:
+            planner_options["rebalance_band"] = rebalance_band
         plan = build_portfolio_plan(
             policy=policy,
             signals=selected_signals,
             snapshot=portfolio_snapshot,
-            quotes=quotes,
+            quotes=selected_quotes,
+            quote_times=quote_times,
+            require_explicit_quotes=require_explicit_quotes,
+            **planner_options,
         )
         self.repositories.portfolio_plans.add(plan)
         self.audit.emit(

@@ -29,6 +29,7 @@ from quantpilot.packages.core.schemas import (
     ExecutionMode,
     OrderPlan,
     OrderStatus,
+    PortfolioSnapshot,
     Signal,
     StrategyRecipe,
     UserPolicy,
@@ -322,14 +323,38 @@ class OperatorService:
         if snapshot.monthly_loss_ratio <= policy.monthly_loss_stop_all_autotrading:
             return blocked_by("monthly_loss_stop_engaged", selection=selection)
 
-        signal_set = self._record_signal_set(recipe, policy)
+        signal_set = self._record_signal_set(
+            recipe,
+            policy,
+            snapshot=snapshot,
+            evaluated_at=now,
+        )
         signals = signal_set.signals
         if not signal_set.data_quality.usable:
             reason = signal_set.data_quality.reason_codes[0] if signal_set.data_quality.reason_codes else "signal_provider_unavailable"
             decide("noop", reason, strategy_id=registry_entry.strategy_id)
             return finish("completed", selection=selection, order_plan_ids=[])
 
-        plan = self.harness.create_portfolio_plan(policy_id=policy.policy_id, signals=signals, snapshot=snapshot)
+        if recipe.strategy_id == "pullback_trend_v2":
+            rules = recipe.decision_rules
+            if rules is None:
+                decide("noop", "typed_decision_rules_missing", strategy_id=registry_entry.strategy_id)
+                return finish("completed", selection=selection, order_plan_ids=[])
+            plan = self.harness.create_portfolio_plan(
+                policy_id=policy.policy_id,
+                signals=signals,
+                snapshot=snapshot,
+                quotes={symbol.strip().upper(): quote.last for symbol, quote in signal_set.quotes.items()},
+                quote_times={symbol.strip().upper(): quote.as_of for symbol, quote in signal_set.quotes.items()},
+                require_explicit_quotes=True,
+                rebalance_band=rules.rebalance_band,
+            )
+        else:
+            plan = self.harness.create_portfolio_plan(
+                policy_id=policy.policy_id,
+                signals=signals,
+                snapshot=snapshot,
+            )
         proposals = self.harness.generate_order_proposals(portfolio_plan_id=plan.plan_id, snapshot=snapshot)
 
         if not proposals:
@@ -377,12 +402,24 @@ class OperatorService:
         self.repositories.strategies.add(recipe)
         return recipe
 
-    def _record_signal_set(self, recipe: StrategyRecipe, policy: UserPolicy) -> SignalSet:
+    def _record_signal_set(
+        self,
+        recipe: StrategyRecipe,
+        policy: UserPolicy,
+        *,
+        snapshot: PortfolioSnapshot | None = None,
+        evaluated_at: datetime | None = None,
+    ) -> SignalSet:
+        professional = recipe.strategy_id == "pullback_trend_v2"
         signal_set = generate_provider_bound_signals(
             recipe,
             self.ohlcv_provider,
             quote_provider=self.quote_provider,
             policy=policy,
+            securities=self.harness.security_provider.get_securities(),
+            horizon="completed_history" if professional else None,
+            portfolio_snapshot=snapshot,
+            evaluated_at=evaluated_at,
         )
         for signal in signal_set.signals:
             self.repositories.signals.add(signal)

@@ -1,7 +1,8 @@
 from __future__ import annotations
 
-from datetime import date
+from datetime import date, datetime
 from hashlib import sha256
+from math import isfinite
 
 from quantpilot.packages.core.portfolio.optimizer import DeterministicPortfolioOptimizer
 from quantpilot.packages.core.portfolio.optimizer_types import (
@@ -72,6 +73,29 @@ def _quote_for_symbol(snapshot: PortfolioSnapshot, symbol: str, quotes: dict[str
         if position.symbol == symbol:
             return position.market_price
     return 100.0
+
+
+def _explicit_quote_evidence(
+    *,
+    symbol: str,
+    quotes: dict[str, float] | None,
+    quote_times: dict[str, datetime] | None,
+) -> tuple[float, datetime] | None:
+    normalized_symbol = _symbol(symbol)
+    raw_price = None
+    if quotes:
+        raw_price = quotes.get(symbol) if symbol in quotes else quotes.get(normalized_symbol)
+    quote_time = None
+    if quote_times:
+        quote_time = quote_times.get(symbol) if symbol in quote_times else quote_times.get(normalized_symbol)
+    if isinstance(raw_price, bool) or not isinstance(raw_price, (int, float)):
+        return None
+    price = float(raw_price)
+    if not isfinite(price) or price <= 0:
+        return None
+    if not isinstance(quote_time, datetime) or quote_time.tzinfo is None or quote_time.utcoffset() is None:
+        return None
+    return price, quote_time
 
 
 def _symbol(value: str) -> str:
@@ -197,14 +221,32 @@ def build_portfolio_plan(
     signals: list[Signal],
     snapshot: PortfolioSnapshot,
     quotes: dict[str, float] | None = None,
+    quote_times: dict[str, datetime] | None = None,
+    require_explicit_quotes: bool = False,
     expected_return_risk_proxies: dict[str, ExpectedReturnRiskProxy] | None = None,
     sector_metadata: dict[str, str] | None = None,
     optimizer_constraints: OptimizationConstraints | None = None,
     rebalance_band: float = DEFAULT_REBALANCE_BAND,
 ) -> PortfolioPlan:
+    explicit_quote_evidence: dict[str, tuple[float, datetime]] = {}
+    if require_explicit_quotes:
+        for signal in signals:
+            evidence = _explicit_quote_evidence(
+                symbol=signal.symbol,
+                quotes=quotes,
+                quote_times=quote_times,
+            )
+            if evidence is not None:
+                explicit_quote_evidence[_symbol(signal.symbol)] = evidence
+    actionable_signals = [signal for signal in signals if signal.action != SignalAction.blocked]
+    planning_signals = (
+        [signal for signal in actionable_signals if _symbol(signal.symbol) in explicit_quote_evidence]
+        if require_explicit_quotes
+        else actionable_signals
+    )
     optimization_input = build_optimization_input(
         policy=policy,
-        signals=signals,
+        signals=planning_signals,
         snapshot=snapshot,
         expected_return_risk_proxies=expected_return_risk_proxies,
         sector_metadata=sector_metadata,
@@ -224,8 +266,18 @@ def build_portfolio_plan(
     for signal in signals:
         symbol = _symbol(signal.symbol)
         current = current_weights.get(symbol, 0.0)
+        if signal.action == SignalAction.blocked:
+            target_weights[signal.symbol] = round(current, 6)
+            continue
+        if require_explicit_quotes and symbol not in explicit_quote_evidence:
+            target_weights[signal.symbol] = round(current, 6)
+            continue
         target = optimized_targets.get(symbol, _initial_target(policy, signal, current))
-        price = _quote_for_symbol(snapshot, signal.symbol, quotes)
+        if require_explicit_quotes:
+            price, quote_time = explicit_quote_evidence[symbol]
+        else:
+            price = _quote_for_symbol(snapshot, signal.symbol, quotes)
+            quote_time = None
         delta_notional = (target - current) * snapshot.equity
 
         if delta_notional > 1:
@@ -245,6 +297,7 @@ def build_portfolio_plan(
                         notional=round(notional, 2),
                         target_weight=round(target, 6),
                         reason=signal.reason,
+                        **({"quote_time": quote_time} if quote_time is not None else {}),
                     )
                 )
         elif delta_notional < -1:
@@ -261,6 +314,7 @@ def build_portfolio_plan(
                         notional=round(notional, 2),
                         target_weight=round(max(target, 0.0), 6),
                         reason=signal.reason,
+                        **({"quote_time": quote_time} if quote_time is not None else {}),
                     )
                 )
 

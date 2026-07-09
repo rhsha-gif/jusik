@@ -159,6 +159,37 @@ class UserPolicy(HarnessModel):
         return self
 
 
+class PullbackTrendDecisionRules(HarnessModel):
+    """Typed, review-locked thresholds for the professional pullback strategy."""
+
+    trend_window: int = Field(default=120, ge=2)
+    risk_window: int = Field(default=20, ge=2)
+    rsi_window: int = Field(default=14, ge=2)
+    atr_window: int = Field(default=14, ge=2)
+    volume_window: int = Field(default=20, ge=2)
+    oversold_rsi: float = Field(default=35.0, ge=0, le=100)
+    overheat_rsi: float = Field(default=72.0, ge=0, le=100)
+    min_volume_ratio: float = Field(default=1.05, gt=0)
+    min_multifactor_score: float = Field(default=68.0, ge=0, le=100)
+    max_quote_premium: float = Field(default=0.005, ge=0, le=1)
+    max_quote_age_seconds: int = Field(default=30, gt=0)
+    risk_ma_ratio: float = Field(default=0.94, gt=0, le=1)
+    overheat_ma_ratio: float = Field(default=1.20, ge=1)
+    trim_fraction: float = Field(default=0.50, gt=0, lt=1)
+    hard_stop_loss_fraction: float = Field(default=0.08, gt=0, lt=1)
+    atr_stop_multiplier: float = Field(default=2.0, gt=0)
+    max_candidates: int = Field(default=20, gt=0)
+    rebalance_band: float = Field(default=0.01, gt=0, le=1)
+
+    @model_validator(mode="after")
+    def validate_threshold_relationships(self) -> "PullbackTrendDecisionRules":
+        if self.risk_window >= self.trend_window:
+            raise ValueError("risk_window must be shorter than trend_window")
+        if self.oversold_rsi >= self.overheat_rsi:
+            raise ValueError("oversold_rsi must be below overheat_rsi")
+        return self
+
+
 class StrategyRecipe(HarnessModel):
     strategy_id: str
     version: str
@@ -167,6 +198,10 @@ class StrategyRecipe(HarnessModel):
     timeframe: str = "daily"
     universe_filter: dict[str, Any] = Field(default_factory=dict)
     features: list[dict[str, Any]] = Field(default_factory=list)
+    decision_rules: PullbackTrendDecisionRules | None = Field(
+        default=None,
+        exclude_if=lambda value: value is None,
+    )
     entry_rules: list[str]
     exit_rules: list[str]
     no_chasing_rules: dict[str, Any] = Field(default_factory=dict)
@@ -198,6 +233,12 @@ class StrategyRecipe(HarnessModel):
 
     @model_validator(mode="after")
     def validate_strategy_permissions(self) -> "StrategyRecipe":
+        if self.strategy_id == "pullback_trend_v2":
+            if self.decision_rules is None:
+                raise ValueError("pullback_trend_v2 requires decision_rules")
+            if self.decision_rules != PullbackTrendDecisionRules():
+                raise ValueError("decision_rules must match locked pullback_trend_v2 thresholds")
+
         method = str(self.position_sizing.get("method", "")).strip()
         if method not in {"capped_target_weight", "capped_score_weight", "inverse_volatility"}:
             raise ValueError("position_sizing.method is not implemented")

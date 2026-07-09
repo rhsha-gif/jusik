@@ -91,9 +91,9 @@ These paths remain unowned unless a later task explicitly adopts them after Code
 
 ## Active focus
 
-- Codex: `idle/review` — QP-020 complete; waiting for QP-110 handoff before QP-030
-- Claude Code: `QP-110 ready` — executable pullback signal engine
-- Next integration gate: `GATE-1` — QP-010 contract accepted; QP-020 and QP-110 ready in parallel
+- Codex: `QP-040 preparation` — QP-030 complete; strategy health, verified protective sells, retirement, and cadence next
+- Claude Code: `QP-120 review` — implementation complete in worktree `qp120-position-risk`; awaiting Codex GATE-2 review and copy-back
+- Next integration gate: `GATE-2` — QP-120 review plus QP-040 strategy-health and risk-order isolation proof
 
 ## Work queue
 
@@ -102,23 +102,35 @@ These paths remain unowned unless a later task explicitly adopts them after Code
 | QP-000 | codex | none | workboard, `AGENTS.md`, `CLAUDE.md` | done | Both agents have read-first and ownership rules; fresh baseline recorded | backend 324/1; smoke mock/default-blocked; frontend 20/build passed |
 | QP-010 | codex | QP-000 | operator decision contract, contract tests, fixtures | done | Exact pure-function inputs/outputs and fail-closed tests exist without implementing the engine | targeted: 3 passed, 16 xfailed; full suite after initial rails: 325 passed, 1 skipped, 8 xfailed |
 | QP-020 | codex | QP-010 | repository and managed-position persistence modules/tests | done | Paper-mode state survives restart; idempotency remains unique; fixture defaults unchanged | 8 focused tests passed; SQLite WAL/full-sync, restart recovery, stale-write and secret-field guards verified |
-| QP-110 | claude | QP-010 | technical indicators, pure pullback signal module, focused tests/fixtures | ready | Selected strategy emits deterministic, no-lookahead actions using the locked thresholds | contract and xfail targets ready |
-| QP-030 | codex | QP-020, QP-110 | schemas, signal adapter, portfolio optimizer/planner, operator integration | blocked | Selected strategy alone drives plans; max positions and existing safety gates are enforced | pending |
-| QP-120 | claude | QP-110 | pure position-risk evaluator and focused tests | blocked | 8%/2ATR stop and technical exit/trim precedence are deterministic and broker-free | pending |
+| QP-110 | claude | QP-010 | technical indicators, pure pullback signal module, focused tests/fixtures | done | Selected strategy emits deterministic, no-lookahead actions using the locked thresholds | Codex-reviewed targeted suite: 12 passed; canonical rules shared with v2 typed schema |
+| QP-030 | codex | QP-020, QP-110 | schemas, signal adapter, portfolio optimizer/planner, operator integration | done | Selected strategy alone drives plans; max positions and existing safety gates are enforced | post-review backend 379 passed/1 skipped/7 QP-120 xfailed; smoke mock/default-blocked; selected-v2 integration and blocked-no-sell proofs passed |
+| QP-120 | claude | QP-110 | pure position-risk evaluator and focused tests | review | 8%/2ATR stop and technical exit/trim precedence are deterministic and broker-free | targeted `8 passed in 0.47s`; worktree full suite `349 tests, 0 failures, 0 errors, 10 skipped` (1 manual KIS skip + 9 QP-110 xfails from the pre-QP-030 base commit); smoke `broker=mock`, operator default-blocked; diff limited to `quantpilot/packages/core/risk/position_exit.py` + `quantpilot/tests/unit/test_position_exit_contract.py` in worktree `qp120-position-risk`, awaiting Codex GATE-2 review |
 | QP-040 | codex | QP-030, QP-120 | strategy performance, retirement, liquidation, rebalance orchestration | blocked | Retirement creates no buys; risk-reducing sells remain auditable and idempotent | pending |
-| QP-130 | claude | QP-040 | signal/risk fixtures, replay validation, fixes limited to Claude-owned modules | blocked | Entry/exit/stop behavior is replayed without look-ahead and documented with exact evidence | pending |
 | QP-050 | codex | QP-040 | KIS paper adapters, reconciliation, session job, fake-client tests | blocked | No production host accepted; fake tests pass; manual paper test stays opt-in | pending |
-| QP-060 | codex | QP-050, QP-130 | operator status/report UI and final hardening | blocked | Safety state, position risk, strategy health, rebalance, and reconciliation are visible | pending |
+| QP-060 | codex | QP-050 | operator status/report UI and final hardening | blocked | Safety state, position risk, strategy health, rebalance, and reconciliation are visible | pending |
 | QP-900 | codex | QP-060 | completion report and final verification only | blocked | Full acceptance audit passes; all required evidence is current | pending |
 
 ## Integration requests
 
 - QP-030: provider-bound signal flow must pass real completed history and actual `Quote.as_of`; never reuse
   `OrderIntent.quote_time` as market-data freshness evidence.
+- QP-030: pass the reconciled broker snapshot into signal evaluation so current weights are real; the selected v2
+  recipe must fail closed when typed rules, completed history, or a per-symbol quote is missing and must never fall
+  back to the legacy classifier.
+- QP-030: build the provisional multi-factor score before the final pullback decision, expose only the final
+  decision to planning, and ignore future/incomplete bars.
 - QP-030: enforce `UserPolicy.max_positions`, replace the professional path's missing-quote `100.0` fallback with
   fail-closed behavior, and use the locked 0.01 rebalance band instead of the legacy 0.001 default.
 - QP-040: risk-reducing liquidation sells must not be rejected together with failed buys or blocked solely by a
   monthly buy/automation pause; they still require fresh quotes, idempotency, state-machine, and audit checks.
+- QP-040: normalize drawdown as a positive ratio and use a pure health decision: disable at MDD `>= 0.20` or
+  excess return `<= -0.10`; pause only when MDD is strictly above `1.5 * backtest MDD`; missing benchmark blocks
+  buys without forcing liquidation.
+- QP-040: add an auditable order purpose and independently verify that a claimed protective/retirement order is a
+  sell that cannot exceed the reconciled long position. Isolate such orders from ordinary buy batches; terminal
+  order states must never re-enter a submit batch.
+- QP-040: retirement uses fresh best-bid marketable limit orders only, advances only after reconciliation, evaluates
+  protective risk at one-minute cadence, and runs ordinary rebalance at most once per ISO week.
 - QP-050: thread the reconciled broker snapshot through the final submission-time risk check instead of silently
   substituting `fixture_portfolio_snapshot()`.
 
@@ -147,3 +159,31 @@ These paths remain unowned unless a later task explicitly adopts them after Code
   Independent audit integration findings were recorded. QP-020 claimed and QP-110 released to Claude Code.
 - 2026-07-10 KST — Codex — QP-020 done in parallel with Claude QP-110. Added opt-in SQLite paper-state
   persistence and a secret-free managed-position/run-checkpoint ledger. Focused verification: `8 passed`.
+- 2026-07-10 06:40 KST — Codex + Claude Code — QP-030 independent slices started while Claude implements QP-110
+  in `.claude/worktrees/qp110-pullback-signal`. Integration audit fixed the required data path: completed history,
+  broker current weights, actual quote price/time, pre-decision multi-factor score, max-position cap, and explicit
+  no-fabricated-quote behavior. Codex will review and copy only the allowed QP-110 diff into the main workspace.
+- 2026-07-10 07:05 KST — Codex — QP-110 and QP-030 done. Integrated and reviewed Claude's Wilder
+  SMA/RSI/ATR/volume engine, added an exact first-session ATR seed proof, typed and locked the v2 rules, preserved
+  the v1 spec hash, normalized completed history, carried actual broker weights and quote timestamps through the
+  selected-v2 signal and plan path, enforced the 20-candidate/8-position limits, and made missing professional
+  quotes fail closed. Verification: `364 passed, 1 skipped, 7 xfailed` (all remaining xfails belong to QP-120),
+  smoke passed with mock broker and Level 5 default-blocked. QP-120 started in Claude session `ac78fee1`.
+- 2026-07-10 07:05 KST — Codex — Removed the optional Claude replay task QP-130. Its replay assertions are folded
+  into Codex-owned QP-040/QP-900 verification, leaving Claude only the two pure modules where separate work adds
+  material value: QP-110 signals and QP-120 position risk.
+- 2026-07-10 07:15 KST — Claude Code — QP-120 moved to review (resumed and completed the `ac78fee1` worktree
+  session). Pure evaluator in `quantpilot/packages/core/risk/position_exit.py`: protective stop
+  `max(entry * 0.92, entry - 2 * ATR14)` rounded to 6dp; fail-closed `blocked` on naive/future/stale (>30s)
+  quotes with zero exit quantity; full `exit` at stop breach or close <= SMA20 * 0.94 with stop-breach
+  precedence over the `trim` branch; 50% `trim` at RSI >= 72 or close >= SMA20 * 1.20; deterministic, no
+  clock/env/broker/order imports (import-boundary test kept). All 7 QP-120 xfail markers removed and passing:
+  targeted `8 passed in 0.47s`; worktree full suite `349 tests, 0 failures` (10 skipped = 1 manual KIS +
+  9 QP-110 xfails inherent to the worktree base commit); smoke `broker=mock`, `live_trading_enabled=false`,
+  operator default-blocked. No Git staging performed. Codex review focus: 6dp rounding of stop/quantities and
+  `>=` boundary semantics on the trim thresholds, then copy-back and QP-040 unblock.
+- 2026-07-10 07:20 KST — Codex — QP-030 final safety review found and fixed two merge blockers: a provider/data
+  `blocked` signal can no longer become a liquidation sell for an existing holding, and an evaluation-date daily
+  bar is conservatively excluded unless a later session confirms completion. Added held-position stale-quote and
+  same-day-forming-bar regressions. Verification after the fixes: `379 passed, 1 skipped, 7 xfailed`; smoke passed
+  with `broker=mock`, `live_trading_enabled=false`, and Level 5 default-blocked.

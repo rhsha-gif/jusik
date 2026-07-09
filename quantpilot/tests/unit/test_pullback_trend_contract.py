@@ -21,10 +21,11 @@ def _bars(*, future_spike: bool = False, final_close: float | None = None) -> li
     start = date(2026, 1, 1)
     bars: list[PullbackBar] = []
     closes = [100.0 + index * 0.20 for index in range(120)]
-    closes.extend(closes[-1] - offset for offset in range(1, 15))
+    closes.extend([closes[-1] - offset for offset in range(1, 15)])
     closes.append(closes[-1] + 8.0)
     if final_close is not None:
         closes[-1] = final_close
+    days = len(closes)
     for index, close in enumerate(closes):
         bars.append(
             PullbackBar(
@@ -101,7 +102,6 @@ def test_pullback_module_has_no_execution_or_broker_dependencies() -> None:
     assert all(token not in source for token in forbidden)
 
 
-@pytest.mark.xfail(reason="QP-110 Claude implementation target", strict=False)
 def test_pullback_indicators_ignore_future_rows() -> None:
     baseline = build_pullback_indicators(_request())
     with_future = build_pullback_indicators(_request(bars=_bars(future_spike=True)))
@@ -112,7 +112,30 @@ def test_pullback_indicators_ignore_future_rows() -> None:
     assert baseline.atr14 >= 0
 
 
-@pytest.mark.xfail(reason="QP-110 Claude implementation target", strict=False)
+def test_pullback_atr_seeds_from_the_first_completed_session_true_range() -> None:
+    start = date(2026, 1, 1)
+    bars = [
+        PullbackBar(
+            symbol="AAA",
+            session_date=start + timedelta(days=index),
+            open=100.0,
+            high=105.0 if index == 0 else 101.0,
+            low=95.0 if index == 0 else 99.0,
+            close=100.0,
+            volume=100_000,
+        )
+        for index in range(120)
+    ]
+    snapshot = build_pullback_indicators(_request(bars=bars))
+    expected_atr = (10.0 + 13 * 2.0) / 14
+    for _ in range(120 - 14):
+        expected_atr = (expected_atr * 13 + 2.0) / 14
+
+    assert snapshot.atr14 == round(expected_atr, 6)
+    assert snapshot.prior_rsi14 == 50.0
+    assert snapshot.rsi14 == 50.0
+
+
 def test_pullback_entry_requires_every_locked_confirmation() -> None:
     decision = evaluate_pullback_signal(_request())
 
@@ -124,7 +147,6 @@ def test_pullback_entry_requires_every_locked_confirmation() -> None:
     assert decision.target_weight_hint <= 0.15
 
 
-@pytest.mark.xfail(reason="QP-110 Claude implementation target", strict=False)
 def test_pullback_entry_accepts_exact_score_and_premium_boundaries() -> None:
     request = _request()
     cutoff_close = next(bar.close for bar in request.bars if bar.session_date == request.signal_date)
@@ -142,7 +164,6 @@ def test_pullback_entry_accepts_exact_score_and_premium_boundaries() -> None:
     assert decision.quote_age_seconds == 30.0
 
 
-@pytest.mark.xfail(reason="QP-110 Claude implementation target", strict=False)
 def test_pullback_insufficient_history_fails_closed() -> None:
     request = _request(bars=_bars()[:119])
 
@@ -153,7 +174,6 @@ def test_pullback_insufficient_history_fails_closed() -> None:
     assert "insufficient_history" in decision.reason_codes
 
 
-@pytest.mark.xfail(reason="QP-110 Claude implementation target", strict=False)
 def test_pullback_ineligible_candidate_fails_closed_before_buy() -> None:
     request = _request().model_copy(
         update={"candidate_eligible": False, "candidate_block_reason": "policy_blocklist"}
@@ -165,7 +185,6 @@ def test_pullback_ineligible_candidate_fails_closed_before_buy() -> None:
     assert "policy_blocklist" in decision.reason_codes
 
 
-@pytest.mark.xfail(reason="QP-110 Claude implementation target", strict=False)
 def test_pullback_future_or_naive_quote_timestamp_fails_closed() -> None:
     request = _request()
     future = request.model_copy(update={"quote_as_of": request.evaluated_at + timedelta(seconds=1)})
@@ -180,7 +199,6 @@ def test_pullback_future_or_naive_quote_timestamp_fails_closed() -> None:
     assert evaluate_pullback_signal(naive).action == SignalAction.blocked
 
 
-@pytest.mark.xfail(reason="QP-110 Claude implementation target", strict=False)
 def test_pullback_decision_is_deterministic_and_preserves_strategy_identity() -> None:
     request = _request()
 
@@ -192,7 +210,6 @@ def test_pullback_decision_is_deterministic_and_preserves_strategy_identity() ->
     assert first.recipe_version == request.recipe_version
 
 
-@pytest.mark.xfail(reason="QP-110 Claude implementation target", strict=False)
 def test_pullback_stale_quote_fails_closed() -> None:
     request = _request()
     request = request.model_copy(update={"quote_as_of": request.evaluated_at - timedelta(seconds=31)})
@@ -204,7 +221,6 @@ def test_pullback_stale_quote_fails_closed() -> None:
     assert decision.target_weight_hint == request.current_weight
 
 
-@pytest.mark.xfail(reason="QP-110 Claude implementation target", strict=False)
 def test_pullback_existing_position_exit_precedes_overheat_trim() -> None:
     request = _request(bars=_bars(final_close=90.0)).model_copy(update={"current_weight": 0.10})
     decision = evaluate_pullback_signal(request)

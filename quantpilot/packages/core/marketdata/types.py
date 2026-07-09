@@ -62,6 +62,7 @@ class SignalSet(HarnessModel):
     signals: list[Signal]
     provider_status: dict[str, ProviderStatus]
     data_quality: MarketDataQuality
+    quotes: dict[str, Quote] = Field(default_factory=dict)
     calibrated_signal_set: CalibratedSignalSet | None = None
     order_submission_enabled: bool = False
     source: str = "provider_bound_signal_engine"

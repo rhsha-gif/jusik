@@ -1,8 +1,9 @@
 from __future__ import annotations
 
-from datetime import date, timedelta
+from datetime import date, datetime, timedelta
 from pathlib import Path
 from typing import Any
+from zoneinfo import ZoneInfo
 
 from quantpilot.packages.core.marketdata.fixture_provider import (
     default_ohlcv_fixture_path as _default_ohlcv_fixture_path,
@@ -12,11 +13,13 @@ from quantpilot.packages.core.marketdata.providers import OHLCVProvider, QuotePr
 from quantpilot.packages.core.marketdata.types import (
     MarketDataQuality,
     ProviderStatus,
+    Quote,
     QuoteSnapshot,
     SignalSet,
 )
 from quantpilot.packages.core.schemas import (
     CandidateUniverseItem,
+    PortfolioSnapshot,
     Signal,
     SignalAction,
     StrategyRecipe,
@@ -25,8 +28,20 @@ from quantpilot.packages.core.schemas import (
     utc_now,
 )
 from quantpilot.packages.core.signals.calibration import calibrate_signal_set
+from quantpilot.packages.core.signals.multifactor import build_multi_factor_score
+from quantpilot.packages.core.signals.pullback_trend import (
+    PullbackBar,
+    PullbackSignalInput,
+    PullbackTrendParameters,
+    build_pullback_indicators,
+    evaluate_pullback_signal,
+)
 from quantpilot.packages.core.technical.indicators import calculate_technical_indicators, fixture_price_history
-from quantpilot.packages.core.universe.builder import build_candidate_universe
+from quantpilot.packages.core.universe.builder import build_candidate_universe, build_ranked_candidate_universe
+
+
+PROFESSIONAL_STRATEGY_ID = "pullback_trend_v2"
+PROFESSIONAL_MARKET_TIMEZONE = ZoneInfo("Asia/Seoul")
 
 
 def default_ohlcv_fixture_path() -> Path:
@@ -363,6 +378,328 @@ def _provider_failure_reason(statuses: dict[str, ProviderStatus], quality: Marke
     return "market data provider fail-closed"
 
 
+def _bar_session_date(bar: dict[str, Any]) -> date | None:
+    value = bar.get("date", bar.get("session_date"))
+    if isinstance(value, datetime):
+        return None
+    if isinstance(value, date):
+        return value
+    try:
+        return date.fromisoformat(str(value))
+    except (TypeError, ValueError):
+        return None
+
+
+def _professional_parameters(recipe: StrategyRecipe) -> PullbackTrendParameters | None:
+    rules = getattr(recipe, "decision_rules", None)
+    if rules is None:
+        return None
+    supported = PullbackTrendParameters.model_fields
+    payload = {
+        key: value
+        for key, value in rules.model_dump().items()
+        if key in supported
+    }
+    return PullbackTrendParameters(**payload)
+
+
+def _portfolio_weight(snapshot: PortfolioSnapshot | None, symbol: str) -> float:
+    if snapshot is None:
+        return 0.0
+    normalized = _symbol_key(symbol)
+    value = sum(
+        position.market_value
+        for position in snapshot.positions
+        if _symbol_key(position.symbol) == normalized
+    )
+    return round(value / snapshot.equity, 6)
+
+
+def _decision_signal(
+    *,
+    recipe: StrategyRecipe,
+    policy: UserPolicy,
+    decision,
+    technical_score: float,
+    quant_score: float,
+    score_reason_codes: list[str],
+) -> Signal:
+    return Signal(
+        strategy_id=decision.strategy_id,
+        recipe_version=decision.recipe_version,
+        symbol=decision.symbol,
+        ticker=decision.symbol,
+        signal_date=decision.signal_date,
+        action=decision.action,
+        strength=decision.strength,
+        technical_score=technical_score,
+        quant_score=quant_score,
+        target_weight_hint=decision.target_weight_hint,
+        stop_price_hint=None,
+        take_profit_hint=None,
+        valid_until=decision.signal_date + fixture_signal_validity(),
+        policy_version=policy.version,
+        reason_codes=_unique_codes([*decision.reason_codes, *score_reason_codes]),
+        reason=decision.reason,
+        source="professional_pullback_trend_v2",
+    )
+
+
+def _apply_max_positions_cap(
+    signals: list[Signal],
+    *,
+    policy: UserPolicy,
+    portfolio_snapshot: PortfolioSnapshot | None,
+    multifactor_scores: dict[str, float],
+) -> list[Signal]:
+    held_symbols = {
+        _symbol_key(position.symbol)
+        for position in (portfolio_snapshot.positions if portfolio_snapshot is not None else [])
+        if position.quantity > 0
+    }
+    available_slots = max(0, policy.max_positions - len(held_symbols))
+    new_buys = sorted(
+        (
+            signal
+            for signal in signals
+            if signal.action == SignalAction.buy_ready and _symbol_key(signal.symbol) not in held_symbols
+        ),
+        key=lambda signal: (-multifactor_scores.get(_symbol_key(signal.symbol), 0.0), _symbol_key(signal.symbol)),
+    )
+    allowed = {_symbol_key(signal.symbol) for signal in new_buys[:available_slots]}
+    capped: list[Signal] = []
+    for signal in signals:
+        symbol = _symbol_key(signal.symbol)
+        if signal.action != SignalAction.buy_ready or symbol in held_symbols or symbol in allowed:
+            capped.append(signal)
+            continue
+        capped.append(
+            signal.model_copy(
+                update={
+                    "action": SignalAction.watch,
+                    "strength": 0.0,
+                    "target_weight_hint": 0.0,
+                    "stop_price_hint": None,
+                    "take_profit_hint": None,
+                    "reason_codes": _unique_codes([*signal.reason_codes, "max_positions_cap"]),
+                    "reason": f"{signal.reason}; new position blocked by max_positions cap",
+                }
+            )
+        )
+    return capped
+
+
+def _generate_professional_signals(
+    *,
+    recipe: StrategyRecipe,
+    bars: list[dict[str, Any]],
+    quotes: dict[str, Quote],
+    quality: MarketDataQuality,
+    policy: UserPolicy | None,
+    securities: list[dict[str, Any]] | None,
+    portfolio_snapshot: PortfolioSnapshot | None,
+    evaluated_at: datetime,
+) -> list[Signal]:
+    effective_policy = policy or UserPolicy()
+    symbols = _bar_symbols(bars) or _security_symbols(securities)
+    parameters = _professional_parameters(recipe)
+    if parameters is None:
+        return _blocked_signals(
+            recipe,
+            symbols,
+            policy=effective_policy,
+            reason="typed decision rules are required for pullback_trend_v2",
+            reason_codes=["typed_decision_rules_missing"],
+        )
+    if securities is None:
+        return _blocked_signals(
+            recipe,
+            symbols,
+            policy=effective_policy,
+            reason="security metadata is required for professional candidate selection",
+            reason_codes=["security_metadata_missing"],
+        )
+
+    rules = recipe.decision_rules
+    assert rules is not None
+    ranked = build_ranked_candidate_universe(
+        effective_policy,
+        securities,
+        portfolio_snapshot=portfolio_snapshot,
+        max_candidates=rules.max_candidates,
+        include_excluded=True,
+    )
+    ranked_by_symbol = {_symbol_key(item.candidate.ticker): item for item in ranked}
+    quotes_by_symbol = {_symbol_key(symbol): quote for symbol, quote in quotes.items()}
+    cutoff = (
+        evaluated_at.astimezone(PROFESSIONAL_MARKET_TIMEZONE).date()
+        if evaluated_at.tzinfo is not None and evaluated_at.utcoffset() is not None
+        else evaluated_at.date()
+    )
+    rows_by_symbol: dict[str, list[dict[str, Any]]] = {}
+    invalid_date_symbols: set[str] = set()
+    for bar in bars:
+        symbol = _symbol_key(bar.get("symbol", bar.get("ticker", "")))
+        if not symbol:
+            continue
+        session_date = _bar_session_date(bar)
+        if session_date is None:
+            invalid_date_symbols.add(symbol)
+            continue
+        # Without an exchange-calendar completion marker, the evaluation-date
+        # daily bar is conservatively treated as still forming.
+        if session_date < cutoff:
+            rows_by_symbol.setdefault(symbol, []).append({**bar, "date": session_date.isoformat()})
+    for symbol_rows in rows_by_symbol.values():
+        symbol_rows.sort(key=lambda row: str(row["date"]))
+
+    generated: list[Signal] = []
+    multifactor_scores: dict[str, float] = {}
+    for symbol in symbols:
+        symbol_rows = rows_by_symbol.get(symbol, [])
+        signal_date = _bar_session_date(symbol_rows[-1]) if symbol_rows else cutoff
+        if not symbol_rows or signal_date is None:
+            generated.append(
+                _blocked_signal(
+                    recipe,
+                    symbol,
+                    policy=effective_policy,
+                    signal_date=cutoff,
+                    reason="completed dated history is missing",
+                    reason_codes=["completed_history_missing"],
+                )
+            )
+            continue
+        quote = quotes_by_symbol.get(symbol)
+        if quote is None:
+            generated.append(
+                _blocked_signal(
+                    recipe,
+                    symbol,
+                    policy=effective_policy,
+                    signal_date=signal_date,
+                    reason="actual quote evidence is missing",
+                    reason_codes=["quote_missing"],
+                )
+            )
+            continue
+
+        try:
+            pullback_bars = [
+                PullbackBar(
+                    symbol=symbol,
+                    session_date=date.fromisoformat(str(row["date"])),
+                    open=row["open"],
+                    high=row["high"],
+                    low=row["low"],
+                    close=row["close"],
+                    volume=row.get("volume", 0),
+                )
+                for row in symbol_rows
+            ]
+        except (KeyError, TypeError, ValueError):
+            generated.append(
+                _blocked_signal(
+                    recipe,
+                    symbol,
+                    policy=effective_policy,
+                    signal_date=signal_date,
+                    reason="completed history failed OHLCV validation",
+                    reason_codes=["completed_history_invalid"],
+                )
+            )
+            continue
+
+        ranked_candidate = ranked_by_symbol.get(symbol)
+        candidate_eligible = bool(ranked_candidate and ranked_candidate.selected)
+        candidate_reason = (
+            ranked_candidate.exclusion_reason
+            if ranked_candidate is not None
+            else "candidate_metadata_missing"
+        )
+        request = PullbackSignalInput(
+            strategy_id=recipe.strategy_id,
+            recipe_version=recipe.version,
+            symbol=symbol,
+            signal_date=signal_date,
+            bars=pullback_bars,
+            current_weight=_portfolio_weight(portfolio_snapshot, symbol),
+            max_position_weight=effective_policy.max_position_weight,
+            candidate_eligible=candidate_eligible,
+            candidate_block_reason=candidate_reason,
+            data_usable=quality.usable and symbol not in invalid_date_symbols,
+            multifactor_score=0.0,
+            quote_price=quote.last,
+            quote_as_of=quote.as_of,
+            evaluated_at=evaluated_at,
+        )
+
+        technical_score = 0.0
+        quant_score = 0.0
+        score_reason_codes: list[str] = []
+        if candidate_eligible and request.data_usable:
+            try:
+                indicators = build_pullback_indicators(request, parameters)
+                technical = calculate_technical_indicators(
+                    symbol_rows,
+                    ticker=symbol,
+                    signal_date=signal_date,
+                )
+            except ValueError:
+                pass
+            else:
+                technical_score = technical.technical_score
+                quant_score = technical.momentum_score
+                provisional = Signal(
+                    strategy_id=recipe.strategy_id,
+                    recipe_version=recipe.version,
+                    symbol=symbol,
+                    signal_date=signal_date,
+                    action=SignalAction.watch,
+                    strength=round(technical.momentum_score / 100.0, 6),
+                    technical_score=technical_score,
+                    quant_score=quant_score,
+                    target_weight_hint=0.0,
+                    policy_version=effective_policy.version,
+                    reason_codes=["professional_multifactor_provisional"],
+                    reason="provisional score input; never exposed to planning",
+                    source="professional_multifactor_provisional",
+                )
+                latest_bar = {
+                    **symbol_rows[-1],
+                    "ma20": indicators.sma20,
+                    "volume_ratio": indicators.volume_ratio20,
+                }
+                score = build_multi_factor_score(
+                    signal=provisional,
+                    bar=latest_bar,
+                    market_data_quality=quality,
+                    ranked_candidate=ranked_candidate,
+                )
+                multifactor_scores[symbol] = score.final_score
+                score_reason_codes = score.reason_codes
+                request = request.model_copy(update={"multifactor_score": score.final_score})
+
+        decision = evaluate_pullback_signal(request, parameters)
+        generated.append(
+            _decision_signal(
+                recipe=recipe,
+                policy=effective_policy,
+                decision=decision,
+                technical_score=technical_score,
+                quant_score=quant_score,
+                score_reason_codes=score_reason_codes,
+            )
+        )
+
+    return _apply_max_positions_cap(
+        generated,
+        policy=effective_policy,
+        portfolio_snapshot=portfolio_snapshot,
+        multifactor_scores=multifactor_scores,
+    )
+
+
 def generate_provider_bound_signals(
     recipe: StrategyRecipe,
     ohlcv_provider: OHLCVProvider,
@@ -371,10 +708,14 @@ def generate_provider_bound_signals(
     policy: UserPolicy | None = None,
     securities: list[dict[str, Any]] | None = None,
     horizon: str | None = None,
+    portfolio_snapshot: PortfolioSnapshot | None = None,
+    evaluated_at: datetime | None = None,
 ) -> SignalSet:
+    evaluation_time = evaluated_at
     requested_symbols = _security_symbols(securities)
     provider_status: dict[str, ProviderStatus] = {}
     qualities: list[MarketDataQuality] = []
+    quote_snapshot: QuoteSnapshot | None = None
 
     try:
         ohlcv = ohlcv_provider.get_ohlcv(requested_symbols or None, horizon=horizon)
@@ -401,6 +742,7 @@ def generate_provider_bound_signals(
             signals=blocked_signals,
             provider_status=provider_status,
             data_quality=quality,
+            quotes={},
             calibrated_signal_set=calibrate_signal_set(
                 signals=blocked_signals,
                 bars=[],
@@ -419,7 +761,7 @@ def generate_provider_bound_signals(
 
     if quote_provider is not None:
         try:
-            quote_snapshot: QuoteSnapshot = quote_provider.get_quotes(signal_symbols)
+            quote_snapshot = quote_provider.get_quotes(signal_symbols)
         except Exception as exc:
             provider_status["quote"] = ProviderStatus(
                 provider_name=type(quote_provider).__name__,
@@ -447,6 +789,7 @@ def generate_provider_bound_signals(
             signals=blocked_signals,
             provider_status=provider_status,
             data_quality=quality,
+            quotes=quote_snapshot.quotes if quote_snapshot is not None else {},
             calibrated_signal_set=calibrate_signal_set(
                 signals=blocked_signals,
                 bars=bars,
@@ -458,7 +801,19 @@ def generate_provider_bound_signals(
             ),
         )
 
-    signals = generate_signals(recipe, bars, policy=policy, securities=securities)
+    if recipe.strategy_id == PROFESSIONAL_STRATEGY_ID:
+        signals = _generate_professional_signals(
+            recipe=recipe,
+            bars=bars,
+            quotes=quote_snapshot.quotes if quote_snapshot is not None else {},
+            quality=quality,
+            policy=policy,
+            securities=securities,
+            portfolio_snapshot=portfolio_snapshot,
+            evaluated_at=evaluation_time or utc_now(),
+        )
+    else:
+        signals = generate_signals(recipe, bars, policy=policy, securities=securities)
     calibrated = calibrate_signal_set(
         signals=signals,
         bars=bars,
@@ -472,5 +827,6 @@ def generate_provider_bound_signals(
         signals=signals,
         provider_status=provider_status,
         data_quality=quality.model_copy(update={"symbol_count": len(signals)}),
+        quotes=quote_snapshot.quotes if quote_snapshot is not None else {},
         calibrated_signal_set=calibrated,
     )

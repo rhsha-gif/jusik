@@ -1,0 +1,32 @@
+{
+  "pullback_parameters": {
+    "trend_window": 120,
+    "risk_window": 20,
+    "rsi_window": 14,
+    "atr_window": 14,
+    "volume_window": 20,
+    "oversold_rsi": 35.0,
+    "overheat_rsi": 72.0,
+    "min_volume_ratio": 1.05,
+    "min_multifactor_score": 68.0,
+    "max_quote_premium": 0.005,
+    "max_quote_age_seconds": 30,
+    "risk_ma_ratio": 0.94,
+    "overheat_ma_ratio": 1.2,
+    "trim_fraction": 0.5
+  },
+  "position_stop_cases": [
+    {
+      "name": "fixed_fraction_stop_is_tighter",
+      "average_entry_price": 100.0,
+      "atr14": 10.0,
+      "expected_protective_stop": 92.0
+    },
+    {
+      "name": "atr_stop_is_tighter",
+      "average_entry_price": 100.0,
+      "atr14": 2.0,
+      "expected_protective_stop": 96.0
+    }
+  ]
+}

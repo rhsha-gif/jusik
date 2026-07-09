@@ -26,6 +26,17 @@ QuantPilot is a safe, fixture-first trading operator harness. Live trading must 
 - Codex or a human reviews Fable5 diffs before merge.
 - Live trading remains disabled by default.
 
+## Codex + Claude Code Workboard
+
+- Read `docs/professional_operator_workboard.md` before claiming or changing professional-operator work.
+- The workboard is the canonical source for task ownership, dependencies, acceptance criteria, evidence, and handoff state.
+- Codex and Claude Code may work concurrently only on disjoint paths recorded in the workboard.
+- Each agent may own at most one `in_progress` task.
+- Claude Code is limited to its claimed pure technical/signal/position-risk modules and focused tests/fixtures.
+- Codex owns cross-cutting contracts, repositories, operator integration, broker adapters, API/UI, review, and all Git staging/commits.
+- Both agents update the workboard at claim, handoff, review, and blocker checkpoints using its document-edit lease.
+- Do not mark a task `done` without exact verification output recorded in the workboard.
+
 ## Required Commands
 
 Use PowerShell equivalents on Windows:
@@ -50,3 +61,4 @@ Do not add live broker credentials, enable real broker access, or create tests t
 ## Level 5 References
 
 Read [docs/fable5_level5_implementation_spec.md](docs/fable5_level5_implementation_spec.md) and [docs/contracts/operator_contracts.md](docs/contracts/operator_contracts.md) before implementation.
+Also read [docs/professional_operator_workboard.md](docs/professional_operator_workboard.md) for the active execution stage and file ownership.

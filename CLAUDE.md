@@ -5,6 +5,7 @@ QuantPilot is a safe, fixture-first portfolio operator harness. Fable5 may imple
 ## Read First
 
 - `AGENTS.md`
+- `docs/professional_operator_workboard.md`
 - `README.md`
 - `docs/fable5_level5_implementation_spec.md`
 - `docs/contracts/operator_contracts.md`
@@ -60,3 +61,9 @@ Use `make test` and `make smoke` only where `make` is available.
 - Keep diffs narrow and consistent with existing Pydantic/FastAPI patterns.
 - Use subagents for risk review and test review when available.
 - Treat pending Level 5 tests as implementation targets, not proof that Level 5 exists.
+- Claim exactly one `ready` Claude-owned task in `docs/professional_operator_workboard.md` before editing code.
+- Edit only the paths recorded for that task. Do not edit schemas, repositories, operator/harness integration,
+  broker adapters, API routes, jobs, frontend, environment files, or unrelated documentation.
+- If a cross-boundary change is needed, record it under `Integration requests` in the workboard and stop at the boundary.
+- Update the workboard with targeted-test evidence and move the task to `review` when finished.
+- Do not run `git add`, `git commit`, `git reset`, `git clean`, branch changes, or file moves; Codex owns integration.

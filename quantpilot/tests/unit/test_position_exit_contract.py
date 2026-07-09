@@ -24,6 +24,7 @@ def _request(**updates: object) -> PositionRiskInput:
         "quantity": 10.0,
         "average_entry_price": 100.0,
         "current_price": 100.0,
+        "completed_close": 100.0,
         "atr14": 2.0,
         "sma20": 100.0,
         "rsi14": 50.0,
@@ -48,7 +49,6 @@ def test_position_exit_module_has_no_execution_or_broker_dependencies() -> None:
     assert all(token not in source for token in forbidden)
 
 
-@pytest.mark.xfail(reason="QP-120 Claude implementation target", strict=False)
 def test_protective_stop_uses_tighter_fixed_or_atr_boundary() -> None:
     cases = json.loads(FIXTURE_PATH.read_text(encoding="utf-8"))["position_stop_cases"]
 
@@ -60,11 +60,14 @@ def test_protective_stop_uses_tighter_fixed_or_atr_boundary() -> None:
             )
         )
         assert decision.protective_stop == case["expected_protective_stop"]
+        assert decision.fixed_fraction_stop == case["average_entry_price"] * 0.92
+        assert decision.atr_stop == case["average_entry_price"] - 2 * case["atr14"]
 
 
-@pytest.mark.xfail(reason="QP-120 Claude implementation target", strict=False)
 def test_hard_stop_exit_precedes_overheat_trim() -> None:
-    decision = evaluate_position_risk(_request(current_price=95.0, atr14=2.0, rsi14=80.0))
+    decision = evaluate_position_risk(
+        _request(current_price=95.0, completed_close=121.0, atr14=2.0, rsi14=80.0)
+    )
 
     assert decision.action == SignalAction.exit
     assert decision.exit_fraction == 1.0
@@ -72,7 +75,6 @@ def test_hard_stop_exit_precedes_overheat_trim() -> None:
     assert "protective_stop_triggered" in decision.reason_codes
 
 
-@pytest.mark.xfail(reason="QP-120 Claude implementation target", strict=False)
 def test_price_equal_to_protective_stop_exits_full_position() -> None:
     decision = evaluate_position_risk(_request(current_price=96.0, atr14=2.0))
 
@@ -81,16 +83,41 @@ def test_price_equal_to_protective_stop_exits_full_position() -> None:
     assert decision.exit_fraction == 1.0
 
 
-@pytest.mark.xfail(reason="QP-120 Claude implementation target", strict=False)
 def test_overheat_trims_half_when_no_exit_trigger_fires() -> None:
-    decision = evaluate_position_risk(_request(current_price=121.0, sma20=100.0, rsi14=75.0, atr14=2.0))
+    decision = evaluate_position_risk(
+        _request(current_price=100.0, completed_close=121.0, sma20=100.0, rsi14=75.0)
+    )
 
     assert decision.action == SignalAction.trim
     assert decision.exit_fraction == 0.5
     assert decision.quantity_to_exit == 5.0
 
 
-@pytest.mark.xfail(reason="QP-120 Claude implementation target", strict=False)
+def test_completed_close_drives_technical_exit_not_intraday_quote() -> None:
+    technical_exit = evaluate_position_risk(
+        _request(current_price=100.0, completed_close=94.0, sma20=100.0)
+    )
+    intraday_dip_only = evaluate_position_risk(
+        _request(current_price=93.0, completed_close=100.0, sma20=100.0, atr14=10.0)
+    )
+
+    assert technical_exit.action == SignalAction.exit
+    assert technical_exit.reason_codes == ["technical_exit_close_below_sma20_band"]
+    assert intraday_dip_only.protective_stop == 92.0
+    assert intraday_dip_only.action == SignalAction.hold
+
+
+def test_exact_overheat_boundaries_trim_half() -> None:
+    rsi_boundary = evaluate_position_risk(_request(rsi14=72.0))
+    price_boundary = evaluate_position_risk(
+        _request(rsi14=50.0, completed_close=120.0, sma20=100.0)
+    )
+
+    assert rsi_boundary.action == SignalAction.trim
+    assert price_boundary.action == SignalAction.trim
+    assert rsi_boundary.exit_fraction == price_boundary.exit_fraction == 0.5
+
+
 def test_stale_quote_blocks_without_exit_quantity() -> None:
     now = datetime(2026, 7, 10, 1, 0, tzinfo=timezone.utc)
     decision = evaluate_position_risk(
@@ -102,7 +129,6 @@ def test_stale_quote_blocks_without_exit_quantity() -> None:
     assert "quote_stale" in decision.reason_codes
 
 
-@pytest.mark.xfail(reason="QP-120 Claude implementation target", strict=False)
 def test_future_or_naive_quote_timestamp_fails_closed() -> None:
     now = datetime(2026, 7, 10, 1, 0, tzinfo=timezone.utc)
     future = evaluate_position_risk(_request(quote_as_of=now + timedelta(seconds=1), evaluated_at=now))
@@ -114,7 +140,6 @@ def test_future_or_naive_quote_timestamp_fails_closed() -> None:
     assert naive.action == SignalAction.blocked
 
 
-@pytest.mark.xfail(reason="QP-120 Claude implementation target", strict=False)
 def test_position_risk_decision_is_deterministic_and_preserves_identity() -> None:
     request = _request()
 

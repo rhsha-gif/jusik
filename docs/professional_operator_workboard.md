@@ -91,9 +91,9 @@ These paths remain unowned unless a later task explicitly adopts them after Code
 
 ## Active focus
 
-- Codex: `QP-040 preparation` — QP-030 complete; strategy health, verified protective sells, retirement, and cadence next
-- Claude Code: `QP-120 review` — implementation complete in worktree `qp120-position-risk`; awaiting Codex GATE-2 review and copy-back
-- Next integration gate: `GATE-2` — QP-120 review plus QP-040 strategy-health and risk-order isolation proof
+- Codex: `QP-040 in_progress` — strategy health persistence, verified protective sells, retirement, and cadence
+- Claude Code: `idle/done` — QP-110 and QP-120 reviewed; no additional Claude task is necessary
+- Next integration gate: `GATE-2` — verified risk-reducing order isolation plus restart-safe retirement/cadence proof
 
 ## Work queue
 
@@ -104,8 +104,8 @@ These paths remain unowned unless a later task explicitly adopts them after Code
 | QP-020 | codex | QP-010 | repository and managed-position persistence modules/tests | done | Paper-mode state survives restart; idempotency remains unique; fixture defaults unchanged | 8 focused tests passed; SQLite WAL/full-sync, restart recovery, stale-write and secret-field guards verified |
 | QP-110 | claude | QP-010 | technical indicators, pure pullback signal module, focused tests/fixtures | done | Selected strategy emits deterministic, no-lookahead actions using the locked thresholds | Codex-reviewed targeted suite: 12 passed; canonical rules shared with v2 typed schema |
 | QP-030 | codex | QP-020, QP-110 | schemas, signal adapter, portfolio optimizer/planner, operator integration | done | Selected strategy alone drives plans; max positions and existing safety gates are enforced | post-review backend 379 passed/1 skipped/7 QP-120 xfailed; smoke mock/default-blocked; selected-v2 integration and blocked-no-sell proofs passed |
-| QP-120 | claude | QP-110 | pure position-risk evaluator and focused tests | review | 8%/2ATR stop and technical exit/trim precedence are deterministic and broker-free | targeted `8 passed in 0.47s`; worktree full suite `349 tests, 0 failures, 0 errors, 10 skipped` (1 manual KIS skip + 9 QP-110 xfails from the pre-QP-030 base commit); smoke `broker=mock`, operator default-blocked; diff limited to `quantpilot/packages/core/risk/position_exit.py` + `quantpilot/tests/unit/test_position_exit_contract.py` in worktree `qp120-position-risk`, awaiting Codex GATE-2 review |
-| QP-040 | codex | QP-030, QP-120 | strategy performance, retirement, liquidation, rebalance orchestration | blocked | Retirement creates no buys; risk-reducing sells remain auditable and idempotent | pending |
+| QP-120 | claude | QP-110 | pure position-risk evaluator and focused tests | done | 8%/2ATR stop and technical exit/trim precedence are deterministic and broker-free | Codex-reviewed targeted: 10 passed; completed-close contract and raw-boundary comparison added; backend 388 passed/1 manual skip |
+| QP-040 | codex | QP-030, QP-120 | strategy performance, retirement, liquidation, rebalance orchestration | in_progress | Retirement creates no buys; risk-reducing sells remain auditable and idempotent | pure strategy-health review: 13 passed; persistence/risk-order integration pending |
 | QP-050 | codex | QP-040 | KIS paper adapters, reconciliation, session job, fake-client tests | blocked | No production host accepted; fake tests pass; manual paper test stays opt-in | pending |
 | QP-060 | codex | QP-050 | operator status/report UI and final hardening | blocked | Safety state, position risk, strategy health, rebalance, and reconciliation are visible | pending |
 | QP-900 | codex | QP-060 | completion report and final verification only | blocked | Full acceptance audit passes; all required evidence is current | pending |
@@ -187,3 +187,8 @@ These paths remain unowned unless a later task explicitly adopts them after Code
   bar is conservatively excluded unless a later session confirms completion. Added held-position stale-quote and
   same-day-forming-bar regressions. Verification after the fixes: `379 passed, 1 skipped, 7 xfailed`; smoke passed
   with `broker=mock`, `live_trading_enabled=false`, and Level 5 default-blocked.
+- 2026-07-10 07:25 KST — Codex — QP-120 done after reviewing Claude's pure implementation. Corrected the contract
+  so the realtime quote drives only the protective stop while the completed daily close drives SMA20 exit/trim;
+  exposed both fixed-fraction and ATR stop components; and compare unrounded thresholds before rounding outputs.
+  Exact stop, technical-exit, RSI/extension trim, stale/future/naive quote, precedence, and determinism proofs pass.
+  Verification: QP-120 targeted `10 passed`; strategy-health targeted `13 passed`; backend `388 passed, 1 skipped`.

@@ -36,6 +36,7 @@
 ## Routing assessment
 
 점수는 1~5이며 총점은 `domain*0.30 + tools*0.25 + track*0.25 + continuity*0.10 + coordination*0.10`이다.
+비교 가능한 실적이 없으면 `track=3`으로 기록하고, 안전한 bounded seed 작업 적용 여부를 근거에 명시한다.
 
 | Task | Candidate | Domain | Tools | Track | Continuity | Coordination | Total | Decision rationale |
 |---|---|---:|---:|---:|---:|---:|---:|---|

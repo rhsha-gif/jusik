@@ -338,6 +338,7 @@ def _blocked_signal(
         target_weight_hint=0.0,
         stop_price_hint=None,
         take_profit_hint=None,
+        entry_atr14=None,
         valid_until=signal_date + fixture_signal_validity(),
         policy_version=policy.version if policy else None,
         reason_codes=_unique_codes(["provider_fail_closed", *reason_codes]),
@@ -437,6 +438,11 @@ def _decision_signal(
         target_weight_hint=decision.target_weight_hint,
         stop_price_hint=None,
         take_profit_hint=None,
+        entry_atr14=(
+            decision.indicators.atr14
+            if decision.indicators is not None
+            else None
+        ),
         valid_until=decision.signal_date + fixture_signal_validity(),
         policy_version=policy.version,
         reason_codes=_unique_codes([*decision.reason_codes, *score_reason_codes]),

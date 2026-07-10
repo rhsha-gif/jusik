@@ -8,6 +8,10 @@ from zoneinfo import ZoneInfo
 
 from quantpilot.packages.brokers.mock_broker import MockBroker
 from quantpilot.packages.brokers.paper_broker import PaperBroker
+from quantpilot.packages.brokers.kis_paper import KisPaperBrokerAdapter
+from quantpilot.packages.core.execution.paper_submission import (
+    DurablePaperSubmissionCoordinator,
+)
 from quantpilot.packages.core.execution.state_machine import (
     ApprovalRequired,
     RiskCheckRequired,
@@ -92,7 +96,23 @@ class HarnessService:
         security_provider: SecurityProvider | None = None,
         market_data_provider: MarketDataProvider | None = None,
         pending_liquidation_provider: object | None = None,
+        external_paper_broker: KisPaperBrokerAdapter | None = None,
+        paper_submission_coordinator: DurablePaperSubmissionCoordinator | None = None,
     ) -> None:
+        if (external_paper_broker is None) != (
+            paper_submission_coordinator is None
+        ):
+            raise ValueError(
+                "external paper broker and durable coordinator must be configured together"
+            )
+        if (
+            external_paper_broker is not None
+            and external_paper_broker.submission_gateway
+            is not paper_submission_coordinator
+        ):
+            raise ValueError(
+                "external paper broker must use the configured durable coordinator"
+            )
         self.repositories = repositories or RepositoryRegistry()
         self.audit = AuditRecorder(self.repositories.audit_logs)
         self.autopilot_paused = False
@@ -102,7 +122,21 @@ class HarnessService:
         self.security_provider: SecurityProvider = security_provider or FixtureSecurityProvider()
         self.market_data_provider: MarketDataProvider = market_data_provider or FixtureMarketDataProvider()
         self.pending_liquidation_provider = pending_liquidation_provider
+        self.external_paper_broker = external_paper_broker
+        self.paper_submission_coordinator = paper_submission_coordinator
+        self.paper_dispatch_provider = (
+            paper_submission_coordinator.store
+            if paper_submission_coordinator is not None
+            else None
+        )
         self.operator_safety_state_provider: object | None = None
+
+    @property
+    def external_paper_enabled(self) -> bool:
+        return (
+            self.external_paper_broker is not None
+            and self.paper_submission_coordinator is not None
+        )
 
     @classmethod
     def from_environment(cls, repositories: RepositoryRegistry | None = None) -> "HarnessService":
@@ -451,6 +485,7 @@ class HarnessService:
         quotes: dict[str, float] | None = None,
         quote_times: dict[str, datetime] | None = None,
         require_explicit_quotes: bool = False,
+        require_whole_shares: bool = False,
         rebalance_band: float | None = None,
     ) -> PortfolioPlan:
         policy = self.repositories.policies.require(policy_id)
@@ -472,6 +507,7 @@ class HarnessService:
             quotes=selected_quotes,
             quote_times=quote_times,
             require_explicit_quotes=require_explicit_quotes,
+            require_whole_shares=require_whole_shares,
             **planner_options,
         )
         self.repositories.portfolio_plans.add(plan)
@@ -729,14 +765,18 @@ class HarnessService:
         durable_daily_count = 0
         durable_daily_turnover = 0.0
         durable_submitted_keys: list[str] = []
+        unresolved_paper_buy_order = False
+        accounted_reserved_quantities_by_order = dict(
+            repository_reserved_quantities
+        )
+        counted_order_plan_ids = {
+            order.order_plan_id for order in submitted_orders
+        }
         provider = self.pending_liquidation_provider
         if provider is not None and hasattr(provider, "list_pending_liquidations"):
             checkpoints: list[PendingLiquidationCheckpoint] = (
                 provider.list_pending_liquidations(include_reconciled=True)
             )
-            submitted_repository_order_ids = {
-                order.order_plan_id for order in submitted_orders
-            }
             for checkpoint in checkpoints:
                 if (
                     checkpoint.policy_id != policy.policy_id
@@ -771,7 +811,7 @@ class HarnessService:
                 additional_reservation = max(
                     0.0,
                     durable_reservation
-                    - repository_reserved_quantities.get(
+                    - accounted_reserved_quantities_by_order.get(
                         checkpoint.order_plan_id,
                         0.0,
                     ),
@@ -784,8 +824,17 @@ class HarnessService:
                     unfilled_order_keys.append(
                         f"{checkpoint.strategy_id}:{checkpoint.symbol}:sell"
                     )
+                accounted_reserved_quantities_by_order[
+                    checkpoint.order_plan_id
+                ] = max(
+                    accounted_reserved_quantities_by_order.get(
+                        checkpoint.order_plan_id,
+                        0.0,
+                    ),
+                    durable_reservation,
+                )
                 if (
-                    checkpoint.order_plan_id not in submitted_repository_order_ids
+                    checkpoint.order_plan_id not in counted_order_plan_ids
                     and checkpoint.broker_submission_attempted
                     and checkpoint.created_at.astimezone(
                         ZoneInfo("Asia/Seoul")
@@ -797,6 +846,74 @@ class HarnessService:
                         checkpoint.quantity_requested * checkpoint.limit_price
                     )
                     durable_submitted_keys.append(checkpoint.idempotency_key)
+                    counted_order_plan_ids.add(checkpoint.order_plan_id)
+
+        dispatch_provider = self.paper_dispatch_provider
+        if dispatch_provider is not None and hasattr(
+            dispatch_provider,
+            "list_paper_order_dispatches",
+        ):
+            active_dispatch_states = {
+                "prepared",
+                "dispatch_claimed",
+                "outcome_unknown",
+                "accepted",
+                "partially_filled",
+            }
+            for dispatch in dispatch_provider.list_paper_order_dispatches():
+                if (
+                    dispatch.policy_id != policy.policy_id
+                    or dispatch.order_plan_id in excluded
+                ):
+                    continue
+                if dispatch.status in active_dispatch_states:
+                    unfilled_order_keys.append(
+                        f"{dispatch.strategy_id}:{dispatch.symbol}:{dispatch.side}"
+                    )
+                    if dispatch.side == "buy":
+                        unresolved_paper_buy_order = True
+                    if dispatch.side == "sell":
+                        outstanding = max(
+                            0.0,
+                            dispatch.quantity
+                            - dispatch.cumulative_filled_quantity,
+                        )
+                        additional_reservation = max(
+                            0.0,
+                            outstanding
+                            - accounted_reserved_quantities_by_order.get(
+                                dispatch.order_plan_id,
+                                0.0,
+                            ),
+                        )
+                        if additional_reservation > 0.000001:
+                            reserved_sell_quantities[dispatch.symbol] = (
+                                reserved_sell_quantities.get(dispatch.symbol, 0.0)
+                                + additional_reservation
+                            )
+                        accounted_reserved_quantities_by_order[
+                            dispatch.order_plan_id
+                        ] = max(
+                            accounted_reserved_quantities_by_order.get(
+                                dispatch.order_plan_id,
+                                0.0,
+                            ),
+                            outstanding,
+                        )
+                attempted_at = dispatch.dispatch_claimed_at
+                if (
+                    dispatch.attempt_count == 1
+                    and attempted_at is not None
+                    and dispatch.order_plan_id not in counted_order_plan_ids
+                    and attempted_at.astimezone(ZoneInfo("Asia/Seoul")).date()
+                    == current_trading_date
+                ):
+                    durable_daily_count += 1
+                    durable_daily_turnover += (
+                        dispatch.quantity * dispatch.limit_price
+                    )
+                    durable_submitted_keys.append(dispatch.idempotency_key)
+                    counted_order_plan_ids.add(dispatch.order_plan_id)
         return GuardrailState(
             daily_order_count=len(submitted_orders) + durable_daily_count,
             daily_turnover_used=round(
@@ -808,11 +925,12 @@ class HarnessService:
             broker_healthy=self.broker_healthy,
             autopilot_paused=self.autopilot_paused,
             last_blocked_reason=self.last_blocked_reason,
+            unresolved_paper_buy_order=unresolved_paper_buy_order,
             unfilled_order_keys=sorted(set(unfilled_order_keys)),
-            submitted_idempotency_keys=[
+            submitted_idempotency_keys=sorted(set([
                 *[order.idempotency_key for order in submitted_orders],
                 *durable_submitted_keys,
-            ],
+            ])),
             reserved_sell_quantities=reserved_sell_quantities,
         )
 
@@ -2028,6 +2146,8 @@ class HarnessService:
 
     def _broker_for_policy(self, policy: UserPolicy):
         if policy.broker == BrokerMode.paper:
+            if self.external_paper_broker is not None:
+                return self.external_paper_broker
             return PaperBroker()
         if policy.broker == BrokerMode.mock:
             return MockBroker()
@@ -2090,17 +2210,38 @@ class HarnessService:
         snapshot: PortfolioSnapshot | None = None,
         position_binding: ManagedPositionBinding | None = None,
         market_quote: Quote | None = None,
+        paper_run_id: str | None = None,
+        entry_atr14: float | None = None,
         now: datetime | None = None,
         before_broker_submit: Callable[[OrderPlan], None] | None = None,
     ) -> tuple[OrderPlan, BrokerOrder, list[Fill]]:
         order_plan = self.repositories.order_plans.require(order_plan_id)
         policy = self.repositories.policies.require(order_plan.policy_id)
+        if self.external_paper_enabled and snapshot is None:
+            raise RiskCheckRequired(
+                "external paper submission requires an explicit reconciled snapshot"
+            )
+        if self.external_paper_enabled and market_quote is None:
+            raise RiskCheckRequired(
+                "external paper submission requires an explicit L2 quote"
+            )
+        if self.external_paper_enabled and (
+            paper_run_id is None or not paper_run_id.strip()
+        ):
+            raise RiskCheckRequired(
+                "external paper submission requires a durable operator run ID"
+            )
         if order_plan.purpose in {"protective_exit", "strategy_retirement"} and snapshot is None:
             raise RiskCheckRequired(
                 "risk-reducing orders require an explicit reconciled portfolio snapshot"
             )
         portfolio_snapshot = snapshot or fixture_portfolio_snapshot()
         submission_time = now or utc_now()
+        snapshot_max_age_seconds = (
+            policy.stale_quote_max_age_seconds
+            if order_plan.purpose in {"protective_exit", "strategy_retirement"}
+            else 900
+        )
 
         if order_plan.risk_check_id is None or order_plan.status == OrderStatus.draft:
             raise RiskCheckRequired("risk_checked is required before submission")
@@ -2135,11 +2276,7 @@ class HarnessService:
             position_binding=position_binding,
             market_quote=market_quote,
             now=submission_time,
-            snapshot_max_age_seconds=(
-                policy.stale_quote_max_age_seconds
-                if order_plan.purpose in {"protective_exit", "strategy_retirement"}
-                else 900
-            ),
+            snapshot_max_age_seconds=snapshot_max_age_seconds,
         )
         if not fresh_risk.passed:
             self.audit.emit(
@@ -2177,12 +2314,7 @@ class HarnessService:
             order_plans=batch_orders,
             config=BatchRiskConfig(
                 quote_max_age_seconds=policy.stale_quote_max_age_seconds,
-                snapshot_max_age_seconds=(
-                    policy.stale_quote_max_age_seconds
-                    if order_plan.purpose
-                    in {"protective_exit", "strategy_retirement"}
-                    else 900
-                ),
+                snapshot_max_age_seconds=snapshot_max_age_seconds,
             ),
             guardrail_state=self._guardrail_state(
                 policy=policy,
@@ -2316,6 +2448,45 @@ class HarnessService:
         final_safety_failures = current_submission_safety_failures()
         if final_safety_failures:
             fail_final_submission(final_safety_failures)
+        if self.paper_submission_coordinator is not None:
+            try:
+                self.paper_submission_coordinator.prepare_order(
+                    order_plan.model_copy(deep=True),
+                    run_id=paper_run_id or "",
+                    user_id=policy.user_id,
+                    snapshot=portfolio_snapshot,
+                    quote=market_quote,
+                    entry_atr14=entry_atr14,
+                    quote_max_age_seconds=policy.stale_quote_max_age_seconds,
+                    snapshot_max_age_seconds=snapshot_max_age_seconds,
+                    minimum_cash_reserve=(
+                        policy.min_cash_weight * portfolio_snapshot.equity
+                    ),
+                )
+            except Exception:
+                before = order_plan.model_copy(deep=True)
+                order_plan.blocked_reason = "paper_dispatch_prepare_failed"
+                transition_order_plan(
+                    order_plan=order_plan,
+                    new_status=OrderStatus.failed,
+                    audit=self.audit,
+                    user_id=policy.user_id,
+                    source="execution_service",
+                    action="paper_dispatch_prepare_failed",
+                )
+                self.repositories.order_plans.update(order_plan)
+                self.audit.emit(
+                    user_id=policy.user_id,
+                    entity_type="order_plan",
+                    entity_id=order_plan.order_plan_id,
+                    action="paper_dispatch_prepare_failed",
+                    before_state=before,
+                    after_state={"reason": "durable_paper_evidence_unavailable"},
+                    source="execution_service",
+                )
+                raise RiskCheckRequired(
+                    "durable paper dispatch preparation failed"
+                ) from None
         broker_order, fills = broker.submit_order(order_plan)
         evidence_failures: list[str] = []
         if broker_order.order_plan_id != order_plan.order_plan_id:

@@ -24,12 +24,32 @@ FALLBACK_MATRIX: dict[str, tuple[Literal[4, 3, 2, 0], str]] = {
     "live_trading_flag_engaged": (0, "LIVE_TRADING_ENABLED must remain false; operator refuses to run"),
     "policy_review_required": (0, "policy version drift requires explicit user review before any automation"),
     "policy_not_found": (0, "no active policy exists for the requested policy id"),
+    "policy_user_mismatch": (
+        0,
+        "the operator request user does not own the selected policy",
+    ),
     "monthly_loss_stop_engaged": (0, "monthly loss stop halts all automatic trading"),
     "broker_mode_unsafe": (0, "broker mode is not mock or paper; automation refuses to run"),
     "run_mode_broker_mismatch": (0, "requested run mode does not match the policy broker mode"),
     "paper_submission_journal_required": (
         0,
         "professional paper submission stays disabled until its durable broker journal is configured",
+    ),
+    "paper_state_provenance_mismatch": (
+        0,
+        "paper execution state does not match the durable KIS paper account binding",
+    ),
+    "paper_loss_baseline_missing": (
+        0,
+        "a manually verified paper loss baseline is required before automation",
+    ),
+    "paper_submission_outcome_unknown": (
+        0,
+        "paper order outcome is uncertain; reconciliation must finish before automation resumes",
+    ),
+    "paper_submission_rejected": (
+        3,
+        "the paper broker definitively rejected the order; automatic submission is stopped",
     ),
     "policy_not_promoted": (4, "policy is not promoted to Level 5; guarded autopilot is the highest allowed level"),
     "no_level5_strategy_eligible": (4, "no validated_l5 strategy is eligible; fall back to guarded autopilot rails"),

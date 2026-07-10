@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from datetime import datetime, timedelta, timezone
+from types import SimpleNamespace
 from zoneinfo import ZoneInfo
 
 import pytest
@@ -162,6 +163,96 @@ def _risk_input(
         rsi14=50,
         quote_as_of=evaluated_at,
         evaluated_at=evaluated_at,
+    )
+
+
+class _DispatchProvider:
+    def __init__(self, dispatch: object | None) -> None:
+        self.dispatch = dispatch
+        self.loaded_order_plan_ids: list[str] = []
+
+    def load_paper_order_dispatch(self, order_plan_id: str):
+        self.loaded_order_plan_ids.append(order_plan_id)
+        return self.dispatch
+
+
+def _seed_submitted_pending_checkpoint(
+    store: PaperStateStore,
+    *,
+    policy: UserPolicy,
+    managed: ManagedPositionState,
+    order_plan_id: str,
+) -> PendingLiquidationCheckpoint:
+    created = NOW - timedelta(minutes=1)
+    prepared = PendingLiquidationCheckpoint(
+        order_plan_id=order_plan_id,
+        policy_id=policy.policy_id,
+        policy_version=policy.version,
+        strategy_id=managed.strategy_id,
+        strategy_version=managed.strategy_version,
+        symbol=managed.symbol,
+        purpose="protective_exit",
+        idempotency_key="sha256:" + "d" * 64,
+        quantity_before=managed.quantity,
+        quantity_requested=managed.quantity,
+        expected_quantity_after=0,
+        account_quantity_before=managed.quantity,
+        expected_account_quantity_after=0,
+        limit_price=90,
+        quote_as_of=created,
+        reconciled_snapshot_id="prior-snapshot",
+        created_at=created,
+        updated_at=created,
+    )
+    submitted = PendingLiquidationCheckpoint.model_validate(
+        prepared.model_copy(
+            update={
+                "status": "submitted",
+                "broker_submission_attempted": True,
+                "risk_check_id": "risk-final-before-dispatch-claim",
+                "updated_at": created + timedelta(microseconds=1),
+                "revision": 1,
+            }
+        ).model_dump()
+    )
+    store.seed_fixture_position(managed, data_mode="fixture")
+    store.save_strategy_operator_state(
+        _state(
+            policy,
+            retirement_phase="awaiting_reconciliation",
+            pending_order_plan_ids=[order_plan_id],
+            last_risk_evaluated_at=created,
+            updated_at=created,
+        )
+    )
+    store.insert_pending_liquidation(prepared)
+    store.update_pending_liquidation(submitted)
+    return submitted
+
+
+def _dispatch_evidence(
+    checkpoint: PendingLiquidationCheckpoint,
+    *,
+    attempt_count: int,
+    status: str,
+) -> SimpleNamespace:
+    return SimpleNamespace(
+        order_plan_id=checkpoint.order_plan_id,
+        policy_id=checkpoint.policy_id,
+        policy_version=checkpoint.policy_version,
+        strategy_id=checkpoint.strategy_id,
+        strategy_version=checkpoint.strategy_version,
+        symbol=checkpoint.symbol,
+        side="sell",
+        purpose=checkpoint.purpose,
+        idempotency_key=checkpoint.idempotency_key,
+        quantity=checkpoint.quantity_requested,
+        limit_price=checkpoint.limit_price,
+        quote_as_of=checkpoint.quote_as_of,
+        risk_check_id=checkpoint.risk_check_id,
+        reconciled_snapshot_id=checkpoint.reconciled_snapshot_id,
+        attempt_count=attempt_count,
+        status=status,
     )
 
 
@@ -815,6 +906,122 @@ def test_prepared_checkpoint_without_attempt_is_released_after_restart(tmp_path)
         assert guardrail.reserved_sell_quantities == {}
         assert guardrail.unfilled_order_keys == []
         assert guardrail.daily_order_count == 0
+
+
+@pytest.mark.parametrize(
+    ("dispatch_kind", "expected_reason"),
+    [
+        ("missing", "durable_dispatch_missing_before_claim"),
+        ("prepared", "durable_dispatch_unclaimed_before_post"),
+    ],
+)
+def test_restart_recovers_submitted_callback_marker_without_dispatch_claim(
+    tmp_path,
+    dispatch_kind: str,
+    expected_reason: str,
+) -> None:
+    policy = _policy()
+    managed = _managed(policy, "CCC", 10)
+    path = tmp_path / "state.sqlite3"
+    with PaperStateStore(path) as store:
+        submitted = _seed_submitted_pending_checkpoint(
+            store,
+            policy=policy,
+            managed=managed,
+            order_plan_id=f"oplan-killed-{dispatch_kind}",
+        )
+
+    dispatch = (
+        None
+        if dispatch_kind == "missing"
+        else _dispatch_evidence(
+            submitted,
+            attempt_count=0,
+            status="prepared",
+        )
+    )
+    provider = _DispatchProvider(dispatch)
+    with PaperStateStore(path) as reopened:
+        coordinator, harness, registry = _coordinator(policy, reopened)
+        harness.paper_dispatch_provider = provider
+        result = coordinator.run_position_cycle(
+            policy=policy,
+            registry_entry=registry.require("pullback_trend_v2"),
+            strategy=_recipe(),
+            snapshot=_snapshot(
+                policy,
+                positions=[
+                    PortfolioPosition(symbol="CCC", quantity=10, market_price=90)
+                ],
+            ),
+            risk_inputs={},
+            quotes={},
+            evaluated_at=NOW,
+        )
+
+        recovered = reopened.load_pending_liquidation(submitted.order_plan_id)
+        assert recovered is not None
+        assert recovered.status == "reconciled"
+        assert recovered.last_error_code == expected_reason
+        assert recovered.broker_submission_attempted is True
+        assert result.state.pending_order_plan_ids == []
+        assert expected_reason + ":CCC" in result.state.reason_codes
+        assert provider.loaded_order_plan_ids == [submitted.order_plan_id]
+        assert harness.repositories.broker_orders.list() == []
+        assert harness.repositories.order_plans.list() == []
+
+
+@pytest.mark.parametrize(
+    "dispatch_status",
+    ["dispatch_claimed", "outcome_unknown", "accepted", "partially_filled"],
+)
+def test_restart_preserves_submitted_checkpoint_for_any_attempted_dispatch(
+    tmp_path,
+    dispatch_status: str,
+) -> None:
+    policy = _policy()
+    managed = _managed(policy, "CCC", 10)
+    path = tmp_path / "state.sqlite3"
+    with PaperStateStore(path) as store:
+        submitted = _seed_submitted_pending_checkpoint(
+            store,
+            policy=policy,
+            managed=managed,
+            order_plan_id=f"oplan-attempted-{dispatch_status}",
+        )
+
+    provider = _DispatchProvider(
+        _dispatch_evidence(
+            submitted,
+            attempt_count=1,
+            status=dispatch_status,
+        )
+    )
+    with PaperStateStore(path) as reopened:
+        coordinator, harness, registry = _coordinator(policy, reopened)
+        harness.paper_dispatch_provider = provider
+        result = coordinator.run_position_cycle(
+            policy=policy,
+            registry_entry=registry.require("pullback_trend_v2"),
+            strategy=_recipe(),
+            snapshot=_snapshot(
+                policy,
+                positions=[
+                    PortfolioPosition(symbol="CCC", quantity=10, market_price=90)
+                ],
+            ),
+            risk_inputs={},
+            quotes={},
+            evaluated_at=NOW,
+        )
+
+        preserved = reopened.load_pending_liquidation(submitted.order_plan_id)
+        assert preserved == submitted
+        assert result.status == "awaiting_reconciliation"
+        assert result.state.pending_order_plan_ids == [submitted.order_plan_id]
+        assert provider.loaded_order_plan_ids == [submitted.order_plan_id]
+        assert harness.repositories.broker_orders.list() == []
+        assert harness.repositories.order_plans.list() == []
 
 
 def test_submission_attempt_is_durable_before_broker_call(

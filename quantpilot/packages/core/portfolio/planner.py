@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from datetime import date, datetime
 from hashlib import sha256
-from math import isfinite
+from math import floor, isfinite
 
 from quantpilot.packages.core.portfolio.optimizer import DeterministicPortfolioOptimizer
 from quantpilot.packages.core.portfolio.optimizer_types import (
@@ -223,6 +223,7 @@ def build_portfolio_plan(
     quotes: dict[str, float] | None = None,
     quote_times: dict[str, datetime] | None = None,
     require_explicit_quotes: bool = False,
+    require_whole_shares: bool = False,
     expected_return_risk_proxies: dict[str, ExpectedReturnRiskProxy] | None = None,
     sector_metadata: dict[str, str] | None = None,
     optimizer_constraints: OptimizationConstraints | None = None,
@@ -278,6 +279,9 @@ def build_portfolio_plan(
         else:
             price = _quote_for_symbol(snapshot, signal.symbol, quotes)
             quote_time = None
+        if require_whole_shares and not float(price).is_integer():
+            target_weights[signal.symbol] = round(current, 6)
+            continue
         delta_notional = (target - current) * snapshot.equity
 
         if delta_notional > 1:
@@ -285,6 +289,16 @@ def build_portfolio_plan(
             if notional <= 1:
                 target = current
             else:
+                quantity = (
+                    float(floor(notional / price))
+                    if require_whole_shares
+                    else round(notional / price, 6)
+                )
+                if quantity <= 0:
+                    target = current
+                    target_weights[signal.symbol] = round(current, 6)
+                    continue
+                notional = quantity * price
                 target = current + notional / snapshot.equity
                 available_to_spend -= notional
                 order_intents.append(
@@ -292,7 +306,7 @@ def build_portfolio_plan(
                         symbol=signal.symbol,
                         side="buy",
                         order_type=OrderType.limit,
-                        quantity=round(notional / price, 6),
+                        quantity=quantity,
                         limit_price=price,
                         notional=round(notional, 2),
                         target_weight=round(target, 6),
@@ -308,9 +322,24 @@ def build_portfolio_plan(
                     for position in snapshot.positions
                     if position.symbol.strip().upper() == signal.symbol.strip().upper()
                 )
-                quantity = min(notional / price, held_quantity)
+                orderable_quantity = sum(
+                    position.effective_orderable_quantity
+                    for position in snapshot.positions
+                    if position.symbol.strip().upper() == signal.symbol.strip().upper()
+                )
+                quantity = (
+                    float(
+                        min(
+                            floor(notional / price),
+                            floor(orderable_quantity + 0.000001),
+                        )
+                    )
+                    if require_whole_shares
+                    else min(notional / price, orderable_quantity)
+                )
                 notional = quantity * price
                 if quantity <= 0:
+                    target_weights[signal.symbol] = round(current, 6)
                     continue
                 target = (
                     max(0.0, current * (held_quantity - quantity) / held_quantity)

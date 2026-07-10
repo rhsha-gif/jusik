@@ -7,7 +7,7 @@ SQLite only when ``PaperStateStore`` is explicitly constructed.
 from __future__ import annotations
 
 from contextlib import contextmanager
-from datetime import datetime, timedelta
+from datetime import date, datetime, timedelta, timezone
 import json
 from math import isfinite
 from pathlib import Path
@@ -18,8 +18,12 @@ from quantpilot.packages.core.operator.position_ledger import (
     ManagedPositionState,
     OperatorCycleClaim,
     OperatorSafetyState,
+    PaperExecutionSession,
+    PaperOrderDispatch,
+    PaperPortfolioLossBaseline,
     PaperRunCheckpoint,
     PendingLiquidationCheckpoint,
+    StateStoreProvenance,
     StrategyOperatorState,
 )
 from quantpilot.packages.core.schemas import ProcessedFillRecord
@@ -45,11 +49,52 @@ class PaperStateMigrationRequired(PaperStateError):
     pass
 
 
+class PaperStateProvenanceError(PaperStateError):
+    pass
+
+
+PAPER_STATE_SCHEMA_VERSION = 8
+PAPER_STATE_PREVIOUS_SCHEMA_VERSION = 7
+PAPER_STATE_MIGRATABLE_SCHEMA_VERSIONS = frozenset({6, 7})
+
+PAPER_DISPATCH_TRANSITIONS: dict[str, set[str]] = {
+    "prepared": {"expired_pre_dispatch", "failed_pre_dispatch"},
+    "dispatch_claimed": {
+        "outcome_unknown",
+        "accepted",
+        "partially_filled",
+        "filled",
+        "rejected",
+    },
+    "outcome_unknown": {
+        "outcome_unknown",
+        "accepted",
+        "partially_filled",
+        "filled",
+        "rejected",
+        "cancelled",
+    },
+    "accepted": {"accepted", "partially_filled", "filled", "rejected", "cancelled"},
+    "partially_filled": {"partially_filled", "filled", "cancelled"},
+    "filled": {"filled"},
+    "rejected": {"rejected"},
+    "cancelled": {"cancelled"},
+    "expired_pre_dispatch": {"expired_pre_dispatch"},
+    "failed_pre_dispatch": {"failed_pre_dispatch"},
+}
+
+
+def _require_aware_timestamp(value: datetime, *, field_name: str) -> datetime:
+    if value.tzinfo is None or value.utcoffset() is None:
+        raise ValueError(f"{field_name} must include a UTC offset")
+    return value
+
+
 PENDING_LIQUIDATION_TRANSITIONS: dict[str, set[str]] = {
     "prepared": {"submitted", "accepted", "filled", "failed", "outcome_unknown"},
-    "submitted": {"accepted", "partially_filled", "filled", "failed", "outcome_unknown"},
-    "accepted": {"partially_filled", "filled", "cancelled", "rejected", "failed", "outcome_unknown"},
-    "partially_filled": {"filled", "cancelled", "failed", "outcome_unknown"},
+    "submitted": {"accepted", "partially_filled", "filled", "cancelled", "rejected", "failed", "outcome_unknown"},
+    "accepted": {"accepted", "partially_filled", "filled", "cancelled", "rejected", "failed", "outcome_unknown"},
+    "partially_filled": {"partially_filled", "filled", "cancelled", "failed", "outcome_unknown"},
     "outcome_unknown": {"accepted", "partially_filled", "filled", "cancelled", "rejected", "failed"},
     "filled": {"reconciled"},
     "cancelled": {"reconciled"},
@@ -67,9 +112,34 @@ class PaperStateStore:
         database_path: str | Path,
         *,
         allow_fixture_seed: bool = False,
+        data_mode: str = "fixture",
+        broker_environment: str | None = None,
+        account_scope_fingerprint: str | None = None,
     ) -> None:
+        selected_environment = broker_environment or (
+            "fixture_mock" if data_mode == "fixture" else "kis_paper"
+        )
+        try:
+            requested = StateStoreProvenance(
+                store_id="requested-store-binding",
+                schema_version=PAPER_STATE_SCHEMA_VERSION,
+                data_mode=data_mode,  # type: ignore[arg-type]
+                broker_environment=selected_environment,  # type: ignore[arg-type]
+                account_scope_fingerprint=account_scope_fingerprint,
+                created_at=datetime.now(timezone.utc),
+            )
+        except ValueError as exc:
+            raise PaperStateProvenanceError(
+                "invalid paper-state store provenance"
+            ) from exc
+        if allow_fixture_seed and requested.data_mode != "fixture":
+            raise PaperStateProvenanceError(
+                "fixture seeding cannot be enabled for a paper-bound store"
+            )
         target = str(database_path)
         self._allow_fixture_seed = allow_fixture_seed
+        self._requested_provenance = requested
+        self._provenance: StateStoreProvenance | None = None
         if target != ":memory:":
             Path(database_path).expanduser().parent.mkdir(parents=True, exist_ok=True)
         self._connection = sqlite3.connect(target, timeout=5.0)
@@ -78,13 +148,19 @@ class PaperStateStore:
         self._connection.execute("PRAGMA busy_timeout = 5000")
         self._connection.execute("PRAGMA foreign_keys = ON")
         self._connection.execute("PRAGMA synchronous = FULL")
-        if target != ":memory:":
-            self._connection.execute("PRAGMA journal_mode = WAL")
         try:
             self._initialize_schema()
+            if target != ":memory:":
+                self._connection.execute("PRAGMA journal_mode = WAL")
         except Exception:
             self.close()
             raise
+
+    @property
+    def provenance(self) -> StateStoreProvenance:
+        if self._provenance is None:
+            raise PaperStateCorruptionError("paper-state provenance is unavailable")
+        return StateStoreProvenance.model_validate(self._provenance.model_dump())
 
     def __enter__(self) -> "PaperStateStore":
         return self
@@ -98,7 +174,72 @@ class PaperStateStore:
             self._closed = True
 
     def _initialize_schema(self) -> None:
-        with self._connection:
+        user_version = int(
+            self._connection.execute("PRAGMA user_version").fetchone()[0]
+        )
+        if user_version > PAPER_STATE_SCHEMA_VERSION:
+            raise PaperStateMigrationRequired(
+                "paper-state database was created by a newer schema version"
+            )
+        table_names = {
+            row[0]
+            for row in self._connection.execute(
+                """
+                SELECT name FROM sqlite_master
+                WHERE type = 'table' AND name NOT LIKE 'sqlite_%'
+                """
+            )
+        }
+        persisted: StateStoreProvenance | None = None
+        if "state_store_metadata" in table_names:
+            rows = self._connection.execute(
+                """
+                SELECT singleton_id, store_id, schema_version, data_mode,
+                       broker_environment, account_scope_fingerprint,
+                       state_json, created_at
+                FROM state_store_metadata
+                """
+            ).fetchall()
+            if len(rows) != 1:
+                raise PaperStateCorruptionError(
+                    "paper-state database must contain exactly one provenance row"
+                )
+            persisted = self._decode_store_provenance(rows[0])
+            requested = self._requested_provenance
+            if (
+                persisted.data_mode != requested.data_mode
+                or persisted.broker_environment != requested.broker_environment
+                or persisted.account_scope_fingerprint
+                != requested.account_scope_fingerprint
+            ):
+                raise PaperStateProvenanceError(
+                    "paper-state database provenance does not match the requested mode, environment, or account"
+                )
+            if persisted.schema_version not in {
+                *PAPER_STATE_MIGRATABLE_SCHEMA_VERSIONS,
+                PAPER_STATE_SCHEMA_VERSION,
+            }:
+                raise PaperStateMigrationRequired(
+                    "paper-state metadata schema version requires an explicit migration"
+                )
+            if user_version != persisted.schema_version:
+                raise PaperStateCorruptionError(
+                    "paper-state PRAGMA and metadata schema versions disagree"
+                )
+        elif self._requested_provenance.data_mode == "paper_trading":
+            populated_tables: list[str] = []
+            for table_name in sorted(table_names):
+                quoted = table_name.replace('"', '""')
+                if self._connection.execute(
+                    f'SELECT 1 FROM "{quoted}" LIMIT 1'
+                ).fetchone() is not None:
+                    populated_tables.append(table_name)
+            if populated_tables:
+                raise PaperStateMigrationRequired(
+                    "a populated legacy state database cannot be promoted to KIS paper mode; archive it and create a new paper database"
+                )
+
+        with self._transaction():
             existing_position_columns = {
                 row[1]
                 for row in self._connection.execute(
@@ -115,7 +256,19 @@ class PaperStateStore:
                         "archive the fixture paper-state database and start a new paper session"
                     )
                 self._connection.execute("DROP TABLE managed_positions")
-            self._connection.executescript(
+            schema_statements = [
+                """
+                CREATE TABLE IF NOT EXISTS state_store_metadata (
+                    singleton_id INTEGER NOT NULL PRIMARY KEY CHECK (singleton_id = 1),
+                    store_id TEXT NOT NULL UNIQUE,
+                    schema_version INTEGER NOT NULL,
+                    data_mode TEXT NOT NULL,
+                    broker_environment TEXT NOT NULL,
+                    account_scope_fingerprint TEXT,
+                    state_json TEXT NOT NULL,
+                    created_at TEXT NOT NULL
+                ) WITHOUT ROWID
+                """,
                 """
                 CREATE TABLE IF NOT EXISTS managed_positions (
                     policy_id TEXT NOT NULL,
@@ -125,15 +278,17 @@ class PaperStateStore:
                     state_json TEXT NOT NULL,
                     updated_at TEXT NOT NULL,
                     PRIMARY KEY (policy_id, strategy_id, strategy_version, symbol)
-                ) WITHOUT ROWID;
-
+                ) WITHOUT ROWID
+                """,
+                """
                 CREATE TABLE IF NOT EXISTS paper_run_checkpoints (
                     run_id TEXT PRIMARY KEY,
                     idempotency_key TEXT NOT NULL UNIQUE,
                     state_json TEXT NOT NULL,
                     updated_at TEXT NOT NULL
-                ) WITHOUT ROWID;
-
+                ) WITHOUT ROWID
+                """,
+                """
                 CREATE TABLE IF NOT EXISTS strategy_operator_states (
                     policy_id TEXT NOT NULL,
                     strategy_id TEXT NOT NULL,
@@ -141,8 +296,9 @@ class PaperStateStore:
                     state_json TEXT NOT NULL,
                     updated_at TEXT NOT NULL,
                     PRIMARY KEY (policy_id, strategy_id, strategy_version)
-                ) WITHOUT ROWID;
-
+                ) WITHOUT ROWID
+                """,
+                """
                 CREATE TABLE IF NOT EXISTS pending_liquidations (
                     order_plan_id TEXT PRIMARY KEY,
                     idempotency_key TEXT NOT NULL UNIQUE,
@@ -152,8 +308,9 @@ class PaperStateStore:
                     symbol TEXT NOT NULL,
                     state_json TEXT NOT NULL,
                     updated_at TEXT NOT NULL
-                ) WITHOUT ROWID;
-
+                ) WITHOUT ROWID
+                """,
+                """
                 CREATE TABLE IF NOT EXISTS operator_cycle_claims (
                     policy_id TEXT NOT NULL,
                     strategy_id TEXT NOT NULL,
@@ -168,16 +325,18 @@ class PaperStateStore:
                         cycle_kind,
                         bucket
                     )
-                ) WITHOUT ROWID;
-
+                ) WITHOUT ROWID
+                """,
+                """
                 CREATE UNIQUE INDEX IF NOT EXISTS uq_weekly_policy_cycle
                 ON operator_cycle_claims (
                     policy_id,
                     cycle_kind,
                     bucket
                 )
-                WHERE cycle_kind = 'weekly_rebalance';
-
+                WHERE cycle_kind = 'weekly_rebalance'
+                """,
+                """
                 CREATE TABLE IF NOT EXISTS processed_fill_ledger (
                     fill_id TEXT PRIMARY KEY,
                     broker_order_id TEXT NOT NULL,
@@ -189,16 +348,159 @@ class PaperStateStore:
                     symbol TEXT NOT NULL,
                     state_json TEXT NOT NULL,
                     recorded_at TEXT NOT NULL
-                ) WITHOUT ROWID;
-
+                ) WITHOUT ROWID
+                """,
+                """
                 CREATE TABLE IF NOT EXISTS operator_safety_states (
                     policy_id TEXT PRIMARY KEY,
                     state_json TEXT NOT NULL,
                     updated_at TEXT NOT NULL
-                ) WITHOUT ROWID;
+                ) WITHOUT ROWID
+                """,
                 """
+                CREATE TABLE IF NOT EXISTS paper_execution_sessions (
+                    session_id TEXT PRIMARY KEY,
+                    store_id TEXT NOT NULL,
+                    fencing_token INTEGER NOT NULL,
+                    status TEXT NOT NULL,
+                    state_json TEXT NOT NULL,
+                    updated_at TEXT NOT NULL,
+                    UNIQUE (session_id, store_id, fencing_token),
+                    UNIQUE (store_id, fencing_token),
+                    FOREIGN KEY (store_id) REFERENCES state_store_metadata(store_id)
+                ) WITHOUT ROWID
+                """,
+                """
+                CREATE UNIQUE INDEX IF NOT EXISTS uq_active_paper_execution_session
+                ON paper_execution_sessions (store_id)
+                WHERE status = 'active'
+                """,
+                """
+                CREATE TABLE IF NOT EXISTS paper_order_dispatches (
+                    order_plan_id TEXT PRIMARY KEY,
+                    broker_order_id TEXT NOT NULL UNIQUE,
+                    idempotency_key TEXT NOT NULL UNIQUE,
+                    store_id TEXT NOT NULL,
+                    session_id TEXT NOT NULL,
+                    fencing_token INTEGER NOT NULL,
+                    status TEXT NOT NULL,
+                    revision INTEGER NOT NULL,
+                    state_json TEXT NOT NULL,
+                    updated_at TEXT NOT NULL,
+                    FOREIGN KEY (session_id, store_id, fencing_token)
+                        REFERENCES paper_execution_sessions(
+                            session_id, store_id, fencing_token
+                        )
+                ) WITHOUT ROWID
+                """,
+                """
+                CREATE INDEX IF NOT EXISTS ix_paper_dispatch_status
+                ON paper_order_dispatches (store_id, status, updated_at)
+                """,
+                """
+                CREATE TABLE IF NOT EXISTS paper_portfolio_loss_baselines (
+                    store_id TEXT NOT NULL,
+                    business_date TEXT NOT NULL,
+                    account_scope_fingerprint TEXT NOT NULL,
+                    state_json TEXT NOT NULL,
+                    captured_at TEXT NOT NULL,
+                    PRIMARY KEY (store_id, business_date),
+                    FOREIGN KEY (store_id) REFERENCES state_store_metadata(store_id)
+                ) WITHOUT ROWID
+                """,
+            ]
+            for statement in schema_statements:
+                self._connection.execute(statement)
+
+            if persisted is None:
+                requested = self._requested_provenance
+                persisted = StateStoreProvenance(
+                    schema_version=PAPER_STATE_SCHEMA_VERSION,
+                    data_mode=requested.data_mode,
+                    broker_environment=requested.broker_environment,
+                    account_scope_fingerprint=requested.account_scope_fingerprint,
+                    created_at=datetime.now(timezone.utc),
+                )
+                self._connection.execute(
+                    """
+                    INSERT INTO state_store_metadata (
+                        singleton_id, store_id, schema_version, data_mode,
+                        broker_environment, account_scope_fingerprint,
+                        state_json, created_at
+                    ) VALUES (1, ?, ?, ?, ?, ?, ?, ?)
+                    """,
+                    (
+                        persisted.store_id,
+                        persisted.schema_version,
+                        persisted.data_mode,
+                        persisted.broker_environment,
+                        persisted.account_scope_fingerprint,
+                        self._serialize(persisted),
+                        persisted.created_at.isoformat(),
+                    ),
+                )
+            elif persisted.schema_version in PAPER_STATE_MIGRATABLE_SCHEMA_VERSIONS:
+                previous = persisted
+                persisted = StateStoreProvenance.model_validate(
+                    previous.model_copy(
+                        update={"schema_version": PAPER_STATE_SCHEMA_VERSION}
+                    ).model_dump()
+                )
+                cursor = self._connection.execute(
+                    """
+                    UPDATE state_store_metadata
+                    SET schema_version = ?, state_json = ?
+                    WHERE singleton_id = 1 AND store_id = ?
+                      AND schema_version = ? AND state_json = ?
+                    """,
+                    (
+                        persisted.schema_version,
+                        self._serialize(persisted),
+                        previous.store_id,
+                        previous.schema_version,
+                        self._serialize(previous),
+                    ),
+                )
+                if cursor.rowcount != 1:
+                    raise PaperStateConflictError(
+                        "paper-state provenance changed during schema migration"
+                    )
+            self._connection.execute(
+                f"PRAGMA user_version = {PAPER_STATE_SCHEMA_VERSION}"
             )
-            self._connection.execute("PRAGMA user_version = 5")
+        self._provenance = persisted
+
+    @staticmethod
+    def _decode_store_provenance(row: sqlite3.Row) -> StateStoreProvenance:
+        try:
+            model = StateStoreProvenance.model_validate_json(row["state_json"])
+        except ValueError as exc:
+            raise PaperStateCorruptionError(
+                "invalid paper-state provenance JSON"
+            ) from exc
+        metadata = (
+            row["singleton_id"],
+            row["store_id"],
+            row["schema_version"],
+            row["data_mode"],
+            row["broker_environment"],
+            row["account_scope_fingerprint"],
+            row["created_at"],
+        )
+        expected = (
+            1,
+            model.store_id,
+            model.schema_version,
+            model.data_mode,
+            model.broker_environment,
+            model.account_scope_fingerprint,
+            model.created_at.isoformat(),
+        )
+        if metadata != expected:
+            raise PaperStateCorruptionError(
+                "paper-state provenance does not match its metadata columns"
+            )
+        return model
 
     @contextmanager
     def _transaction(self) -> Iterator[None]:
@@ -215,6 +517,10 @@ class PaperStateStore:
     def _serialize(
         model: (
             ManagedPositionState
+            | StateStoreProvenance
+            | PaperExecutionSession
+            | PaperOrderDispatch
+            | PaperPortfolioLossBaseline
             | PaperRunCheckpoint
             | StrategyOperatorState
             | PendingLiquidationCheckpoint
@@ -246,14 +552,113 @@ class PaperStateStore:
             raise PaperStateCorruptionError("managed-position identity does not match its key")
         return model
 
-    @staticmethod
-    def _decode_checkpoint(row: sqlite3.Row) -> PaperRunCheckpoint:
+    def _decode_checkpoint(self, row: sqlite3.Row) -> PaperRunCheckpoint:
         try:
             model = PaperRunCheckpoint.model_validate_json(row["state_json"])
         except ValueError as exc:
             raise PaperStateCorruptionError("invalid paper-run checkpoint JSON") from exc
         if model.run_id != row["run_id"] or model.idempotency_key != row["idempotency_key"]:
             raise PaperStateCorruptionError("paper-run checkpoint identity does not match its key")
+        if model.data_mode != self.provenance.data_mode:
+            raise PaperStateCorruptionError(
+                "paper-run checkpoint data mode does not match its state store"
+            )
+        return model
+
+    @staticmethod
+    def _decode_paper_execution_session(
+        row: sqlite3.Row,
+    ) -> PaperExecutionSession:
+        try:
+            model = PaperExecutionSession.model_validate_json(row["state_json"])
+        except ValueError as exc:
+            raise PaperStateCorruptionError(
+                "invalid paper-execution session JSON"
+            ) from exc
+        metadata = (
+            row["session_id"],
+            row["store_id"],
+            row["fencing_token"],
+            row["status"],
+            row["updated_at"],
+        )
+        expected = (
+            model.session_id,
+            model.store_id,
+            model.fencing_token,
+            model.status,
+            model.updated_at.isoformat(),
+        )
+        if metadata != expected:
+            raise PaperStateCorruptionError(
+                "paper-execution session identity does not match its metadata"
+            )
+        return model
+
+    @staticmethod
+    def _decode_paper_order_dispatch(row: sqlite3.Row) -> PaperOrderDispatch:
+        try:
+            model = PaperOrderDispatch.model_validate_json(row["state_json"])
+        except ValueError as exc:
+            raise PaperStateCorruptionError(
+                "invalid paper-order dispatch JSON"
+            ) from exc
+        metadata = (
+            row["order_plan_id"],
+            row["broker_order_id"],
+            row["idempotency_key"],
+            row["store_id"],
+            row["session_id"],
+            row["fencing_token"],
+            row["status"],
+            row["revision"],
+            row["updated_at"],
+        )
+        expected = (
+            model.order_plan_id,
+            model.broker_order_id,
+            model.idempotency_key,
+            model.store_id,
+            model.session_id,
+            model.fencing_token,
+            model.status,
+            model.revision,
+            model.updated_at.isoformat(),
+        )
+        if metadata != expected:
+            raise PaperStateCorruptionError(
+                "paper-order dispatch identity does not match its metadata"
+            )
+        return model
+
+    @staticmethod
+    def _decode_paper_portfolio_loss_baseline(
+        row: sqlite3.Row,
+    ) -> PaperPortfolioLossBaseline:
+        try:
+            model = PaperPortfolioLossBaseline.model_validate_json(
+                row["state_json"]
+            )
+        except ValueError as exc:
+            raise PaperStateCorruptionError(
+                "invalid paper portfolio loss-baseline JSON"
+            ) from exc
+        metadata = (
+            row["store_id"],
+            row["business_date"],
+            row["account_scope_fingerprint"],
+            row["captured_at"],
+        )
+        expected = (
+            model.store_id,
+            model.business_date.isoformat(),
+            model.account_scope_fingerprint,
+            model.captured_at.isoformat(),
+        )
+        if metadata != expected:
+            raise PaperStateCorruptionError(
+                "paper portfolio loss baseline does not match its metadata"
+            )
         return model
 
     @staticmethod
@@ -361,6 +766,1034 @@ class PaperStateStore:
                 "operator-safety identity does not match its key"
             )
         return model
+
+    def _require_paper_store(self) -> StateStoreProvenance:
+        provenance = self.provenance
+        if (
+            provenance.data_mode != "paper_trading"
+            or provenance.broker_environment != "kis_paper"
+            or provenance.account_scope_fingerprint is None
+        ):
+            raise PaperStateProvenanceError(
+                "paper dispatch requires a KIS-paper-bound state store"
+            )
+        return provenance
+
+    def _validate_loss_baseline_provenance(
+        self,
+        baseline: PaperPortfolioLossBaseline,
+    ) -> None:
+        provenance = self._require_paper_store()
+        if (
+            baseline.store_id != provenance.store_id
+            or baseline.data_mode != provenance.data_mode
+            or baseline.broker_environment != provenance.broker_environment
+            or baseline.account_scope_fingerprint
+            != provenance.account_scope_fingerprint
+        ):
+            raise PaperStateProvenanceError(
+                "paper loss baseline does not match its state-store provenance"
+            )
+
+    def insert_paper_portfolio_loss_baseline(
+        self,
+        baseline: PaperPortfolioLossBaseline,
+    ) -> PaperPortfolioLossBaseline:
+        """Persist one immutable, explicitly sourced daily loss baseline."""
+
+        baseline = PaperPortfolioLossBaseline.model_validate(
+            baseline.model_dump()
+        )
+        self._validate_loss_baseline_provenance(baseline)
+        with self._transaction():
+            existing_row = self._connection.execute(
+                """
+                SELECT store_id, business_date, account_scope_fingerprint,
+                       state_json, captured_at
+                FROM paper_portfolio_loss_baselines
+                WHERE store_id = ? AND business_date = ?
+                """,
+                (baseline.store_id, baseline.business_date.isoformat()),
+            ).fetchone()
+            if existing_row is not None:
+                existing = self._decode_paper_portfolio_loss_baseline(
+                    existing_row
+                )
+                if existing == baseline:
+                    return existing
+                raise PaperStateConflictError(
+                    "paper loss baseline already exists with different evidence"
+                )
+
+            if baseline.source == "prior_session_close":
+                source_row = self._connection.execute(
+                    """
+                    SELECT store_id, business_date, account_scope_fingerprint,
+                           state_json, captured_at
+                    FROM paper_portfolio_loss_baselines
+                    WHERE store_id = ? AND business_date = ?
+                    """,
+                    (
+                        baseline.store_id,
+                        baseline.source_business_date.isoformat(),
+                    ),
+                ).fetchone()
+                if source_row is None:
+                    raise PaperStateConflictError(
+                        "prior-session loss baseline requires its durable source day"
+                    )
+                source = self._decode_paper_portfolio_loss_baseline(source_row)
+                self._validate_loss_baseline_provenance(source)
+                if source.month_key != baseline.month_key:
+                    raise PaperStateConflictError(
+                        "month rollover requires manual loss-baseline confirmation"
+                    )
+                if source.month_start_equity != baseline.month_start_equity:
+                    raise PaperStateConflictError(
+                        "prior-session baseline cannot change month-start equity"
+                    )
+
+            try:
+                self._connection.execute(
+                    """
+                    INSERT INTO paper_portfolio_loss_baselines (
+                        store_id, business_date, account_scope_fingerprint,
+                        state_json, captured_at
+                    ) VALUES (?, ?, ?, ?, ?)
+                    """,
+                    (
+                        baseline.store_id,
+                        baseline.business_date.isoformat(),
+                        baseline.account_scope_fingerprint,
+                        self._serialize(baseline),
+                        baseline.captured_at.isoformat(),
+                    ),
+                )
+            except sqlite3.IntegrityError as exc:
+                raise PaperStateConflictError(
+                    "paper loss baseline already exists"
+                ) from exc
+        return baseline
+
+    def load_paper_portfolio_loss_baseline(
+        self,
+        business_date: date,
+    ) -> PaperPortfolioLossBaseline | None:
+        provenance = self._require_paper_store()
+        row = self._connection.execute(
+            """
+            SELECT store_id, business_date, account_scope_fingerprint,
+                   state_json, captured_at
+            FROM paper_portfolio_loss_baselines
+            WHERE store_id = ? AND business_date = ?
+            """,
+            (provenance.store_id, business_date.isoformat()),
+        ).fetchone()
+        if row is None:
+            return None
+        baseline = self._decode_paper_portfolio_loss_baseline(row)
+        self._validate_loss_baseline_provenance(baseline)
+        return baseline
+
+    def list_paper_portfolio_loss_baselines(
+        self,
+    ) -> list[PaperPortfolioLossBaseline]:
+        provenance = self._require_paper_store()
+        rows = self._connection.execute(
+            """
+            SELECT store_id, business_date, account_scope_fingerprint,
+                   state_json, captured_at
+            FROM paper_portfolio_loss_baselines
+            WHERE store_id = ?
+            ORDER BY business_date
+            """,
+            (provenance.store_id,),
+        ).fetchall()
+        baselines = [
+            self._decode_paper_portfolio_loss_baseline(row) for row in rows
+        ]
+        for baseline in baselines:
+            self._validate_loss_baseline_provenance(baseline)
+        return baselines
+
+    def _validate_session_provenance(
+        self,
+        session: PaperExecutionSession,
+    ) -> None:
+        provenance = self._require_paper_store()
+        if (
+            session.store_id != provenance.store_id
+            or session.data_mode != provenance.data_mode
+            or session.broker_environment != provenance.broker_environment
+            or session.account_scope_fingerprint
+            != provenance.account_scope_fingerprint
+        ):
+            raise PaperStateProvenanceError(
+                "paper session does not match its state-store provenance"
+            )
+
+    def _validate_dispatch_provenance(self, dispatch: PaperOrderDispatch) -> None:
+        provenance = self._require_paper_store()
+        if (
+            dispatch.store_id != provenance.store_id
+            or dispatch.data_mode != provenance.data_mode
+            or dispatch.broker_environment != provenance.broker_environment
+            or dispatch.account_scope_fingerprint
+            != provenance.account_scope_fingerprint
+        ):
+            raise PaperStateProvenanceError(
+                "paper dispatch does not match its state-store provenance"
+            )
+
+    def _load_session_row(self, session_id: str) -> sqlite3.Row | None:
+        return self._connection.execute(
+            """
+            SELECT session_id, store_id, fencing_token, status, state_json, updated_at
+            FROM paper_execution_sessions
+            WHERE session_id = ?
+            """,
+            (session_id.strip(),),
+        ).fetchone()
+
+    def _require_exact_active_session(
+        self,
+        session: PaperExecutionSession,
+        *,
+        checked_at: datetime,
+    ) -> PaperExecutionSession:
+        session = PaperExecutionSession.model_validate(session.model_dump())
+        self._validate_session_provenance(session)
+        row = self._load_session_row(session.session_id)
+        if row is None:
+            raise PaperStateConflictError("paper execution session does not exist")
+        current = self._decode_paper_execution_session(row)
+        if current != session:
+            raise PaperStateConflictError(
+                "paper execution session fencing ownership changed"
+            )
+        if current.status != "active" or current.lease_expires_at <= checked_at:
+            raise PaperStateConflictError(
+                "paper execution session lease is not active"
+            )
+        return current
+
+    def start_paper_execution_session(
+        self,
+        *,
+        started_at: datetime,
+        lease_expires_at: datetime,
+        session_id: str | None = None,
+    ) -> PaperExecutionSession:
+        """Start one fenced paper session, abandoning only an expired predecessor."""
+
+        _require_aware_timestamp(started_at, field_name="started_at")
+        _require_aware_timestamp(
+            lease_expires_at,
+            field_name="lease_expires_at",
+        )
+        provenance = self._require_paper_store()
+        with self._transaction():
+            active_row = self._connection.execute(
+                """
+                SELECT session_id, store_id, fencing_token, status, state_json, updated_at
+                FROM paper_execution_sessions
+                WHERE store_id = ? AND status = 'active'
+                """,
+                (provenance.store_id,),
+            ).fetchone()
+            if active_row is not None:
+                active = self._decode_paper_execution_session(active_row)
+                if active.lease_expires_at > started_at:
+                    raise PaperStateConflictError(
+                        "an unexpired paper execution session already owns the store"
+                    )
+                abandoned = PaperExecutionSession.model_validate(
+                    active.model_copy(
+                        update={
+                            "status": "abandoned",
+                            "updated_at": started_at,
+                            "ended_at": started_at,
+                            "revision": active.revision + 1,
+                        }
+                    ).model_dump()
+                )
+                cursor = self._connection.execute(
+                    """
+                    UPDATE paper_execution_sessions
+                    SET status = ?, state_json = ?, updated_at = ?
+                    WHERE session_id = ? AND status = 'active' AND fencing_token = ?
+                    """,
+                    (
+                        abandoned.status,
+                        self._serialize(abandoned),
+                        abandoned.updated_at.isoformat(),
+                        active.session_id,
+                        active.fencing_token,
+                    ),
+                )
+                if cursor.rowcount != 1:
+                    raise PaperStateConflictError(
+                        "paper execution session changed during lease takeover"
+                    )
+            token = int(
+                self._connection.execute(
+                    """
+                    SELECT COALESCE(MAX(fencing_token), 0)
+                    FROM paper_execution_sessions
+                    WHERE store_id = ?
+                    """,
+                    (provenance.store_id,),
+                ).fetchone()[0]
+            ) + 1
+            values: dict[str, object] = {
+                "store_id": provenance.store_id,
+                "account_scope_fingerprint": provenance.account_scope_fingerprint,
+                "fencing_token": token,
+                "started_at": started_at,
+                "lease_expires_at": lease_expires_at,
+                "updated_at": started_at,
+            }
+            if session_id is not None:
+                values["session_id"] = session_id
+            session = PaperExecutionSession(**values)
+            self._connection.execute(
+                """
+                INSERT INTO paper_execution_sessions (
+                    session_id, store_id, fencing_token, status,
+                    state_json, updated_at
+                ) VALUES (?, ?, ?, ?, ?, ?)
+                """,
+                (
+                    session.session_id,
+                    session.store_id,
+                    session.fencing_token,
+                    session.status,
+                    self._serialize(session),
+                    session.updated_at.isoformat(),
+                ),
+            )
+        return session
+
+    def load_paper_execution_session(
+        self,
+        session_id: str,
+    ) -> PaperExecutionSession | None:
+        row = self._load_session_row(session_id)
+        if row is None:
+            return None
+        session = self._decode_paper_execution_session(row)
+        self._validate_session_provenance(session)
+        return session
+
+    def list_paper_execution_sessions(self) -> list[PaperExecutionSession]:
+        rows = self._connection.execute(
+            """
+            SELECT session_id, store_id, fencing_token, status, state_json, updated_at
+            FROM paper_execution_sessions
+            ORDER BY fencing_token, session_id
+            """
+        ).fetchall()
+        sessions = [self._decode_paper_execution_session(row) for row in rows]
+        for session in sessions:
+            self._validate_session_provenance(session)
+        return sessions
+
+    def renew_paper_execution_session(
+        self,
+        session: PaperExecutionSession,
+        *,
+        renewed_at: datetime,
+        lease_expires_at: datetime,
+    ) -> PaperExecutionSession:
+        """Extend only the exact unexpired session owner; expired leases stay dead."""
+
+        _require_aware_timestamp(renewed_at, field_name="renewed_at")
+        _require_aware_timestamp(
+            lease_expires_at,
+            field_name="lease_expires_at",
+        )
+        session = PaperExecutionSession.model_validate(session.model_dump())
+        self._validate_session_provenance(session)
+        with self._transaction():
+            current = self._require_exact_active_session(
+                session,
+                checked_at=renewed_at,
+            )
+            if renewed_at <= current.updated_at:
+                raise PaperStateConflictError(
+                    "paper-session renewal timestamp must advance"
+                )
+            if lease_expires_at <= current.lease_expires_at:
+                raise PaperStateConflictError(
+                    "paper-session renewal must extend the lease"
+                )
+            renewed = PaperExecutionSession.model_validate(
+                current.model_copy(
+                    update={
+                        "lease_expires_at": lease_expires_at,
+                        "updated_at": renewed_at,
+                        "revision": current.revision + 1,
+                    }
+                ).model_dump()
+            )
+            cursor = self._connection.execute(
+                """
+                UPDATE paper_execution_sessions
+                SET state_json = ?, updated_at = ?
+                WHERE session_id = ? AND status = 'active'
+                  AND fencing_token = ? AND state_json = ?
+                """,
+                (
+                    self._serialize(renewed),
+                    renewed.updated_at.isoformat(),
+                    current.session_id,
+                    current.fencing_token,
+                    self._serialize(current),
+                ),
+            )
+            if cursor.rowcount != 1:
+                raise PaperStateConflictError(
+                    "paper execution session changed before lease renewal"
+                )
+        return renewed
+
+    def close_paper_execution_session(
+        self,
+        session: PaperExecutionSession,
+        *,
+        closed_at: datetime,
+    ) -> PaperExecutionSession:
+        _require_aware_timestamp(closed_at, field_name="closed_at")
+        session = PaperExecutionSession.model_validate(session.model_dump())
+        self._validate_session_provenance(session)
+        with self._transaction():
+            current = self._require_exact_active_session(
+                session,
+                checked_at=closed_at,
+            )
+            if closed_at <= current.updated_at:
+                raise PaperStateConflictError(
+                    "paper-session close timestamp must advance"
+                )
+            closed = PaperExecutionSession.model_validate(
+                current.model_copy(
+                    update={
+                        "status": "closed",
+                        "updated_at": closed_at,
+                        "ended_at": closed_at,
+                        "revision": current.revision + 1,
+                    }
+                ).model_dump()
+            )
+            cursor = self._connection.execute(
+                """
+                UPDATE paper_execution_sessions
+                SET status = ?, state_json = ?, updated_at = ?
+                WHERE session_id = ? AND status = 'active' AND fencing_token = ?
+                """,
+                (
+                    closed.status,
+                    self._serialize(closed),
+                    closed.updated_at.isoformat(),
+                    current.session_id,
+                    current.fencing_token,
+                ),
+            )
+            if cursor.rowcount != 1:
+                raise PaperStateConflictError(
+                    "paper execution session changed before close"
+                )
+        return closed
+
+    def _load_dispatch_row(self, order_plan_id: str) -> sqlite3.Row | None:
+        return self._connection.execute(
+            """
+            SELECT order_plan_id, broker_order_id, idempotency_key, store_id, session_id,
+                   fencing_token, status, revision, state_json, updated_at
+            FROM paper_order_dispatches
+            WHERE order_plan_id = ?
+            """,
+            (order_plan_id.strip(),),
+        ).fetchone()
+
+    def insert_paper_order_dispatch(
+        self,
+        dispatch: PaperOrderDispatch,
+    ) -> PaperOrderDispatch:
+        """Prepare one exact journal row without granting POST authority."""
+
+        dispatch = PaperOrderDispatch.model_validate(dispatch.model_dump())
+        self._validate_dispatch_provenance(dispatch)
+        if (
+            dispatch.status != "prepared"
+            or dispatch.revision != 0
+            or dispatch.attempt_count != 0
+        ):
+            raise PaperStateConflictError(
+                "new paper dispatches must start prepared at revision zero"
+            )
+        with self._transaction():
+            session_row = self._load_session_row(dispatch.session_id)
+            if session_row is None:
+                raise PaperStateConflictError(
+                    "paper dispatch requires a persisted execution session"
+                )
+            session = self._decode_paper_execution_session(session_row)
+            self._require_exact_active_session(
+                session,
+                checked_at=dispatch.prepared_at,
+            )
+            if (
+                dispatch.store_id != session.store_id
+                or dispatch.fencing_token != session.fencing_token
+                or dispatch.account_scope_fingerprint
+                != session.account_scope_fingerprint
+            ):
+                raise PaperStateProvenanceError(
+                    "paper dispatch does not match its execution session"
+                )
+            existing_row = self._connection.execute(
+                """
+                SELECT order_plan_id, broker_order_id, idempotency_key, store_id, session_id,
+                       fencing_token, status, revision, state_json, updated_at
+                FROM paper_order_dispatches
+                WHERE order_plan_id = ? OR idempotency_key = ?
+                """,
+                (dispatch.order_plan_id, dispatch.idempotency_key),
+            ).fetchone()
+            if existing_row is not None:
+                existing = self._decode_paper_order_dispatch(existing_row)
+                if existing == dispatch:
+                    return existing
+                raise PaperStateConflictError(
+                    "paper dispatch identity is already bound to different evidence"
+                )
+            try:
+                self._connection.execute(
+                    """
+                    INSERT INTO paper_order_dispatches (
+                        order_plan_id, broker_order_id, idempotency_key, store_id, session_id,
+                        fencing_token, status, revision, state_json, updated_at
+                    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                    """,
+                    (
+                        dispatch.order_plan_id,
+                        dispatch.broker_order_id,
+                        dispatch.idempotency_key,
+                        dispatch.store_id,
+                        dispatch.session_id,
+                        dispatch.fencing_token,
+                        dispatch.status,
+                        dispatch.revision,
+                        self._serialize(dispatch),
+                        dispatch.updated_at.isoformat(),
+                    ),
+                )
+            except sqlite3.IntegrityError as exc:
+                raise PaperStateConflictError(
+                    "paper dispatch order or idempotency key already exists"
+                ) from exc
+        return dispatch
+
+    def claim_dispatch_attempt(
+        self,
+        order_plan_id: str,
+        *,
+        session: PaperExecutionSession,
+        claimed_at: datetime,
+    ) -> PaperOrderDispatch:
+        """CAS prepared to dispatch_claimed; commit must precede any external POST."""
+
+        _require_aware_timestamp(claimed_at, field_name="claimed_at")
+        session = PaperExecutionSession.model_validate(session.model_dump())
+        with self._transaction():
+            current_session = self._require_exact_active_session(
+                session,
+                checked_at=claimed_at,
+            )
+            row = self._load_dispatch_row(order_plan_id)
+            if row is None:
+                raise PaperStateNotFoundError(
+                    f"missing paper dispatch: {order_plan_id.strip()}"
+                )
+            current = self._decode_paper_order_dispatch(row)
+            self._validate_dispatch_provenance(current)
+            if (
+                current.session_id != current_session.session_id
+                or current.fencing_token != current_session.fencing_token
+            ):
+                raise PaperStateConflictError(
+                    "paper dispatch belongs to a different session fence"
+                )
+            if current.status != "prepared" or current.attempt_count != 0:
+                raise PaperStateConflictError(
+                    "paper dispatch has already claimed its only external attempt"
+                )
+            if current.submission_evidence_expires_at <= claimed_at:
+                raise PaperStateConflictError(
+                    "paper dispatch submission evidence expired before claim"
+                )
+            if claimed_at <= current.updated_at:
+                raise PaperStateConflictError(
+                    "dispatch claim timestamp must advance durable state"
+                )
+            unresolved_rows = self._connection.execute(
+                """
+                SELECT order_plan_id, broker_order_id, idempotency_key, store_id,
+                       session_id, fencing_token, status, revision, state_json,
+                       updated_at
+                FROM paper_order_dispatches
+                WHERE store_id = ? AND order_plan_id <> ?
+                  AND status IN ('dispatch_claimed', 'outcome_unknown')
+                ORDER BY order_plan_id
+                """,
+                (current.store_id, current.order_plan_id),
+            ).fetchall()
+            unresolved = [
+                self._decode_paper_order_dispatch(row) for row in unresolved_rows
+            ]
+            for item in unresolved:
+                self._validate_dispatch_provenance(item)
+            risk_reducing_sell = (
+                current.side == "sell"
+                and current.purpose
+                in {"protective_exit", "strategy_retirement"}
+                and current.quantity
+                <= current.snapshot_symbol_orderable_quantity + 0.000001
+            )
+            if unresolved and (
+                any(item.side == "sell" for item in unresolved)
+                or not risk_reducing_sell
+            ):
+                raise PaperStateConflictError(
+                    "an unresolved paper dispatch blocks new external attempts"
+                )
+            claimed = PaperOrderDispatch.model_validate(
+                current.model_copy(
+                    update={
+                        "status": "dispatch_claimed",
+                        "attempt_count": 1,
+                        "dispatch_claimed_at": claimed_at,
+                        "updated_at": claimed_at,
+                        "revision": current.revision + 1,
+                    }
+                ).model_dump()
+            )
+            cursor = self._connection.execute(
+                """
+                UPDATE paper_order_dispatches
+                SET status = ?, revision = ?, state_json = ?, updated_at = ?
+                WHERE order_plan_id = ? AND status = 'prepared'
+                  AND revision = ?
+                """,
+                (
+                    claimed.status,
+                    claimed.revision,
+                    self._serialize(claimed),
+                    claimed.updated_at.isoformat(),
+                    current.order_plan_id,
+                    current.revision,
+                ),
+            )
+            if cursor.rowcount != 1:
+                raise PaperStateConflictError(
+                    "paper dispatch claim lost its compare-and-swap race"
+                )
+        return claimed
+
+    def takeover_prepared_paper_order_dispatch(
+        self,
+        order_plan_id: str,
+        *,
+        session: PaperExecutionSession,
+        taken_over_at: datetime,
+    ) -> PaperOrderDispatch:
+        """Rebind only an unattempted prepared row from an expired predecessor."""
+
+        _require_aware_timestamp(taken_over_at, field_name="taken_over_at")
+        session = PaperExecutionSession.model_validate(session.model_dump())
+        with self._transaction():
+            successor = self._require_exact_active_session(
+                session,
+                checked_at=taken_over_at,
+            )
+            row = self._load_dispatch_row(order_plan_id)
+            if row is None:
+                raise PaperStateNotFoundError(
+                    f"missing paper dispatch: {order_plan_id.strip()}"
+                )
+            current = self._decode_paper_order_dispatch(row)
+            self._validate_dispatch_provenance(current)
+            if current.status != "prepared" or current.attempt_count != 0:
+                raise PaperStateConflictError(
+                    "only an unattempted prepared dispatch can change session fence"
+                )
+            if (
+                current.session_id == successor.session_id
+                and current.fencing_token == successor.fencing_token
+            ):
+                return current
+            owner_row = self._load_session_row(current.session_id)
+            if owner_row is None:
+                raise PaperStateCorruptionError(
+                    "prepared paper dispatch lost its owning execution session"
+                )
+            owner = self._decode_paper_execution_session(owner_row)
+            if owner.fencing_token != current.fencing_token:
+                raise PaperStateCorruptionError(
+                    "prepared paper dispatch fence does not match its owner"
+                )
+            if owner.status == "active" and owner.lease_expires_at > taken_over_at:
+                raise PaperStateConflictError(
+                    "a live predecessor still owns the prepared paper dispatch"
+                )
+            if taken_over_at <= current.updated_at:
+                raise PaperStateConflictError(
+                    "paper dispatch takeover timestamp must advance durable state"
+                )
+            rebound = PaperOrderDispatch.model_validate(
+                current.model_copy(
+                    update={
+                        "session_id": successor.session_id,
+                        "fencing_token": successor.fencing_token,
+                        "updated_at": taken_over_at,
+                        "revision": current.revision + 1,
+                    }
+                ).model_dump()
+            )
+            cursor = self._connection.execute(
+                """
+                UPDATE paper_order_dispatches
+                SET session_id = ?, fencing_token = ?, revision = ?,
+                    state_json = ?, updated_at = ?
+                WHERE order_plan_id = ? AND session_id = ?
+                  AND fencing_token = ? AND status = 'prepared'
+                  AND revision = ?
+                """,
+                (
+                    rebound.session_id,
+                    rebound.fencing_token,
+                    rebound.revision,
+                    self._serialize(rebound),
+                    rebound.updated_at.isoformat(),
+                    current.order_plan_id,
+                    current.session_id,
+                    current.fencing_token,
+                    current.revision,
+                ),
+            )
+            if cursor.rowcount != 1:
+                raise PaperStateConflictError(
+                    "prepared paper dispatch changed during fenced takeover"
+                )
+        return rebound
+
+    @staticmethod
+    def _dispatch_immutable_identity(dispatch: PaperOrderDispatch) -> tuple[object, ...]:
+        return (
+            dispatch.order_plan_id,
+            dispatch.broker_order_id,
+            dispatch.run_id,
+            dispatch.idempotency_key,
+            dispatch.request_fingerprint,
+            dispatch.policy_id,
+            dispatch.policy_version,
+            dispatch.user_id,
+            dispatch.strategy_id,
+            dispatch.strategy_version,
+            dispatch.purpose,
+            dispatch.symbol,
+            dispatch.side,
+            dispatch.order_type,
+            dispatch.quantity,
+            dispatch.limit_price,
+            dispatch.quote_as_of,
+            dispatch.quote_last,
+            dispatch.quote_bid,
+            dispatch.quote_ask,
+            dispatch.quote_reference_basis,
+            dispatch.risk_check_id,
+            dispatch.risk_check_expires_at,
+            dispatch.submission_evidence_expires_at,
+            dispatch.reconciled_snapshot_id,
+            dispatch.reconciled_snapshot_at,
+            dispatch.snapshot_cash,
+            dispatch.snapshot_equity,
+            dispatch.snapshot_symbol_quantity,
+            dispatch.snapshot_symbol_orderable_quantity,
+            dispatch.snapshot_daily_loss_ratio,
+            dispatch.snapshot_monthly_loss_ratio,
+            dispatch.broker_orderable_cash,
+            dispatch.broker_orderable_buy_quantity,
+            dispatch.entry_atr14,
+            dispatch.store_id,
+            dispatch.session_id,
+            dispatch.fencing_token,
+            dispatch.data_mode,
+            dispatch.broker_environment,
+            dispatch.account_scope_fingerprint,
+            dispatch.prepared_at,
+        )
+
+    def update_paper_order_dispatch(
+        self,
+        dispatch: PaperOrderDispatch,
+    ) -> PaperOrderDispatch:
+        """Persist monotonic broker evidence; this method never grants a retry."""
+
+        dispatch = PaperOrderDispatch.model_validate(dispatch.model_dump())
+        self._validate_dispatch_provenance(dispatch)
+        with self._transaction():
+            row = self._load_dispatch_row(dispatch.order_plan_id)
+            if row is None:
+                raise PaperStateNotFoundError(
+                    f"missing paper dispatch: {dispatch.order_plan_id}"
+                )
+            existing = self._decode_paper_order_dispatch(row)
+            if dispatch == existing:
+                return existing
+            if self._dispatch_immutable_identity(dispatch) != self._dispatch_immutable_identity(existing):
+                raise PaperStateConflictError(
+                    "paper dispatch immutable order and provenance evidence changed"
+                )
+            if dispatch.revision != existing.revision + 1:
+                raise PaperStateConflictError(
+                    "paper dispatch revision must advance by exactly one"
+                )
+            if dispatch.updated_at <= existing.updated_at:
+                raise PaperStateConflictError(
+                    "paper dispatch update timestamp must advance"
+                )
+            if dispatch.attempt_count != existing.attempt_count:
+                raise PaperStateConflictError(
+                    "only claim_dispatch_attempt may change attempt count"
+                )
+            if dispatch.dispatch_claimed_at != existing.dispatch_claimed_at:
+                raise PaperStateConflictError(
+                    "paper dispatch claim evidence is immutable"
+                )
+            if dispatch.status not in PAPER_DISPATCH_TRANSITIONS[existing.status]:
+                raise PaperStateConflictError(
+                    f"invalid paper dispatch transition: {existing.status} -> {dispatch.status}"
+                )
+            if (
+                existing.broker_order_reference is not None
+                and dispatch.broker_order_reference
+                != existing.broker_order_reference
+            ):
+                raise PaperStateConflictError(
+                    "paper broker order reference is immutable once assigned"
+                )
+            if (
+                existing.broker_business_date is not None
+                and dispatch.broker_business_date
+                != existing.broker_business_date
+            ):
+                raise PaperStateConflictError(
+                    "paper broker business date is immutable once assigned"
+                )
+            if (
+                existing.broker_forwarding_order_org_number is not None
+                and dispatch.broker_forwarding_order_org_number
+                != existing.broker_forwarding_order_org_number
+            ):
+                raise PaperStateConflictError(
+                    "paper broker forwarding organization is immutable once assigned"
+                )
+            if (
+                existing.broker_order_branch_number is not None
+                and dispatch.broker_order_branch_number
+                != existing.broker_order_branch_number
+            ):
+                raise PaperStateConflictError(
+                    "paper broker order branch is immutable once assigned"
+                )
+            if (
+                existing.broker_order_time is not None
+                and dispatch.broker_order_time != existing.broker_order_time
+            ):
+                raise PaperStateConflictError(
+                    "paper broker order time is immutable once assigned"
+                )
+            existing_fills = {
+                item.broker_fill_reference: item for item in existing.fill_evidence
+            }
+            next_fills = {
+                item.broker_fill_reference: item for item in dispatch.fill_evidence
+            }
+            if not set(existing_fills).issubset(next_fills) or any(
+                next_fills[reference] != evidence
+                for reference, evidence in existing_fills.items()
+            ):
+                raise PaperStateConflictError(
+                    "paper dispatch fill evidence cannot be removed or changed"
+                )
+            if dispatch.cumulative_filled_quantity < (
+                existing.cumulative_filled_quantity - 0.000001
+            ):
+                raise PaperStateConflictError(
+                    "paper dispatch cumulative fills cannot decrease"
+                )
+            reconciliation_transitions = {
+                "pending": {"pending", "blocked", "reconciled"},
+                "blocked": {"blocked", "reconciled"},
+                "reconciled": {"reconciled"},
+            }
+            if dispatch.reconciliation_status not in reconciliation_transitions[
+                existing.reconciliation_status
+            ]:
+                raise PaperStateConflictError(
+                    "paper dispatch reconciliation cannot move backward"
+                )
+            cursor = self._connection.execute(
+                """
+                UPDATE paper_order_dispatches
+                SET status = ?, revision = ?, state_json = ?, updated_at = ?
+                WHERE order_plan_id = ? AND status = ? AND revision = ?
+                """,
+                (
+                    dispatch.status,
+                    dispatch.revision,
+                    self._serialize(dispatch),
+                    dispatch.updated_at.isoformat(),
+                    dispatch.order_plan_id,
+                    existing.status,
+                    existing.revision,
+                ),
+            )
+            if cursor.rowcount != 1:
+                raise PaperStateConflictError(
+                    "paper dispatch changed before monotonic evidence update"
+                )
+        return dispatch
+
+    def recover_interrupted_dispatches(
+        self,
+        *,
+        session: PaperExecutionSession,
+        recovered_at: datetime,
+    ) -> list[PaperOrderDispatch]:
+        """Recover only claims fenced behind an expired predecessor session."""
+
+        _require_aware_timestamp(recovered_at, field_name="recovered_at")
+        session = PaperExecutionSession.model_validate(session.model_dump())
+        recovered: list[PaperOrderDispatch] = []
+        with self._transaction():
+            current_session = self._require_exact_active_session(
+                session,
+                checked_at=recovered_at,
+            )
+            rows = self._connection.execute(
+                """
+                SELECT order_plan_id, broker_order_id, idempotency_key, store_id, session_id,
+                       fencing_token, status, revision, state_json, updated_at
+                FROM paper_order_dispatches
+                WHERE store_id = ? AND status = 'dispatch_claimed'
+                  AND session_id <> ?
+                ORDER BY order_plan_id
+                """,
+                (self.provenance.store_id, current_session.session_id),
+            ).fetchall()
+            for row in rows:
+                existing = self._decode_paper_order_dispatch(row)
+                owner_row = self._load_session_row(existing.session_id)
+                if owner_row is None:
+                    raise PaperStateCorruptionError(
+                        "paper dispatch lost its owning execution session"
+                    )
+                owner = self._decode_paper_execution_session(owner_row)
+                if (
+                    owner.status == "active"
+                    and owner.lease_expires_at > recovered_at
+                ):
+                    continue
+                write_at = max(
+                    recovered_at,
+                    existing.updated_at + timedelta(microseconds=1),
+                )
+                unknown = PaperOrderDispatch.model_validate(
+                    existing.model_copy(
+                        update={
+                            "status": "outcome_unknown",
+                            "last_error_code": "process_interrupted",
+                            "updated_at": write_at,
+                            "revision": existing.revision + 1,
+                        }
+                    ).model_dump()
+                )
+                cursor = self._connection.execute(
+                    """
+                    UPDATE paper_order_dispatches
+                    SET status = ?, revision = ?, state_json = ?, updated_at = ?
+                    WHERE order_plan_id = ? AND status = 'dispatch_claimed'
+                      AND revision = ?
+                    """,
+                    (
+                        unknown.status,
+                        unknown.revision,
+                        self._serialize(unknown),
+                        unknown.updated_at.isoformat(),
+                        unknown.order_plan_id,
+                        existing.revision,
+                    ),
+                )
+                if cursor.rowcount != 1:
+                    raise PaperStateConflictError(
+                        "paper dispatch changed during interrupted recovery"
+                    )
+                recovered.append(unknown)
+        return recovered
+
+    def load_paper_order_dispatch(
+        self,
+        order_plan_id: str,
+    ) -> PaperOrderDispatch | None:
+        row = self._load_dispatch_row(order_plan_id)
+        if row is None:
+            return None
+        dispatch = self._decode_paper_order_dispatch(row)
+        self._validate_dispatch_provenance(dispatch)
+        return dispatch
+
+    def find_paper_order_dispatch_by_idempotency_key(
+        self,
+        idempotency_key: str,
+    ) -> PaperOrderDispatch | None:
+        row = self._connection.execute(
+            """
+            SELECT order_plan_id, broker_order_id, idempotency_key, store_id, session_id,
+                   fencing_token, status, revision, state_json, updated_at
+            FROM paper_order_dispatches
+            WHERE idempotency_key = ?
+            """,
+            (idempotency_key.strip(),),
+        ).fetchone()
+        if row is None:
+            return None
+        dispatch = self._decode_paper_order_dispatch(row)
+        self._validate_dispatch_provenance(dispatch)
+        return dispatch
+
+    def list_paper_order_dispatches(self) -> list[PaperOrderDispatch]:
+        rows = self._connection.execute(
+            """
+            SELECT order_plan_id, broker_order_id, idempotency_key, store_id, session_id,
+                   fencing_token, status, revision, state_json, updated_at
+            FROM paper_order_dispatches
+            ORDER BY updated_at, order_plan_id
+            """
+        ).fetchall()
+        dispatches = [self._decode_paper_order_dispatch(row) for row in rows]
+        for dispatch in dispatches:
+            self._validate_dispatch_provenance(dispatch)
+        return dispatches
+
+    def list_unresolved_paper_order_dispatches(self) -> list[PaperOrderDispatch]:
+        return [
+            dispatch
+            for dispatch in self.list_paper_order_dispatches()
+            if dispatch.reconciliation_status != "reconciled"
+        ]
 
     def save_operator_safety_state(
         self,
@@ -1042,6 +2475,10 @@ class PaperStateStore:
         """Claim a run and idempotency key; neither identity may be reused."""
 
         checkpoint = PaperRunCheckpoint.model_validate(checkpoint.model_dump())
+        if checkpoint.data_mode != self.provenance.data_mode:
+            raise PaperStateProvenanceError(
+                "paper-run checkpoint data mode does not match its state store"
+            )
         with self._transaction():
             if self._connection.execute(
                 "SELECT 1 FROM paper_run_checkpoints WHERE run_id = ?",
@@ -1077,6 +2514,10 @@ class PaperStateStore:
         """Advance mutable run state while preserving its claimed identity."""
 
         checkpoint = PaperRunCheckpoint.model_validate(checkpoint.model_dump())
+        if checkpoint.data_mode != self.provenance.data_mode:
+            raise PaperStateProvenanceError(
+                "paper-run checkpoint data mode does not match its state store"
+            )
         with self._transaction():
             row = self._connection.execute(
                 """

@@ -136,6 +136,29 @@ def test_monthly_loss_pause_blocks_new_buys_but_allows_risk_reducing_sells() -> 
     assert sell_risk.passed
 
 
+def test_unresolved_paper_buy_blocks_more_buys_but_not_sells() -> None:
+    policy = UserPolicy()
+    snapshot = fixture_portfolio_snapshot()
+    state = GuardrailState(unresolved_paper_buy_order=True)
+
+    buy_risk = run_risk_check(
+        policy=policy,
+        order_plan=_order(policy, side="buy", symbol="AAA"),
+        snapshot=snapshot,
+        guardrail_state=state,
+    )
+    sell_risk = run_risk_check(
+        policy=policy,
+        order_plan=_order(policy, side="sell", symbol="CCC"),
+        snapshot=snapshot,
+        guardrail_state=state,
+    )
+
+    assert "no_unresolved_paper_buy_order" in buy_risk.failed_checks
+    assert "no_unresolved_paper_buy_order" not in sell_risk.failed_checks
+    assert sell_risk.passed
+
+
 def test_monthly_loss_stop_blocks_all_autotrading() -> None:
     policy = UserPolicy()
     snapshot = fixture_portfolio_snapshot(monthly_loss_ratio=-0.11)

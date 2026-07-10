@@ -91,9 +91,9 @@ These paths remain unowned unless a later task explicitly adopts them after Code
 
 ## Active focus
 
-- Codex: `QP-050 in_progress` — durable KIS paper boundary, reconciliation, provenance, and session job
+- Codex: `QP-060 in_progress` — professional operator status/report UI and final hardening
 - Claude Code: `idle/done` — QP-110 and QP-120 reviewed; no additional Claude task is necessary
-- Next integration gate: `GATE-3` — process-kill-safe paper dispatch, broker reconciliation, and mode provenance
+- Next integration gate: `GATE-4` — durable operator visibility without exposing secrets or enabling live trading
 
 ## Work queue
 
@@ -106,8 +106,8 @@ These paths remain unowned unless a later task explicitly adopts them after Code
 | QP-030 | codex | QP-020, QP-110 | schemas, signal adapter, portfolio optimizer/planner, operator integration | done | Selected strategy alone drives plans; max positions and existing safety gates are enforced | post-review backend 379 passed/1 skipped/7 QP-120 xfailed; smoke mock/default-blocked; selected-v2 integration and blocked-no-sell proofs passed |
 | QP-120 | claude | QP-110 | pure position-risk evaluator and focused tests | done | 8%/2ATR stop and technical exit/trim precedence are deterministic and broker-free | Codex-reviewed targeted: 10 passed; completed-close contract and raw-boundary comparison added; backend 388 passed/1 manual skip |
 | QP-040 | codex | QP-030, QP-120 | strategy performance, retirement, liquidation, rebalance orchestration | done | Retirement creates no buys; risk-reducing sells remain auditable and idempotent | independent audits found no P0/P1; backend 568 passed/1 skipped; smoke mock/default-blocked/live=false |
-| QP-050 | codex | QP-040 | KIS paper adapters, reconciliation, session job, fake-client tests | in_progress | Paper dispatch has a process-kill-safe journal and broker-query reconciliation; fixture/paper provenance is durable and cross-mode reuse fails closed; no production host is accepted; fake tests pass; manual paper test stays opt-in | claimed; durable dispatch/provenance hard gates recorded |
-| QP-060 | codex | QP-050 | operator status/report UI and final hardening | blocked | Safety state, position risk, strategy health, rebalance, and reconciliation are visible | pending |
+| QP-050 | codex | QP-040 | KIS paper adapters, reconciliation, session job, fake-client tests | done | Paper dispatch has a process-kill-safe journal and broker-query reconciliation; fixture/paper provenance is durable and cross-mode reuse fails closed; no production host is accepted; fake tests pass; manual paper test stays opt-in | independent final audits found no P0/P1; backend 757 passed/2 skipped; smoke mock/default-blocked/live=false; paper job default-disabled/no-network |
+| QP-060 | codex | QP-050 | operator status/report UI and final hardening | in_progress | Safety state, position risk, strategy health, rebalance, and reconciliation are visible | claimed after QP-050 gate; clean existing operator API/page paths selected |
 | QP-900 | codex | QP-060 | completion report and final verification only | blocked | Full acceptance audit passes; all required evidence is current | pending |
 
 ## Integration requests
@@ -137,6 +137,10 @@ These paths remain unowned unless a later task explicitly adopts them after Code
   `outcome_unknown`, reconcile by broker query after restart, and never blindly resend an uncertain order.
 - QP-050: persist fixture/paper provenance at database, session, and relevant row boundaries; reject cross-mode
   reopen or reuse before a KIS paper adapter can read state or submit an order.
+- QP-060: expose a secret-free, read-only professional status projection from the existing operator API route;
+  the dashboard must never migrate or mutate the paper database and missing/stale evidence must not render green.
+- QP-060: surface unresolved paper dispatches and local recovery gaps; retain explicit manual resolution for
+  orders older than the broker's historical query window instead of allowing one old row to hide current status.
 
 ## Blockers and human inputs
 
@@ -214,3 +218,22 @@ These paths remain unowned unless a later task explicitly adopts them after Code
   workspace-local `TEMP` passed `568 passed, 1 skipped in 10.26s`. Smoke passed with `broker=mock`, operator
   default-blocked by `level5_flag_disabled`, and live trading false. Two independent final audits found no P0/P1.
   QP-050 claimed with durable dispatch-journal, outcome-unknown reconciliation, and fixture/paper provenance gates.
+- 2026-07-10 20:09 KST — Claude Code — Read-only verification snapshot during Codex QP-050 WIP; no Claude edits.
+  Pure quant contracts remain green: `44 passed` (position-exit + pullback). Full backend snapshot: `728 tests,
+  8 failures`, all in Codex-owned paths. Six failures share one root cause: the newly added
+  `entry_atr14=decision.atr14` at `signals/service.py:341` sits in the provider fail-closed branch where no
+  `decision` variable exists, raising `NameError` (that branch builds a `blocked` Signal without a pullback
+  decision, so the field presumably wants `None`). The remaining two: `test_kis_paper_session_job`
+  `runtime.policy == _policy()` fails on `TzInfo(0)` vs `timezone.utc` representation after a persistence round
+  trip, and the related level5 provider-stale path failure shares the service.py NameError. Observation only —
+  mid-task snapshot, not a review verdict.
+- 2026-07-10 23:16 KST — Codex — QP-050 done after independent process-kill and boundary audits. Added strict
+  paper-only KIS transport, explicit session authority, durable single-attempt dispatch/provenance, query-only
+  reconciliation, restart hydration/application, persistent loss baselines, orderable-quantity controls, and the
+  default-disabled one-shot paper job. Audit fixes separated KIS forwarding-org from daily order-branch evidence,
+  preserved risk-reducing sells behind uncertain buys, recovered pre-claim liquidation checkpoints, revalidated
+  the full human promotion ladder, rejected mixed balance pages, and rechecked the session after the dispatch CAS
+  before POST. Full backend verification passed `757 passed, 2 skipped`; smoke remained `broker=mock`, operator
+  default-blocked by `level5_flag_disabled`, and live trading false. The paper job default exited with
+  `paper_session_disabled` and no network. QP-060 claimed on clean existing operator API/page paths; Claude Code
+  remains idle because its completed pure-signal/risk modules need no additional task.

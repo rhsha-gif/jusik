@@ -15,6 +15,9 @@ from quantpilot.packages.core.execution.state_machine import (
     authorize_level5,
     transition_order_plan,
 )
+from quantpilot.packages.core.execution.paper_submission import (
+    PaperSubmissionRejected,
+)
 from quantpilot.packages.core.harness_service import HarnessService
 from quantpilot.packages.core.marketdata.types import Quote
 from quantpilot.packages.core.operator.position_ledger import (
@@ -24,6 +27,7 @@ from quantpilot.packages.core.operator.position_ledger import (
     PendingLiquidationCheckpoint,
     OperatorSafetyState,
     PaperRunCheckpoint,
+    StateStoreProvenance,
     StrategyOperatorState,
 )
 from quantpilot.packages.core.operator.retirement import (
@@ -73,6 +77,9 @@ OPEN_PENDING_STATUSES = {
 
 
 class ProfessionalStateStore(Protocol):
+    @property
+    def provenance(self) -> StateStoreProvenance: ...
+
     def insert_run_checkpoint(
         self,
         checkpoint: PaperRunCheckpoint,
@@ -352,7 +359,7 @@ class ProfessionalOperatorCoordinator:
     def _snapshot_position_evidence(
         snapshot: PortfolioSnapshot,
         symbol: str,
-    ) -> tuple[tuple[float, float] | None, str | None]:
+    ) -> tuple[tuple[float, float, float] | None, str | None]:
         normalized_symbol = symbol.strip().upper()
         matches = [
             item
@@ -367,7 +374,14 @@ class ProfessionalOperatorCoordinator:
             for item in matches[1:]
         ):
             return None, f"reconciled_position_price_conflict:{normalized_symbol}"
-        return (sum(item.quantity for item in matches), market_price), None
+        return (
+            (
+                sum(item.quantity for item in matches),
+                sum(item.effective_orderable_quantity for item in matches),
+                market_price,
+            ),
+            None,
+        )
 
     def review_strategy_health(
         self,
@@ -804,7 +818,17 @@ class ProfessionalOperatorCoordinator:
                     f"pending_recovered_as_reconciled:{checkpoint.symbol}"
                 )
                 continue
-            if checkpoint.status == "prepared":
+            pre_dispatch_recovery_reason = (
+                self._pre_dispatch_recovery_reason(checkpoint)
+            )
+            if (
+                checkpoint.status == "prepared"
+                or pre_dispatch_recovery_reason is not None
+            ):
+                recovery_reason = (
+                    pre_dispatch_recovery_reason
+                    or "prepared_without_submission_attempt"
+                )
                 journal_order = self.harness.repositories.order_plans.get(
                     checkpoint.order_plan_id
                 )
@@ -857,9 +881,7 @@ class ProfessionalOperatorCoordinator:
                         )
                         continue
                     if journal_order.status != OrderStatus.failed:
-                        journal_order.blocked_reason = (
-                            "prepared_without_submission_attempt"
-                        )
+                        journal_order.blocked_reason = recovery_reason
                         transition_order_plan(
                             order_plan=journal_order,
                             new_status=OrderStatus.failed,
@@ -874,7 +896,7 @@ class ProfessionalOperatorCoordinator:
                 abandoned = checkpoint.model_copy(
                     update={
                         "status": "failed",
-                        "last_error_code": "prepared_without_submission_attempt",
+                        "last_error_code": recovery_reason,
                         "updated_at": max(
                             evaluated_at,
                             checkpoint.updated_at + timedelta(microseconds=1),
@@ -902,7 +924,12 @@ class ProfessionalOperatorCoordinator:
                     )
                 )
                 reconciled_codes.append(
-                    f"prepared_abandoned_without_submission:{checkpoint.symbol}"
+                    (
+                        f"{pre_dispatch_recovery_reason}:{checkpoint.symbol}"
+                        if pre_dispatch_recovery_reason is not None
+                        else "prepared_abandoned_without_submission:"
+                        f"{checkpoint.symbol}"
+                    )
                 )
                 continue
             if checkpoint.status in OPEN_PENDING_STATUSES:
@@ -1108,6 +1135,69 @@ class ProfessionalOperatorCoordinator:
         )
         return state, reconciled_codes, False
 
+    def _pre_dispatch_recovery_reason(
+        self,
+        checkpoint: PendingLiquidationCheckpoint,
+    ) -> str | None:
+        """Prove that a callback marker never reached the one-attempt POST fence."""
+
+        if (
+            checkpoint.status != "submitted"
+            or not checkpoint.broker_submission_attempted
+        ):
+            return None
+        provider = self.harness.paper_dispatch_provider
+        if provider is None or not hasattr(
+            provider,
+            "load_paper_order_dispatch",
+        ):
+            return None
+        try:
+            dispatch = provider.load_paper_order_dispatch(
+                checkpoint.order_plan_id
+            )
+        except Exception:
+            return None
+        if dispatch is None:
+            return "durable_dispatch_missing_before_claim"
+        try:
+            identity_matches = (
+                dispatch.order_plan_id == checkpoint.order_plan_id
+                and dispatch.policy_id == checkpoint.policy_id
+                and dispatch.policy_version == checkpoint.policy_version
+                and dispatch.strategy_id == checkpoint.strategy_id
+                and dispatch.strategy_version == checkpoint.strategy_version
+                and dispatch.symbol == checkpoint.symbol
+                and dispatch.side == "sell"
+                and dispatch.purpose == checkpoint.purpose
+                and dispatch.idempotency_key == checkpoint.idempotency_key
+                and isclose(
+                    dispatch.quantity,
+                    checkpoint.quantity_requested,
+                    abs_tol=0.000001,
+                )
+                and isclose(
+                    dispatch.limit_price,
+                    checkpoint.limit_price,
+                    abs_tol=0.000001,
+                )
+                and dispatch.quote_as_of == checkpoint.quote_as_of
+                and dispatch.risk_check_id == checkpoint.risk_check_id
+                and dispatch.reconciled_snapshot_id
+                == checkpoint.reconciled_snapshot_id
+            )
+            if not identity_matches:
+                return None
+            if dispatch.attempt_count != 0 or dispatch.status not in {
+                "prepared",
+                "expired_pre_dispatch",
+                "failed_pre_dispatch",
+            }:
+                return None
+        except (AttributeError, TypeError, ValueError):
+            return None
+        return "durable_dispatch_unclaimed_before_post"
+
     def _materialize_order(
         self,
         *,
@@ -1128,9 +1218,21 @@ class ProfessionalOperatorCoordinator:
         )
         if position_evidence is None:
             return None, [position_block or "reconciled_position_invalid"]
-        account_quantity, market_price = position_evidence
+        (
+            account_quantity,
+            account_orderable_quantity,
+            market_price,
+        ) = position_evidence
         if account_quantity + 0.000001 < managed.quantity:
             return None, [f"managed_quantity_exceeds_account:{managed.symbol}"]
+        requested_quantity = min(
+            requested_quantity,
+            floor(account_orderable_quantity + 0.000001),
+        )
+        if requested_quantity <= 0:
+            return None, [
+                f"reconciled_orderable_quantity_unavailable:{managed.symbol}"
+            ]
         current_weight = (
             managed.quantity * market_price / snapshot.equity
         )
@@ -1656,8 +1758,58 @@ class ProfessionalOperatorCoordinator:
                 snapshot=snapshot,
                 position_binding=binding,
                 market_quote=quote,
+                paper_run_id=(
+                    f"risk:{claim.policy_id}:{claim.strategy_id}:"
+                    f"{claim.strategy_version}:{claim.bucket}"
+                ),
+                entry_atr14=selected_managed.atr14,
                 now=evaluated_at,
                 before_broker_submit=mark_submission_attempt,
+            )
+        except PaperSubmissionRejected as exc:
+            journal_order = self.harness.repositories.order_plans.require(
+                order.order_plan_id
+            )
+            if journal_order.status == OrderStatus.submitted:
+                transition_order_plan(
+                    order_plan=journal_order,
+                    new_status=OrderStatus.rejected,
+                    audit=self.harness.audit,
+                    user_id=policy.user_id,
+                    source="professional_operator",
+                    action="paper_order_rejected",
+                )
+                self.harness.repositories.order_plans.update(journal_order)
+            rejected = active_checkpoint.model_copy(
+                update={
+                    "status": "rejected",
+                    "broker_submission_attempted": True,
+                    "risk_check_id": journal_order.risk_check_id,
+                    "broker_order_id": exc.dispatch.broker_order_id,
+                    "last_error_code": (
+                        exc.dispatch.last_error_code
+                        or "broker_business_rejected"
+                    ),
+                    "updated_at": max(
+                        exc.dispatch.updated_at,
+                        active_checkpoint.updated_at
+                        + timedelta(microseconds=1),
+                    ),
+                    "revision": active_checkpoint.revision + 1,
+                }
+            )
+            self.state_store.update_pending_liquidation(
+                PendingLiquidationCheckpoint.model_validate(
+                    rejected.model_dump()
+                )
+            )
+            return ProfessionalPositionCycleResult(
+                status="blocked",
+                state=state,
+                position_decisions=decisions,
+                created_order_plan_ids=[order.order_plan_id],
+                blocked_order_plan_ids=[order.order_plan_id],
+                reason_codes=["paper_submission_rejected"],
             )
         except (RiskCheckRequired, ApprovalRequired) as exc:
             failed = active_checkpoint.model_copy(
@@ -1811,6 +1963,7 @@ class ProfessionalOperatorCoordinator:
             OrderStatus.accepted,
             OrderStatus.partially_filled,
             OrderStatus.filled,
+            OrderStatus.cancelled,
         }:
             raise ValueError("order must be broker-accepted before fill reconciliation")
         if snapshot.user_id != policy.user_id:
@@ -1861,6 +2014,7 @@ class ProfessionalOperatorCoordinator:
                 OrderStatus.accepted,
                 OrderStatus.partially_filled,
                 OrderStatus.filled,
+                OrderStatus.cancelled,
             }
         ):
             raise ValueError("broker order linkage is missing or mismatched")

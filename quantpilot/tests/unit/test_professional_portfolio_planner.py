@@ -145,3 +145,53 @@ def test_one_percentage_point_band_keeps_exact_boundary_actionable() -> None:
     assert exact_boundary.order_intents[0].notional == 10_000.0
     assert below_boundary.target_weights["AAA"] == 0.005
     assert below_boundary.order_intents == []
+
+
+def test_external_paper_shape_uses_whole_shares_and_exact_notional() -> None:
+    plan = build_portfolio_plan(
+        policy=_policy(),
+        signals=[_signal("AAA")],
+        snapshot=_snapshot(),
+        quotes={"AAA": 123.0},
+        quote_times={"AAA": QUOTE_TIME},
+        require_explicit_quotes=True,
+        require_whole_shares=True,
+        rebalance_band=0.01,
+    )
+
+    intent = plan.order_intents[0]
+    assert intent.quantity == int(intent.quantity)
+    assert intent.notional == intent.quantity * intent.limit_price
+    assert plan.target_weights["AAA"] == round(intent.notional / 1_000_000, 6)
+
+
+def test_external_paper_shape_rejects_fractional_won_quote_before_order_creation() -> None:
+    plan = build_portfolio_plan(
+        policy=_policy(),
+        signals=[_signal("AAA")],
+        snapshot=_snapshot(),
+        quotes={"AAA": 123.45},
+        quote_times={"AAA": QUOTE_TIME},
+        require_explicit_quotes=True,
+        require_whole_shares=True,
+        rebalance_band=0.01,
+    )
+
+    assert plan.order_intents == []
+    assert plan.target_weights["AAA"] == 0
+
+
+def test_external_paper_shape_does_not_round_a_sub_share_buy_upward() -> None:
+    plan = build_portfolio_plan(
+        policy=_policy(),
+        signals=[_signal("AAA", strength=0.01)],
+        snapshot=_snapshot(),
+        quotes={"AAA": 20_000.0},
+        quote_times={"AAA": QUOTE_TIME},
+        require_explicit_quotes=True,
+        require_whole_shares=True,
+        rebalance_band=0.01,
+    )
+
+    assert plan.order_intents == []
+    assert plan.target_weights["AAA"] == 0

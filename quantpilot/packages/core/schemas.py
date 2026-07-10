@@ -271,6 +271,7 @@ class Signal(HarnessModel):
     target_weight_hint: float | None = Field(default=None, ge=0, le=1)
     stop_price_hint: float | None = Field(default=None, gt=0)
     take_profit_hint: float | None = Field(default=None, gt=0)
+    entry_atr14: float | None = Field(default=None, ge=0, allow_inf_nan=False)
     valid_until: date | None = None
     policy_version: int | None = None
     reason_codes: list[str] = Field(default_factory=list)
@@ -349,8 +350,30 @@ class RebalanceSuggestionReport(HarnessModel):
 class PortfolioPosition(HarnessModel):
     symbol: str
     quantity: float = Field(ge=0, allow_inf_nan=False)
+    orderable_quantity: float | None = Field(
+        default=None,
+        ge=0,
+        allow_inf_nan=False,
+    )
     market_price: float = Field(gt=0, allow_inf_nan=False)
     sector: str = "unknown"
+
+    @model_validator(mode="after")
+    def orderable_quantity_cannot_exceed_holding(self) -> "PortfolioPosition":
+        if (
+            self.orderable_quantity is not None
+            and self.orderable_quantity > self.quantity
+        ):
+            raise ValueError("orderable quantity cannot exceed holding quantity")
+        return self
+
+    @property
+    def effective_orderable_quantity(self) -> float:
+        """Return broker evidence, with a legacy/fixture-only None fallback."""
+
+        if self.orderable_quantity is None:
+            return self.quantity
+        return self.orderable_quantity
 
     @property
     def market_value(self) -> float:
@@ -475,6 +498,7 @@ class GuardrailState(HarnessModel):
     last_broker_error_at: datetime | None = None
     autopilot_paused: bool = False
     last_blocked_reason: str | None = None
+    unresolved_paper_buy_order: bool = False
     unfilled_order_keys: list[str] = Field(default_factory=list)
     submitted_idempotency_keys: list[str] = Field(default_factory=list)
     reserved_sell_quantities: dict[str, float] = Field(default_factory=dict)

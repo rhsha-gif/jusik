@@ -49,10 +49,10 @@ def _current_position_value(snapshot: PortfolioSnapshot, symbol: str) -> float:
     )
 
 
-def _current_position_quantity(snapshot: PortfolioSnapshot, symbol: str) -> float:
+def _current_orderable_quantity(snapshot: PortfolioSnapshot, symbol: str) -> float:
     normalized = symbol.strip().upper()
     return sum(
-        position.quantity
+        position.effective_orderable_quantity
         for position in snapshot.positions
         if position.symbol.strip().upper() == normalized
     )
@@ -141,8 +141,8 @@ def is_verified_risk_reducing_order(
         for symbol, quantity in (reserved_sell_quantities or {}).items()
         if symbol.strip().upper() == normalized_symbol
     )
-    held_quantity = _current_position_quantity(snapshot, intent.symbol)
-    available_quantity = max(0.0, held_quantity - reserved_quantity)
+    orderable_quantity = _current_orderable_quantity(snapshot, intent.symbol)
+    available_quantity = max(0.0, orderable_quantity - reserved_quantity)
     if available_quantity <= 0 or intent.quantity > available_quantity + 0.000001:
         return False
     expected_notional = intent.quantity * intent.limit_price
@@ -239,7 +239,7 @@ def run_risk_check(
     )
     available_sell_quantity = max(
         0.0,
-        _current_position_quantity(snapshot, intent.symbol) - reserved_sell_quantity,
+        _current_orderable_quantity(snapshot, intent.symbol) - reserved_sell_quantity,
     )
     check(
         "no_short_sell",
@@ -277,6 +277,10 @@ def run_risk_check(
     if strategy_id is not None:
         conflict_key = f"{strategy_id}:{intent.symbol}:{intent.side}"
         check("unfilled_conflicting_order", conflict_key not in set(state.unfilled_order_keys))
+    check(
+        "no_unresolved_paper_buy_order",
+        intent.side != "buy" or not state.unresolved_paper_buy_order,
+    )
 
     daily_loss_buy_halt = intent.side == "buy" and snapshot.daily_loss_ratio <= policy.daily_loss_limit
     check("daily_loss_limit_not_triggered", not daily_loss_buy_halt)

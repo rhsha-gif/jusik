@@ -217,6 +217,13 @@ def authorize_level4(
     conflict_key = f"{strategy.strategy_id}:{order_plan.intent.symbol}:{order_plan.intent.side}"
     if result := record("no_unfilled_conflicting_order", conflict_key not in set(guardrail_state.unfilled_order_keys), "no matching unfilled order may exist"):
         return result
+    if result := record(
+        "no_unresolved_paper_buy_order",
+        order_plan.intent.side != "buy"
+        or not guardrail_state.unresolved_paper_buy_order,
+        "an unresolved paper buy blocks additional buys",
+    ):
+        return result
     if result := record("idempotency_key_new", order_plan.idempotency_key not in seen and order_plan.idempotency_key not in set(guardrail_state.submitted_idempotency_keys), "idempotency key must be new"):
         return result
 
@@ -396,6 +403,13 @@ def authorize_level5(
 
     conflict_key = f"{registry_entry.strategy_id}:{order_plan.intent.symbol}:{order_plan.intent.side}"
     if result := record("no_unfilled_conflicting_order", conflict_key not in set(guardrail_state.unfilled_order_keys), "no matching unfilled order may exist"):
+        return result
+    if result := record(
+        "no_unresolved_paper_buy_order",
+        order_plan.intent.side != "buy"
+        or not guardrail_state.unresolved_paper_buy_order,
+        "an unresolved paper buy blocks additional buys",
+    ):
         return result
     if result := record("idempotency_key_new", order_plan.idempotency_key not in seen and order_plan.idempotency_key not in set(guardrail_state.submitted_idempotency_keys), "idempotency key must be new"):
         return result

@@ -110,10 +110,15 @@ def _build_exposure(
     cash = snapshot.cash
     position_values = _initial_position_values(snapshot)
     position_quantities: dict[str, float] = {}
+    orderable_quantities: dict[str, float] = {}
     for position in snapshot.positions:
         symbol = _symbol(position.symbol)
         position_quantities[symbol] = (
             position_quantities.get(symbol, 0.0) + position.quantity
+        )
+        orderable_quantities[symbol] = (
+            orderable_quantities.get(symbol, 0.0)
+            + position.effective_orderable_quantity
         )
     sectors = _sector_by_symbol(snapshot)
     oversold_symbols: list[str] = []
@@ -131,7 +136,8 @@ def _build_exposure(
         else:
             current_value = position_values.get(symbol, 0.0)
             current_quantity = position_quantities.get(symbol, 0.0)
-            if intent.quantity > current_quantity + 0.000001:
+            current_orderable_quantity = orderable_quantities.get(symbol, 0.0)
+            if intent.quantity > current_orderable_quantity + 0.000001:
                 oversold_symbols.append(symbol)
             sale_quantity = min(intent.quantity, current_quantity)
             remaining_quantity = max(0.0, current_quantity - sale_quantity)
@@ -142,6 +148,10 @@ def _build_exposure(
             )
             cash = round(cash + sale_quantity * sale_price, 2)
             position_quantities[symbol] = remaining_quantity
+            orderable_quantities[symbol] = max(
+                0.0,
+                current_orderable_quantity - intent.quantity,
+            )
             position_values[symbol] = round(
                 current_value * remaining_quantity / current_quantity
                 if current_quantity > 0
@@ -275,10 +285,13 @@ def _evaluate_candidates(
         for candidate in candidates
     )
 
-    held_quantities: dict[str, float] = {}
+    orderable_quantities: dict[str, float] = {}
     for position in snapshot.positions:
         symbol = _symbol(position.symbol)
-        held_quantities[symbol] = held_quantities.get(symbol, 0.0) + position.quantity
+        orderable_quantities[symbol] = (
+            orderable_quantities.get(symbol, 0.0)
+            + position.effective_orderable_quantity
+        )
     requested_sell_quantities: dict[str, float] = {}
     for candidate in candidates:
         if candidate.intent.side != "sell":
@@ -295,7 +308,7 @@ def _evaluate_candidates(
         )
     aggregate_sell_quantities_ok = all(
         requested_quantity + reserved_sell_quantities.get(symbol, 0.0)
-        <= held_quantities.get(symbol, 0.0) + 0.000001
+        <= orderable_quantities.get(symbol, 0.0) + 0.000001
         for symbol, requested_quantity in requested_sell_quantities.items()
     )
 

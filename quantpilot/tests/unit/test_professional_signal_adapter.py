@@ -202,6 +202,9 @@ def test_professional_adapter_ignores_future_bars(monkeypatch) -> None:
     assert future.signals[0].action == baseline.signals[0].action == SignalAction.buy_ready
     assert future.signals[0].technical_score == baseline.signals[0].technical_score
     assert future.signals[0].quant_score == baseline.signals[0].quant_score
+    assert baseline.signals[0].entry_atr14 is not None
+    assert baseline.signals[0].entry_atr14 > 0
+    assert future.signals[0].entry_atr14 == baseline.signals[0].entry_atr14
 
 
 def test_professional_adapter_ignores_unconfirmed_evaluation_day_bar(monkeypatch) -> None:

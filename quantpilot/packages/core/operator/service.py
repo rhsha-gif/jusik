@@ -5,6 +5,10 @@ import json
 from datetime import datetime, timedelta
 
 from quantpilot.packages.core.execution.fallback_manager import FallbackDecision, FallbackManager
+from quantpilot.packages.core.execution.paper_submission import (
+    PaperSubmissionOutcomeUnknown,
+    PaperSubmissionRejected,
+)
 from quantpilot.packages.core.execution.state_machine import (
     ApprovalRequired,
     RiskCheckRequired,
@@ -26,6 +30,7 @@ from quantpilot.packages.core.operator.schemas import (
 )
 from quantpilot.packages.core.operator.position_ledger import (
     OperatorCycleClaim,
+    PaperOrderDispatch,
     PaperRunCheckpoint,
 )
 from quantpilot.packages.core.operator.professional_cycle import (
@@ -47,6 +52,7 @@ from quantpilot.packages.core.schemas import (
     OrderStatus,
     PortfolioSnapshot,
     Signal,
+    SignalAction,
     StrategyRecipe,
     UserPolicy,
     new_id,
@@ -127,6 +133,24 @@ class OperatorService:
         self._runs_by_key: dict[str, OperatorRunResult] = {}
         self._run_fingerprints_by_key: dict[str, str] = {}
         self.professional_state_store = professional_state_store
+        if self.harness.external_paper_enabled:
+            coordinator = self.harness.paper_submission_coordinator
+            broker = self.harness.external_paper_broker
+            if (
+                professional_state_store is None
+                or coordinator is None
+                or broker is None
+                or coordinator.store is not professional_state_store
+                or professional_state_store.provenance.data_mode
+                != "paper_trading"
+                or professional_state_store.provenance.broker_environment
+                != "kis_paper"
+                or professional_state_store.provenance.account_scope_fingerprint
+                != broker.account_scope_fingerprint
+            ):
+                raise ValueError(
+                    "external paper operator requires one matching provenance-bound state store"
+                )
         self.professional = (
             ProfessionalOperatorCoordinator(
                 harness=self.harness,
@@ -275,11 +299,7 @@ class OperatorService:
                     requested_at=request.requested_at,
                     request_fingerprint=request_fingerprint,
                     status="started",
-                    data_mode=(
-                        "paper_trading"
-                        if request.run_mode == "paper_submit"
-                        else "fixture"
-                    ),
+                    data_mode=self.professional_state_store.provenance.data_mode,
                     started_at=started_at,
                     updated_at=started_at,
                 )
@@ -418,6 +438,8 @@ class OperatorService:
         # Gate 2: an active policy must exist.
         if policy is None:
             return blocked_by("policy_not_found")
+        if policy.user_id != request.user_id:
+            return blocked_by("policy_user_mismatch")
 
         # Gate 3: live trading must remain disabled; the operator refuses to run otherwise.
         if live_trading_flag_enabled():
@@ -439,6 +461,11 @@ class OperatorService:
         if (
             request.run_mode == "paper_submit"
             and self.professional_state_store is not None
+            and (
+                self.professional_state_store.provenance.data_mode
+                != "paper_trading"
+                or not self.harness.external_paper_enabled
+            )
         ):
             return blocked_by("paper_submission_journal_required")
 
@@ -488,7 +515,21 @@ class OperatorService:
 
         # Step: sync portfolio snapshot from the mock/paper broker and build the plan.
         broker = self.harness._broker_for_policy(policy)
-        snapshot = broker.get_positions(request.user_id)
+        try:
+            snapshot = broker.get_positions(request.user_id)
+        except Exception as exc:
+            reason_code = getattr(exc, "reason_code", "broker_unhealthy")
+            if not isinstance(reason_code, str) or not reason_code.startswith(
+                "paper_"
+            ):
+                reason_code = "broker_unhealthy"
+            if reason_code == "broker_unhealthy":
+                self.harness.record_broker_health(
+                    policy_id=policy.policy_id,
+                    healthy=False,
+                    reason="paper_snapshot_unavailable",
+                )
+            return blocked_by(reason_code, selection=selection)
         professional_weekly_eligible = False
 
         # Professional runs are risk-first: ordinary planning cannot race ahead of
@@ -554,13 +595,33 @@ class OperatorService:
             if rules is None:
                 decide("noop", "typed_decision_rules_missing", strategy_id=registry_entry.strategy_id)
                 return finish("completed", selection=selection, order_plan_ids=[])
+            planning_quotes: dict[str, float] = {}
+            for signal in signals:
+                symbol = signal.symbol.strip().upper()
+                quote = signal_set.quotes.get(symbol)
+                if quote is None:
+                    continue
+                if request.run_mode == "paper_submit" and signal.action == SignalAction.buy_ready:
+                    if quote.ask is None:
+                        continue
+                    planning_quotes[symbol] = quote.ask
+                elif request.run_mode == "paper_submit" and signal.action in {
+                    SignalAction.exit,
+                    SignalAction.trim,
+                }:
+                    if quote.bid is None:
+                        continue
+                    planning_quotes[symbol] = quote.bid
+                else:
+                    planning_quotes[symbol] = quote.last
             plan = self.harness.create_portfolio_plan(
                 policy_id=policy.policy_id,
                 signals=signals,
                 snapshot=snapshot,
-                quotes={symbol.strip().upper(): quote.last for symbol, quote in signal_set.quotes.items()},
+                quotes=planning_quotes,
                 quote_times={symbol.strip().upper(): quote.as_of for symbol, quote in signal_set.quotes.items()},
                 require_explicit_quotes=True,
+                require_whole_shares=request.run_mode == "paper_submit",
                 rebalance_band=rules.rebalance_band,
             )
         else:
@@ -568,6 +629,7 @@ class OperatorService:
                 policy_id=policy.policy_id,
                 signals=signals,
                 snapshot=snapshot,
+                require_whole_shares=request.run_mode == "paper_submit",
             )
         if not plan.order_intents:
             decide("noop", "no_order_intents", strategy_id=registry_entry.strategy_id)
@@ -637,10 +699,12 @@ class OperatorService:
             )
 
         result = self._submit_proposals(
+            run_id=run_id,
             policy=policy,
             registry_entry=registry_entry,
             recipe=recipe,
             snapshot=snapshot,
+            signal_set=signal_set,
             proposals=proposals,
             selection=selection,
             now=now,
@@ -698,10 +762,12 @@ class OperatorService:
     def _submit_proposals(
         self,
         *,
+        run_id: str,
         policy: UserPolicy,
         registry_entry,
         recipe: StrategyRecipe,
         snapshot,
+        signal_set: SignalSet,
         proposals: list[OrderPlan],
         selection: StrategySelectionDecision,
         now: datetime | None,
@@ -718,6 +784,11 @@ class OperatorService:
         broker_order_ids: list[str] = []
         risk_check_ids: list[str] = []
         fallback: FallbackDecision | None = None
+        submission_outcome_unknown = False
+        signals_by_symbol = {
+            signal.symbol.strip().upper(): signal
+            for signal in signal_set.signals
+        }
 
         def fence_weekly_submission(_order: OrderPlan) -> None:
             nonlocal weekly_claim
@@ -792,15 +863,56 @@ class OperatorService:
             )
             self.repositories.order_plans.update(proposal)
             try:
+                symbol = proposal.intent.symbol.strip().upper()
+                submission_quote = signal_set.quotes.get(symbol)
+                source_signal = signals_by_symbol.get(symbol)
                 order_plan, broker_order, fills = self.harness.submit_order_plan(
                     proposal.order_plan_id,
                     snapshot=snapshot,
+                    market_quote=submission_quote,
+                    paper_run_id=run_id,
+                    entry_atr14=(
+                        source_signal.entry_atr14
+                        if source_signal is not None
+                        and proposal.intent.side == "buy"
+                        else None
+                    ),
+                    now=authorization_time,
                     before_broker_submit=(
                         fence_weekly_submission
                         if weekly_claim is not None
                         else None
                     ),
                 )
+            except PaperSubmissionOutcomeUnknown as exc:
+                submission_outcome_unknown = True
+                fallback = self._handle_paper_outcome_unknown(
+                    policy=policy,
+                    proposal=proposal,
+                    error=exc,
+                )
+                decide(
+                    "fallback",
+                    "paper_submission_outcome_unknown",
+                    strategy_id=registry_entry.strategy_id,
+                    order_plan_id=proposal.order_plan_id,
+                )
+                blocked.append(proposal.order_plan_id)
+                break
+            except PaperSubmissionRejected as exc:
+                fallback = self._handle_paper_rejection(
+                    policy=policy,
+                    proposal=proposal,
+                    error=exc,
+                )
+                decide(
+                    "fallback",
+                    "paper_submission_rejected",
+                    strategy_id=registry_entry.strategy_id,
+                    order_plan_id=proposal.order_plan_id,
+                )
+                blocked.append(proposal.order_plan_id)
+                break
             except (RiskCheckRequired, ApprovalRequired) as exc:
                 decide("block", str(exc), strategy_id=registry_entry.strategy_id, order_plan_id=proposal.order_plan_id)
                 blocked.append(proposal.order_plan_id)
@@ -808,6 +920,28 @@ class OperatorService:
                     fallback = self.fallbacks.for_reason("risk_check_failed")
                 continue
             except Exception as exc:
+                durable_dispatch = self._attempted_paper_dispatch(
+                    proposal.order_plan_id
+                )
+                if durable_dispatch is not None:
+                    submission_outcome_unknown = True
+                    unknown = PaperSubmissionOutcomeUnknown(
+                        durable_dispatch,
+                        "local paper evidence is incomplete; reconciliation is required",
+                    )
+                    fallback = self._handle_paper_outcome_unknown(
+                        policy=policy,
+                        proposal=proposal,
+                        error=unknown,
+                    )
+                    decide(
+                        "fallback",
+                        "paper_submission_outcome_unknown",
+                        strategy_id=registry_entry.strategy_id,
+                        order_plan_id=proposal.order_plan_id,
+                    )
+                    blocked.append(proposal.order_plan_id)
+                    break
                 fallback = self._handle_broker_failure(policy=policy, proposal=proposal, error=exc)
                 decide("fallback", "broker_failure", strategy_id=registry_entry.strategy_id, order_plan_id=proposal.order_plan_id)
                 blocked.append(proposal.order_plan_id)
@@ -842,13 +976,16 @@ class OperatorService:
         if weekly_claim is not None:
             if self.professional is None:
                 raise RuntimeError("weekly rebalance completion context is missing")
-            if weekly_claim.completed_at is not None:
+            if (
+                weekly_claim.completed_at is not None
+                and not submission_outcome_unknown
+            ):
                 self.professional.complete_weekly_rebalance(
                     policy=policy,
                     claim=weekly_claim,
                     completed_at=(authorization_time if now is not None else utc_now()),
                 )
-            else:
+            elif weekly_claim.completed_at is None:
                 self.professional.release_weekly_rebalance(
                     claim=weekly_claim,
                 )
@@ -862,6 +999,90 @@ class OperatorService:
             broker_order_ids=broker_order_ids,
             risk_check_ids=risk_check_ids,
         )
+
+    def _handle_paper_outcome_unknown(
+        self,
+        *,
+        policy: UserPolicy,
+        proposal: OrderPlan,
+        error: PaperSubmissionOutcomeUnknown,
+    ) -> FallbackDecision:
+        current = self.repositories.order_plans.require(proposal.order_plan_id)
+        if current.status not in {
+            OrderStatus.submitted,
+            OrderStatus.accepted,
+            OrderStatus.partially_filled,
+        }:
+            raise RuntimeError(
+                "uncertain paper outcome must preserve a nonterminal submitted state"
+            )
+        self.harness.record_broker_health(
+            policy_id=policy.policy_id,
+            healthy=False,
+            reason="paper_submission_outcome_unknown",
+        )
+        self.audit.emit(
+            user_id=policy.user_id,
+            entity_type="order_plan",
+            entity_id=proposal.order_plan_id,
+            action="paper_submission_outcome_unknown",
+            after_state={
+                "dispatch_status": error.dispatch.status,
+                "reconciliation_status": error.dispatch.reconciliation_status,
+            },
+            source="operator_service",
+        )
+        return self.fallbacks.for_reason("paper_submission_outcome_unknown")
+
+    def _handle_paper_rejection(
+        self,
+        *,
+        policy: UserPolicy,
+        proposal: OrderPlan,
+        error: PaperSubmissionRejected,
+    ) -> FallbackDecision:
+        current = self.repositories.order_plans.require(proposal.order_plan_id)
+        if current.status == OrderStatus.submitted:
+            transition_order_plan(
+                order_plan=current,
+                new_status=OrderStatus.rejected,
+                audit=self.audit,
+                user_id=policy.user_id,
+                source="operator_service",
+                action="paper_order_rejected",
+            )
+            self.repositories.order_plans.update(current)
+        self.audit.emit(
+            user_id=policy.user_id,
+            entity_type="order_plan",
+            entity_id=proposal.order_plan_id,
+            action="paper_order_rejected",
+            after_state={"dispatch_status": error.dispatch.status},
+            source="operator_service",
+        )
+        return self.fallbacks.for_reason("paper_submission_rejected")
+
+    def _attempted_paper_dispatch(
+        self,
+        order_plan_id: str,
+    ) -> PaperOrderDispatch | None:
+        coordinator = self.harness.paper_submission_coordinator
+        if coordinator is None or not hasattr(
+            coordinator.store,
+            "load_paper_order_dispatch",
+        ):
+            return None
+        dispatch = coordinator.store.load_paper_order_dispatch(order_plan_id)
+        if dispatch is None or dispatch.attempt_count != 1:
+            return None
+        if dispatch.status in {
+            "rejected",
+            "cancelled",
+            "expired_pre_dispatch",
+            "failed_pre_dispatch",
+        }:
+            return None
+        return dispatch
 
     def _handle_broker_failure(self, *, policy: UserPolicy, proposal: OrderPlan, error: Exception) -> FallbackDecision:
         current = self.repositories.order_plans.require(proposal.order_plan_id)

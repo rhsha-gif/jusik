@@ -54,6 +54,18 @@ Use `make test` and `make smoke` only where `make` is available.
 - Do not emit raw broker orders from LLM/RL outputs.
 - Do not broaden refactors outside Level 5 surfaces.
 
+## Collaboration Protocol (Codex + Fable5, user-directed 2026-07-10)
+
+- Default posture while Codex executes QP tasks: `standby`. Do not review or intervene per-task.
+- Stuck-task escalation (workboard rule 9): when Codex records a persistent blocker in
+  `docs/professional_operator_workboard.md` — or the user asks for a rescue — run a read-only diagnostic pass
+  and post the root cause to the workboard checkpoint log. Never edit Codex-owned paths to "help".
+- Strength-based routing (workboard rule 10): research synthesis, backtest forensics, quant recipe/risk-matrix
+  design, and independent contract/evidence review are Fable5-owned and run end-to-end in Claude Code (use the
+  specialist agents: `backtest-forensics-agent`, `source-curator-agent`, `risk-matrix-designer`,
+  `quant-recipe-architect`). Hand only the finished artifact to Codex.
+- Stateful integration (DB, broker, API, scheduler, UI, Git) always belongs to Codex.
+
 ## Working Rules
 
 - Preserve existing user changes in the worktree.

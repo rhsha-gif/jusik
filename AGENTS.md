@@ -37,6 +37,21 @@ QuantPilot is a safe, fixture-first trading operator harness. Live trading must 
 - Both agents update the workboard at claim, handoff, review, and blocker checkpoints using its document-edit lease.
 - Do not mark a task `done` without exact verification output recorded in the workboard.
 
+### Stuck-task escalation (workboard rule 9)
+
+- If the same test or defect survives two or more fix attempts, stop looping: record the blocker in the
+  workboard (failing command, error summary) and wait for a Fable5 (Claude Code) read-only diagnostic before
+  further attempts.
+- Fable5 posts a root-cause diagnosis to the checkpoint log; it never edits Codex-owned paths. The fix stays
+  with the path owner.
+
+### Strength-based routing (workboard rule 10)
+
+- Route to Fable5, executed end-to-end in Claude Code: research synthesis, backtest forensics (lookahead,
+  overfitting, data snooping, survivorship), quant recipe and risk-matrix design, and independent
+  contract/evidence review. Fable5 hands only the finished artifact to Codex for integration.
+- Codex keeps all stateful integration regardless of workload: DB, broker, API, scheduler, UI, and Git.
+
 ## Required Commands
 
 Use PowerShell equivalents on Windows:

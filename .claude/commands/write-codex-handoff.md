@@ -2,6 +2,9 @@
 
 Write a complete Codex implementation task handoff document from a finalized recipe.
 
+This is a specialized path, not the default collaboration workflow. Run `/start-collaboration` first and use
+this command only when the recorded capability score selects Codex as the recipe implementer.
+
 ## Usage
 
 ```
@@ -24,7 +27,7 @@ When this command is invoked:
 2. Check that `docs/quant_recipes/<recipe-id>-review.yaml` exists and has `decision: approved`.
 3. If review is missing or not approved, report to user and suggest running `/review-quant-recipe` first.
 4. Read the recipe YAML.
-5. Invoke `codex-handoff-writer` skill with the recipe content.
+5. Confirm the active mission workboard routes implementation to Codex, then invoke `codex-handoff-writer`.
 6. The skill produces a complete handoff document including:
    - Goal statement
    - Input/output specifications with data schemas

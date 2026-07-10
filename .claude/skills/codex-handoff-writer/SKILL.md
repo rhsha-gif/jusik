@@ -1,7 +1,7 @@
 ---
 name: codex-handoff-writer
 description: >
-  Write a complete Codex task handoff document from a finalized QuantPilot recipe.
+  Write a complete Codex task handoff document when capability-based mission routing selected Codex.
   Produces a self-contained task specification with acceptance criteria, data schemas,
   performance constraints, and test stubs — ready for Codex to implement deterministically.
 triggers:
@@ -18,6 +18,10 @@ model: claude-fable-5
 ## Purpose
 
 Convert a finalized QuantPilot YAML recipe into a Codex-ready implementation task. The handoff must be unambiguous: Codex should be able to implement the strategy purely from this document without asking clarifying questions.
+
+This skill is not a default ownership rule. The active mission workboard must already show that the Best-Fit
+routing score selected Codex. If Claude is selected, implement in the Claude-owned worktree instead of invoking
+this skill.
 
 ## Safety Constraints
 

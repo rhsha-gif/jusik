@@ -1,79 +1,64 @@
 # QuantPilot Agent Workflow
 
-QuantPilot is a safe, fixture-first trading operator harness. Live trading must remain disabled by default.
+QuantPilot은 fixture-first 안전 중심 트레이딩 운영자 하네스다. 실거래는 기본적으로 비활성 상태여야 한다.
 
-## QuantPilot Stage 03+ Working Agreements
+## Best-Fit Codex–Claude collaboration
 
-- Treat QuantPilot as a safety-critical trading-system harness.
-- Never enable live trading by default.
-- Never add broker credentials, API keys, account IDs, secrets, or personal trading information to the repository.
-- Any external API connector must have fake-client unit tests and skipped/manual integration tests only.
-- Unit tests must not require internet access.
-- Preserve fixture determinism.
-- Preserve the existing mock default and market-order-disabled default.
-- Use explicit data mode labels: `fixture`, `local_historical`, `external_historical`, `realtime_market_data`, `paper_trading`, `live_trading_candidate`, `live_canary`, or `live_scaled`.
-- Any live-trading-related change must preserve pre-trade risk checks, kill switches, idempotency, order-state-machine checks, audit logging, and reconciliation.
-- Prefer small, reviewable stages. Do not combine multiple stages in one task.
-- Always run `python -m pytest quantpilot/tests` after backend changes.
-- Always run `python -m quantpilot.jobs.run_smoke` when smoke behavior or orchestration changes.
-- Frontend changes under `quantpilot/apps/web` require `npm run build` and `npm run test` from that directory when available.
-- If a test fails, fix the root cause. Do not weaken safety tests to pass.
+- 모든 비단순 작업은 [범용 협업 프로토콜](docs/agent_collaboration_protocol.md)을 따른다.
+- 새 미션은 [작업보드 템플릿](docs/agent_workboard_template.md)을 복사해 목표, 작업 그래프, 라우팅 점수,
+  worktree, 소유 경로, 검증 조건을 먼저 확정한다.
+- 담당자 선정에는 [능력 점수표](docs/agent_capability_scorecard.md)의 모델별 실적을 사용한다.
+- 최초 임무 수신자가 미션 리드를 유지한다. Codex와 Claude Code의 고정 직군은 없으며 작업별 적합도가
+  높은 쪽이 구현을 소유한다.
+- 상대 에이전트의 초기 분해 검토와 최소 하나의 검증 가능한 실질 산출물은 필수다.
+- 각 에이전트는 별도 worktree와 `codex/<mission>-<task>` 또는 `claude/<mission>-<task>` 브랜치에서
+  자기 경로만 수정하고 직접 커밋한다.
+- 미션 리드만 mainline을 통합하고 상대 커밋 검토와 프로젝트 전체 검증을 책임진다.
+- 완료된 `docs/professional_operator_workboard.md`는 역사적 증거다. 새 미션 상태를 그 문서에 추가하지 않는다.
 
-## Current Level 5 Workflow
-
-- Codex prepares Level 5 rails, contracts, fixtures, and tests.
-- Fable5 implements the Level 5 fully automated portfolio operator inside those rails.
-- Codex or a human reviews Fable5 diffs before merge.
-- Live trading remains disabled by default.
-
-## Codex + Claude Code Workboard
-
-- Read `docs/professional_operator_workboard.md` before claiming or changing professional-operator work.
-- The workboard is the canonical source for task ownership, dependencies, acceptance criteria, evidence, and handoff state.
-- Codex and Claude Code may work concurrently only on disjoint paths recorded in the workboard.
-- Each agent may own at most one `in_progress` task.
-- Claude Code is limited to its claimed pure technical/signal/position-risk modules and focused tests/fixtures.
-- Codex owns cross-cutting contracts, repositories, operator integration, broker adapters, API/UI, review, and all Git staging/commits.
-- Both agents update the workboard at claim, handoff, review, and blocker checkpoints using its document-edit lease.
-- Do not mark a task `done` without exact verification output recorded in the workboard.
-
-### Stuck-task escalation (workboard rule 9)
-
-- If the same test or defect survives two or more fix attempts, stop looping: record the blocker in the
-  workboard (failing command, error summary) and wait for a Fable5 (Claude Code) read-only diagnostic before
-  further attempts.
-- Fable5 posts a root-cause diagnosis to the checkpoint log; it never edits Codex-owned paths. The fix stays
-  with the path owner.
-
-### Strength-based routing (workboard rule 10)
-
-- Route to Fable5, executed end-to-end in Claude Code: research synthesis, backtest forensics (lookahead,
-  overfitting, data snooping, survivorship), quant recipe and risk-matrix design, and independent
-  contract/evidence review. Fable5 hands only the finished artifact to Codex for integration.
-- Codex keeps all stateful integration regardless of workload: DB, broker, API, scheduler, UI, and Git.
-
-## Required Commands
-
-Use PowerShell equivalents on Windows:
-
-```powershell
-python -m pytest quantpilot/tests
-python -m quantpilot.jobs.run_smoke
-```
-
-Use `make test` and `make smoke` only where `make` is available.
-
-## Safety Invariants
+## QuantPilot safety adapter
 
 - `LIVE_TRADING_ENABLED=false`
 - `GUARDED_AUTOPILOT_ENABLED=false`
 - `FULLY_AUTOMATED_OPERATOR_ENABLED=false`
 - `MARKET_ORDERS_ENABLED=false`
 - `BROKER_MODE=mock`
+- broker 자격증명, API key, 계좌 ID, 비밀 또는 개인 거래 정보를 저장소에 추가하지 않는다.
+- 외부 connector는 fake-client unit test와 skipped/manual integration test만 사용한다.
+- unit test는 인터넷이나 비밀을 요구하지 않아야 하며 fixture 결정성을 보존한다.
+- data mode는 `fixture`, `local_historical`, `external_historical`, `realtime_market_data`,
+  `paper_trading`, `live_trading_candidate`, `live_canary`, `live_scaled` 중 하나로 명시한다.
+- 거래 관련 변경은 pre-trade risk check, kill switch, idempotency, order state machine, audit logging,
+  reconciliation을 우회할 수 없다.
+- LLM/RL 출력은 broker 주문을 직접 생성, 승인 또는 제출할 수 없다.
+- 실패한 안전 테스트를 약화하지 말고 원인을 수정한다.
+- 기존 사용자 변경을 덮어쓰거나 작업 커밋에 포함하지 않는다.
 
-Do not add live broker credentials, enable real broker access, or create tests that submit live orders.
+## Required verification
 
-## Level 5 References
+Backend 변경 후:
 
-Read [docs/fable5_level5_implementation_spec.md](docs/fable5_level5_implementation_spec.md) and [docs/contracts/operator_contracts.md](docs/contracts/operator_contracts.md) before implementation.
-Also read [docs/professional_operator_workboard.md](docs/professional_operator_workboard.md) for the active execution stage and file ownership.
+```powershell
+python -m pytest quantpilot/tests
+```
+
+Smoke 또는 orchestration 변경 후:
+
+```powershell
+python -m quantpilot.jobs.run_smoke
+```
+
+`quantpilot/apps/web` frontend 변경 후 해당 디렉터리에서:
+
+```powershell
+npm run test
+npm run build
+```
+
+## Level 5 references
+
+Level 5 구현 전 다음 문서를 읽는다.
+
+- [Fable5 Level 5 implementation spec](docs/fable5_level5_implementation_spec.md)
+- [Operator contracts](docs/contracts/operator_contracts.md)
+- 해당 미션의 활성 작업보드

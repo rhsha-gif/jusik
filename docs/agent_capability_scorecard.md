@@ -5,22 +5,31 @@
 > does that task class. Preferences follow evidence; they are priors, never fixed ownership.
 > Owner of this file: Claude Code (COLLAB-V1). All other collaboration documents keep their existing owners.
 
-## 1. Purpose and scope
+## 1. Purpose, scope, and governing documents
 
-This scorecard makes mission routing decision-complete: given a new task, a dispatcher (human or agent)
-can read this file alone and decide which agent instance should execute it, with what confidence, and
-what evidence would change that decision.
+This scorecard makes mission routing decision-complete: given a new mission, a dispatcher (human or
+agent) can read this file alone and decide which agent instance should execute it, with what
+confidence, and what evidence would change that decision.
+
+Governance for new missions is the root `AGENTS.md` plus `docs/agent_collaboration_protocol.md`
+(mission-lead-owned; not yet present in this worktree at authoring time — it arrives via mainline
+integration). Under that protocol each agent commits in its own isolated worktree and the mission
+lead is the sole mainline integrator. `docs/professional_operator_workboard.md` is a **completed
+historical artifact**: its checkpoint log remains valid *evidence* (§8), but its execution rules —
+including rules 4–6 and the old main-repo Git authority — are **not** policy constraints for new
+missions.
 
 Two layers are deliberately separated:
 
-- **Policy constraints (non-negotiable, outside this scorecard).** Safety invariants
-  (`LIVE_TRADING_ENABLED=false` etc.), the order state machine, risk gates, and any user-directed
-  ownership rule (e.g. workboard rules 9–10, Git integration authority in the main repository) are
-  *constraints*, not preferences. No accumulation of capability evidence ever routes work across a
-  policy constraint. If evidence suggests a constraint is misallocated, the finding is escalated to the
-  user; the scorecard itself never overrides it.
-- **Capability preferences (this scorecard).** Everything else is routable and mutable under the
-  evidence rules below.
+- **Policy constraints (non-negotiable, outside this scorecard).** QuantPilot trading safety
+  invariants — `LIVE_TRADING_ENABLED=false`, `GUARDED_AUTOPILOT_ENABLED=false`,
+  `FULLY_AUTOMATED_OPERATOR_ENABLED=false`, `MARKET_ORDERS_ENABLED=false`, `BROKER_MODE=mock` — plus
+  the order state machine, risk gates, no-secrets rule, and any standing user-directed rule. No
+  accumulation of capability evidence ever routes work across a policy constraint. If evidence
+  suggests a constraint is misallocated, the finding is escalated to the user; the scorecard itself
+  never overrides it.
+- **Capability preferences (this scorecard).** Everything else — including which agent implements,
+  reviews, or integrates a given task class — is routable and mutable under the evidence rules below.
 
 ## 2. Agent identity model: instance, not vendor
 
@@ -45,24 +54,48 @@ capability units; `claude-fable-5` and `gpt-5.x-codex-cli` (exact version) are. 
 
 New instances (other vendors, other harnesses) are added here before their first evidence row.
 
-## 3. Routing dimensions and weights
+## 3. Pre-task routing formula (mandatory)
 
-Composite score = Σ (weight × dimension score) / 100, on a 1.00–5.00 scale. Weights are fixed at
-30/25/25/10/10 and may only be changed by the user.
+Routing is decided **before** a mission starts, using exactly these five user-mandated dimensions.
+Routing score = Σ (weight × dimension score) / 100, on a 1.00–5.00 scale, computed per candidate
+instance. Weights are fixed at 30/25/25/10/10 and may only be changed by the user.
 
-| # | Dimension | Weight | What it measures | Anchor 5 | Anchor 1 |
-|---|---|---|---|---|---|
-| D1 | First-pass correctness | 30 | Was the first submitted artifact accepted as functionally correct? | Accepted as-is; reviewer found no behavioral defect | Rejected or fundamentally wrong approach |
-| D2 | Defect severity & rework cost | 25 | Severity of defects found downstream and cost to fix them | Zero defects ≥ P3; zero rework cycles | P0/P1 defect, or ≥3 rework cycles |
-| D3 | Scope & protocol discipline | 25 | Stayed inside owned paths, honest evidence, no invariant drift | Perfect boundary compliance; claims grounded in exact command output | Edited unowned paths, weakened tests, or unverifiable claims |
-| D4 | Verification evidence quality | 10 | Did the agent supply reproducible checks with exact output? | Targeted + full-suite output recorded verbatim | No verification, or asserted-only claims |
-| D5 | Throughput (elapsed time) | 10 | Wall-clock from claim to review-ready, normalized to task size | Clearly faster than the comparable baseline | Stalled; required escalation to progress |
+| # | Dimension | Weight | What it asks | Anchor 5 | Anchor 3 | Anchor 1 |
+|---|---|---|---|---|---|---|
+| R1 | Problem/domain fit | 30 | Does the mission's core difficulty match this instance's strengths? | Core difficulty squarely in the instance's strongest demonstrated class | Adjacent class; partial overlap with demonstrated strengths | Known weak class, or difficulty type never demonstrated |
+| R2 | Repository/tool fit | 25 | Can this instance's harness, tools, and environment do the work natively? | All required tools/permissions native and already configured | Workable with minor adaptation or one missing convenience | Requires tools, access, or environment the instance lacks |
+| R3 | Comparable track record | 25 | What does §4 retrospective evidence say for this task class and model version? | ≥3 comparable samples, mean rating ≥4.5, no open P0/P1 | 1–2 samples, or ≥3 with mixed (3–4) ratings | Recorded failures (mean ≤2), an unresolved P0/P1, or contradicting evidence |
+| R4 | Current context continuity | 10 | How much mission context does the instance already hold? | Already holds the mission's full context (same worktree/session, directly preceding related work) | Partial context; moderate re-derivation needed | Cold start; must re-derive everything |
+| R5 | Handoff/conflict cost | 10 | What does routing here cost in handoffs and conflicts? | No handoff artifacts needed; no overlap with the other agent's active paths | One clean artifact handoff, or minor serialization | Heavy multi-artifact handoff, or would conflict/serialize with active work |
+
+**Tie rule:** if the top two candidates' routing scores differ by **≤ 0.5**, route to the **initial
+mission recipient side** (the instance the mission was first addressed or assigned to). Ties never
+justify pulling a mission away from its recipient.
+
+R3 is the only dimension fed by accumulated evidence; R1/R2/R4/R5 are assessed per mission at
+dispatch time. Score each candidate honestly even when only one candidate is plausible — the recorded
+scores become auditable routing rationale.
+
+## 4. Post-task retrospective evidence (performance, not routing)
+
+The dimensions below measure how a task **went**, after the fact. They exist to feed R3 and the §6
+priors. They are **never** substituted for the §3 routing formula.
+
+### 4.1 Retrospective dimensions
+
+| # | Dimension | What it measures |
+|---|---|---|
+| E1 | First-pass correctness | Was the first submitted artifact accepted as functionally correct? |
+| E2 | Defect severity & rework cost | Severity of defects found downstream and cost to fix them |
+| E3 | Scope & protocol discipline | Stayed inside owned paths, honest evidence, no invariant drift |
+| E4 | Verification evidence quality | Reproducible checks supplied with exact output |
+| E5 | Throughput | Wall-clock from claim to review-ready, normalized to task size |
 
 Severity scale used throughout: **P0** safety-invariant or live-order risk; **P1** wrong trading
 decision logic or data-integrity defect that reached review; **P2** material correctness issue caught
 and fixed in review; **P3** cosmetic/style.
 
-## 4. Completion rating rubric (1–5, per evidence record)
+### 4.2 Completion rating rubric (1–5, per evidence record)
 
 | Rating | Meaning |
 |---|---|
@@ -72,8 +105,7 @@ and fixed in review; **P3** cosmetic/style.
 | 2 | Multiple rework cycles, or a P1 defect discovered in review; task still landed. |
 | 1 | Task failed, was abandoned, caused a P0, or violated a safety/protocol boundary. |
 
-The completion rating is a summary; routing decisions use the weighted composite (§3) when dimension
-scores exist, and the completion rating alone when only coarse historical evidence is available.
+The completion rating summarizes E1–E5 into the single number that R3 consumes.
 
 ## 5. Raw evidence record format
 
@@ -91,57 +123,59 @@ rework_cycles:      # integer
 checks_run:         # exact commands + verbatim result line(s)
 elapsed:            # claim → review-ready wall clock, or "not recorded"
 reviewer:           # who reviewed (instance or human)
-completion_rating:  # 1–5 per §4
-dimension_scores:   # optional {D1..D5}, when reviewer scored them
+completion_rating:  # 1–5 per §4.2
 ```
 
 ## 6. Task-class preference table
 
-Current priors. **Every entry is a prior, not ownership.** `n` = comparable samples for the preferred
-instance in that class. Entries marked `policy` are user-directed routing (workboard rule 10) that has
-not yet been re-derived from ≥3 samples; they are still subject to the same evidence rules and the
-policy-constraint carve-out in §1.
+Current priors feeding R1 and R3. **Every entry is a prior, not ownership.** `n` = comparable samples
+for the preferred instance in that class. Entries whose basis is the historical workboard's rule-10
+routing are labeled `historical routing`: they came from a user direction inside a now-completed
+mission and carry no samples of their own — they are starting priors like any other, fully subject to
+§7.
 
 | Task class | Preferred instance | Basis | n | Confidence |
 |---|---|---|---|---|
 | Pure technical/signal modules (indicators, entry rules) | `fable5-cc`* | QP-110 | 1 | low |
 | Pure position-risk evaluators | `fable5-cc`* | QP-120 | 1 | low |
 | Read-only root-cause diagnosis (stuck-task rescue) | `fable5-cc`* | QP-040/QP-050 diagnoses, both confirmed | 2 | medium |
-| Research synthesis / backtest forensics / risk-matrix & recipe design | `fable5-cc` | policy (rule 10) | 0 | policy prior |
-| Independent contract/evidence review | `fable5-cc` | policy (rule 10) | 0 | policy prior |
+| Research synthesis / backtest forensics / risk-matrix & recipe design | `fable5-cc` | historical routing (workboard rule 10) | 0 | prior only |
+| Independent contract/evidence review | `fable5-cc` | historical routing (workboard rule 10) | 0 | prior only |
 | Cross-cutting contracts & rails (schemas, xfail targets, fixtures) | `codex-gpt5x` | QP-010, QP-030 | 2 | medium |
 | Stateful integration (DB, broker adapters, API, scheduler, UI wiring) | `codex-gpt5x` | QP-020/030/040/050/060 | 5 | high |
-| Release acceptance & Git integration | `codex-gpt5x` | QP-900 + main-repo policy | 1 + policy | policy-backed |
+| Release acceptance & mainline integration | mission lead (role, per collaboration protocol) | QP-900 as evidence for `codex-gpt5x` in that role | 1 | role-based, not a capability preference |
 | Documentation / protocol authoring | no preference | a8867f0 (claude-drafted, codex-committed) | 1 | none |
 
 \* Historical "Claude Code" rows predate exact model-id recording; the prior is provisionally
 assigned to the current Claude instance. See §8.
 
-## 7. Preference-change and tie rules
+Mainline integration is a **role** assigned by the collaboration protocol (the mission lead is the
+sole mainline integrator), not a class won by evidence; it is listed for completeness so dispatchers
+do not route it by score. Each agent's commits in its own worktree need no routing decision at all.
+
+## 7. Preference-change rules
 
 - **Minimum evidence.** A task-class preference changes only after **≥3 comparable samples** (same
-  task class, same instance, comparable difficulty) show the challenger's composite ≥0.5 above the
-  incumbent's. Fewer samples update `n` and confidence, never the preference.
+  task class, same instance, comparable difficulty) show the challenger's mean completion rating (or
+  E1–E5 composite where scored) clearly above the incumbent's. Fewer samples update `n` and
+  confidence, never the preference.
 - **P0/P1 exception.** A single P0 or P1 defect attributable to the currently preferred instance
   triggers an **immediate preference review** for that task class — review, not automatic flip: the
   incumbent is suspended for that class pending a root-cause read, and the class reverts to
-  case-by-case routing until the review concludes.
-- **Tie handling (within 0.5).** If two instances' composites differ by **less than 0.5**, treat as a
-  tie. Ties never flip an existing preference. Break ties for a specific mission in this order:
-  1. Policy constraints (§1) — eliminates ineligible instances first;
-  2. Integration adjacency — the instance already holding neighboring state/paths;
-  3. Availability and parallelism — keep both agents' single `in_progress` slots utilized;
-  4. Cost/latency, judged per mission.
+  case-by-case §3 routing until the review concludes.
+- **Close calls at dispatch.** Near-equal routing scores are handled by the §3 tie rule (≤ 0.5 →
+  initial mission recipient), not by changing the §6 prior.
 - **Staleness.** Evidence older than the producing model version is decayed (§2). Evidence older than
   6 months is advisory only, regardless of version.
 
 ## 8. Seed evidence (QuantPilot, grounded only in the completed workboard)
 
 Source: `docs/professional_operator_workboard.md` (QP-000…QP-900, all `done`; checkpoint log
-2026-07-10 – 2026-07-11 KST). **Data-quality note:** the workboard recorded agents as "Codex" /
-"Claude Code" without exact model versions. These rows therefore carry instance keys with a
-`version-unrecorded` flag and cannot, by themselves, justify cross-version claims. From this record
-onward, the exact model id field in §5 is mandatory.
+2026-07-10 – 2026-07-11 KST) — a completed historical artifact used here strictly as evidence.
+**Data-quality note:** the workboard recorded agents as "Codex" / "Claude Code" without exact model
+versions. These rows therefore carry instance keys with a `version-unrecorded` flag and cannot, by
+themselves, justify cross-version claims. From this record onward, the exact model id field in §5 is
+mandatory.
 
 | task_id | instance (flag) | task_class | first_pass_result | defects | rework | checks_run (verbatim core) | elapsed | rating |
 |---|---|---|---|---|---|---|---|---|
@@ -166,10 +200,12 @@ yet; the table in §6 is the starting prior, nothing more.
 
 ## 9. Operating notes
 
-- Append new evidence records to §8 (or a successor evidence log split out when it grows) at the same
-  checkpoint where the workboard is updated; the workboard remains the canonical execution board, this
-  file is the routing memory.
+- Append new evidence records to §8 (or a successor evidence log split out when it grows) at each
+  mission's completion checkpoint. Under the current protocol this file is the routing memory; the
+  historical workboard is closed and receives no new entries.
+- Record the §3 routing scores (all candidates) in the mission record at dispatch, so routing
+  rationale stays auditable alongside outcome evidence.
 - When a new model version replaces an instance, add the row in §2, decay inherited confidence per §2,
   and re-evaluate §6 at the next ≥3-sample checkpoint.
-- Disagreement between this scorecard and any user-directed rule is resolved in favor of the user rule,
-  and recorded here as a policy constraint until the user says otherwise.
+- Disagreement between this scorecard and any standing user-directed rule is resolved in favor of the
+  user rule, and recorded here as a policy constraint until the user says otherwise.

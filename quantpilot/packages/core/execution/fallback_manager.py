@@ -27,6 +27,10 @@ FALLBACK_MATRIX: dict[str, tuple[Literal[4, 3, 2, 0], str]] = {
     "monthly_loss_stop_engaged": (0, "monthly loss stop halts all automatic trading"),
     "broker_mode_unsafe": (0, "broker mode is not mock or paper; automation refuses to run"),
     "run_mode_broker_mismatch": (0, "requested run mode does not match the policy broker mode"),
+    "paper_submission_journal_required": (
+        0,
+        "professional paper submission stays disabled until its durable broker journal is configured",
+    ),
     "policy_not_promoted": (4, "policy is not promoted to Level 5; guarded autopilot is the highest allowed level"),
     "no_level5_strategy_eligible": (4, "no validated_l5 strategy is eligible; fall back to guarded autopilot rails"),
     "no_approved_strategy_available": (2, "no approved strategy at any autopilot level; suggestions and reports only"),

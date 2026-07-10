@@ -2,6 +2,9 @@ from __future__ import annotations
 
 import hashlib
 from datetime import datetime, timedelta
+from math import isclose
+from typing import Callable
+from zoneinfo import ZoneInfo
 
 from quantpilot.packages.brokers.mock_broker import MockBroker
 from quantpilot.packages.brokers.paper_broker import PaperBroker
@@ -10,6 +13,7 @@ from quantpilot.packages.core.execution.state_machine import (
     RiskCheckRequired,
     authorize_level4,
     live_trading_flag_enabled,
+    operator_kill_switch_engaged,
     transition_order_plan,
 )
 from quantpilot.packages.core.policy.parser import DEFAULT_POLICY_TEXT, parse_policy_text
@@ -21,6 +25,12 @@ from quantpilot.packages.core.portfolio.planner import (
     fixture_portfolio_snapshot,
     proposal_idempotency_key,
 )
+from quantpilot.packages.core.operator.position_ledger import (
+    ManagedPositionBinding,
+    OperatorSafetyState,
+    PendingLiquidationCheckpoint,
+)
+from quantpilot.packages.core.marketdata.types import Quote
 from quantpilot.packages.core.reports.service import build_operation_report
 from quantpilot.packages.core.risk.batch import run_batch_risk_gate
 from quantpilot.packages.core.risk.gatekeeper import run_risk_check
@@ -71,6 +81,9 @@ from quantpilot.packages.db.audit import AuditRecorder
 from quantpilot.packages.db.repositories import RepositoryRegistry
 
 
+_SAFETY_FIELD_UNSET = object()
+
+
 class HarnessService:
     def __init__(
         self,
@@ -78,14 +91,18 @@ class HarnessService:
         *,
         security_provider: SecurityProvider | None = None,
         market_data_provider: MarketDataProvider | None = None,
+        pending_liquidation_provider: object | None = None,
     ) -> None:
         self.repositories = repositories or RepositoryRegistry()
         self.audit = AuditRecorder(self.repositories.audit_logs)
         self.autopilot_paused = False
+        self.broker_healthy = True
         self.last_blocked_reason: str | None = None
         # Fixtures stay the default; local/historical providers are injected explicitly.
         self.security_provider: SecurityProvider = security_provider or FixtureSecurityProvider()
         self.market_data_provider: MarketDataProvider = market_data_provider or FixtureMarketDataProvider()
+        self.pending_liquidation_provider = pending_liquidation_provider
+        self.operator_safety_state_provider: object | None = None
 
     @classmethod
     def from_environment(cls, repositories: RepositoryRegistry | None = None) -> "HarnessService":
@@ -573,10 +590,35 @@ class HarnessService:
         for order in self.repositories.order_plans.list():
             if order.order_plan_id in excluded:
                 continue
+            if (
+                order.status == OrderStatus.cancelled
+                and order.blocked_reason == "dry_run_no_submission"
+            ):
+                # A dry run is evidence that no broker side effect was attempted;
+                # it must not poison the later executable proposal for that signal.
+                continue
             if submitted_only and order.status not in submitted_states:
                 continue
             keys.add(order.idempotency_key)
         return keys
+
+    def _hydrate_operator_safety_state(
+        self,
+        *,
+        policy_id: str,
+    ) -> OperatorSafetyState | None:
+        provider = self.operator_safety_state_provider
+        if provider is None or not hasattr(
+            provider,
+            "load_operator_safety_state",
+        ):
+            return None
+        durable = provider.load_operator_safety_state(policy_id)
+        if durable is not None:
+            self.autopilot_paused = durable.autopilot_paused
+            self.broker_healthy = durable.broker_healthy
+            self.last_blocked_reason = durable.last_blocked_reason
+        return durable
 
     def _guardrail_state(
         self,
@@ -585,7 +627,9 @@ class HarnessService:
         strategy_id: str,
         exclude_order_plan_id: str | None = None,
         exclude_order_plan_ids: set[str] | None = None,
+        now: datetime | None = None,
     ) -> GuardrailState:
+        self._hydrate_operator_safety_state(policy_id=policy.policy_id)
         excluded = set(exclude_order_plan_ids or set())
         if exclude_order_plan_id is not None:
             excluded.add(exclude_order_plan_id)
@@ -602,24 +646,174 @@ class HarnessService:
             OrderStatus.accepted,
             OrderStatus.partially_filled,
         }
+        pre_submission_states = {
+            OrderStatus.proposed,
+            OrderStatus.user_approved,
+        }
+        post_submission_unfilled_states = {
+            OrderStatus.submitted,
+            OrderStatus.accepted,
+            OrderStatus.partially_filled,
+        }
+        current_time = now or utc_now()
+        current_trading_date = current_time.astimezone(
+            ZoneInfo("Asia/Seoul")
+        ).date()
+        repository_orders = self.repositories.order_plans.list()
+        orders_by_id = {order.order_plan_id: order for order in repository_orders}
+        filled_quantities_by_order: dict[str, float] = {}
+        for fill in self.repositories.fills.list():
+            filled_quantities_by_order[fill.order_plan_id] = (
+                filled_quantities_by_order.get(fill.order_plan_id, 0.0)
+                + fill.quantity
+            )
+
+        def active_unfilled(order: OrderPlan) -> bool:
+            if order.status not in unfilled_states:
+                return False
+            if order.status not in pre_submission_states:
+                return True
+            for deadline in (order.expires_at, order.risk_check_expires_at):
+                if deadline is not None:
+                    if deadline.tzinfo is None or deadline.utcoffset() is None:
+                        return False
+                    if deadline <= current_time:
+                        return False
+            return True
+
+        def remaining_sell_quantity(order: OrderPlan) -> float:
+            if order.status not in post_submission_unfilled_states:
+                return order.intent.quantity
+            return max(
+                0.0,
+                order.intent.quantity
+                - filled_quantities_by_order.get(order.order_plan_id, 0.0),
+            )
+
         submitted_orders = [
             order
-            for order in self.repositories.order_plans.list()
-            if order.policy_id == policy.policy_id and order.status in submitted_states and order.order_plan_id not in excluded
+            for order in repository_orders
+            if order.policy_id == policy.policy_id
+            and order.status in submitted_states
+            and order.order_plan_id not in excluded
+            and order.created_at.astimezone(ZoneInfo("Asia/Seoul")).date()
+            == current_trading_date
         ]
         unfilled_order_keys = [
             f"{order.explanation.strategy_id if order.explanation else strategy_id}:{order.intent.symbol}:{order.intent.side}"
-            for order in self.repositories.order_plans.list()
-            if order.policy_id == policy.policy_id and order.status in unfilled_states and order.order_plan_id not in excluded
+            for order in repository_orders
+            if order.policy_id == policy.policy_id
+            and active_unfilled(order)
+            and order.order_plan_id not in excluded
         ]
+        reserved_sell_quantities: dict[str, float] = {}
+        repository_reserved_quantities: dict[str, float] = {}
+        for order in repository_orders:
+            if (
+                order.policy_id != policy.policy_id
+                or not active_unfilled(order)
+                or order.order_plan_id in excluded
+                or order.intent.side != "sell"
+            ):
+                continue
+            remaining_quantity = remaining_sell_quantity(order)
+            if remaining_quantity <= 0.000001:
+                continue
+            symbol = order.intent.symbol.strip().upper()
+            reserved_sell_quantities[symbol] = (
+                reserved_sell_quantities.get(symbol, 0.0) + remaining_quantity
+            )
+            repository_reserved_quantities[order.order_plan_id] = (
+                remaining_quantity
+            )
+        durable_daily_count = 0
+        durable_daily_turnover = 0.0
+        durable_submitted_keys: list[str] = []
+        provider = self.pending_liquidation_provider
+        if provider is not None and hasattr(provider, "list_pending_liquidations"):
+            checkpoints: list[PendingLiquidationCheckpoint] = (
+                provider.list_pending_liquidations(include_reconciled=True)
+            )
+            submitted_repository_order_ids = {
+                order.order_plan_id for order in submitted_orders
+            }
+            for checkpoint in checkpoints:
+                if (
+                    checkpoint.policy_id != policy.policy_id
+                    or checkpoint.order_plan_id in excluded
+                ):
+                    continue
+                unresolved_submission = checkpoint.status in {
+                    "prepared",
+                    "submitted",
+                    "accepted",
+                    "partially_filled",
+                    "outcome_unknown",
+                    "filled",
+                }
+                durable_reservation = (
+                    checkpoint.quantity_requested
+                    if unresolved_submission
+                    else (
+                        checkpoint.cumulative_filled_quantity
+                        if checkpoint.status
+                        in {"cancelled", "rejected", "failed"}
+                        else 0.0
+                    )
+                )
+                repository_order = orders_by_id.get(checkpoint.order_plan_id)
+                if (
+                    checkpoint.status == "prepared"
+                    and repository_order is not None
+                    and not active_unfilled(repository_order)
+                ):
+                    durable_reservation = 0.0
+                additional_reservation = max(
+                    0.0,
+                    durable_reservation
+                    - repository_reserved_quantities.get(
+                        checkpoint.order_plan_id,
+                        0.0,
+                    ),
+                )
+                if additional_reservation > 0.000001:
+                    reserved_sell_quantities[checkpoint.symbol] = (
+                        reserved_sell_quantities.get(checkpoint.symbol, 0.0)
+                        + additional_reservation
+                    )
+                    unfilled_order_keys.append(
+                        f"{checkpoint.strategy_id}:{checkpoint.symbol}:sell"
+                    )
+                if (
+                    checkpoint.order_plan_id not in submitted_repository_order_ids
+                    and checkpoint.broker_submission_attempted
+                    and checkpoint.created_at.astimezone(
+                        ZoneInfo("Asia/Seoul")
+                    ).date()
+                    == current_trading_date
+                ):
+                    durable_daily_count += 1
+                    durable_daily_turnover += (
+                        checkpoint.quantity_requested * checkpoint.limit_price
+                    )
+                    durable_submitted_keys.append(checkpoint.idempotency_key)
         return GuardrailState(
-            daily_order_count=len(submitted_orders),
-            daily_turnover_used=round(sum(order.intent.notional for order in submitted_orders), 2),
+            daily_order_count=len(submitted_orders) + durable_daily_count,
+            daily_turnover_used=round(
+                sum(order.intent.notional for order in submitted_orders)
+                + durable_daily_turnover,
+                2,
+            ),
             kill_switch_engaged=policy.kill_switch_engaged,
+            broker_healthy=self.broker_healthy,
             autopilot_paused=self.autopilot_paused,
             last_blocked_reason=self.last_blocked_reason,
-            unfilled_order_keys=unfilled_order_keys,
-            submitted_idempotency_keys=[order.idempotency_key for order in submitted_orders],
+            unfilled_order_keys=sorted(set(unfilled_order_keys)),
+            submitted_idempotency_keys=[
+                *[order.idempotency_key for order in submitted_orders],
+                *durable_submitted_keys,
+            ],
+            reserved_sell_quantities=reserved_sell_quantities,
         )
 
     def _signal_by_symbol(self) -> dict[str, Signal]:
@@ -843,7 +1037,15 @@ class HarnessService:
             created.append(self.repositories.order_plans.update(order_plan))
         return created
 
-    def apply_risk_check(self, order_plan_id: str, *, snapshot: PortfolioSnapshot | None = None):
+    def apply_risk_check(
+        self,
+        order_plan_id: str,
+        *,
+        snapshot: PortfolioSnapshot | None = None,
+        position_binding: ManagedPositionBinding | None = None,
+        market_quote: Quote | None = None,
+        now: datetime | None = None,
+    ):
         order_plan = self.repositories.order_plans.require(order_plan_id)
         policy = self.repositories.policies.require(order_plan.policy_id)
         seen_keys = {
@@ -856,6 +1058,9 @@ class HarnessService:
             order_plan=order_plan,
             snapshot=snapshot or fixture_portfolio_snapshot(),
             seen_idempotency_keys=seen_keys,
+            position_binding=position_binding,
+            market_quote=market_quote,
+            now=now,
         )
         if risk_check.passed:
             order_plan.risk_check_id = risk_check.risk_check_id
@@ -1828,19 +2033,37 @@ class HarnessService:
             return MockBroker()
         raise RuntimeError("live broker mode is disabled in the pre-harness")
 
-    def _orders_for_submit_batch(self, order_plan: OrderPlan) -> list[OrderPlan]:
+    def _orders_for_submit_batch(
+        self,
+        order_plan: OrderPlan,
+        *,
+        now: datetime | None = None,
+    ) -> list[OrderPlan]:
+        if order_plan.status != OrderStatus.user_approved:
+            return []
+        if order_plan.purpose in {"protective_exit", "strategy_retirement"}:
+            return [order_plan]
         batch_statuses = {
             OrderStatus.proposed,
             OrderStatus.user_approved,
-            OrderStatus.submitted,
-            OrderStatus.accepted,
-            OrderStatus.partially_filled,
-            OrderStatus.filled,
         }
         batch: list[OrderPlan] = []
         current_seen = False
+        current_time = now or utc_now()
         for existing in self.repositories.order_plans.list():
-            if existing.policy_id != order_plan.policy_id or existing.status not in batch_statuses:
+            if (
+                existing.policy_id != order_plan.policy_id
+                or existing.status not in batch_statuses
+                or existing.purpose != "rebalance"
+                or (
+                    existing.expires_at is not None
+                    and existing.expires_at <= current_time
+                )
+                or (
+                    existing.risk_check_expires_at is not None
+                    and existing.risk_check_expires_at <= current_time
+                )
+            ):
                 continue
             if existing.order_plan_id == order_plan.order_plan_id:
                 batch.append(order_plan)
@@ -1860,13 +2083,28 @@ class HarnessService:
             order_intents=[order.intent for order in order_plans],
         )
 
-    def submit_order_plan(self, order_plan_id: str) -> tuple[OrderPlan, BrokerOrder, list[Fill]]:
+    def submit_order_plan(
+        self,
+        order_plan_id: str,
+        *,
+        snapshot: PortfolioSnapshot | None = None,
+        position_binding: ManagedPositionBinding | None = None,
+        market_quote: Quote | None = None,
+        now: datetime | None = None,
+        before_broker_submit: Callable[[OrderPlan], None] | None = None,
+    ) -> tuple[OrderPlan, BrokerOrder, list[Fill]]:
         order_plan = self.repositories.order_plans.require(order_plan_id)
         policy = self.repositories.policies.require(order_plan.policy_id)
+        if order_plan.purpose in {"protective_exit", "strategy_retirement"} and snapshot is None:
+            raise RiskCheckRequired(
+                "risk-reducing orders require an explicit reconciled portfolio snapshot"
+            )
+        portfolio_snapshot = snapshot or fixture_portfolio_snapshot()
+        submission_time = now or utc_now()
 
         if order_plan.risk_check_id is None or order_plan.status == OrderStatus.draft:
             raise RiskCheckRequired("risk_checked is required before submission")
-        if order_plan.risk_check_expires_at is not None and order_plan.risk_check_expires_at <= utc_now():
+        if order_plan.risk_check_expires_at is not None and order_plan.risk_check_expires_at <= submission_time:
             transition_order_plan(
                 order_plan=order_plan,
                 new_status=OrderStatus.expired,
@@ -1877,18 +2115,31 @@ class HarnessService:
             )
             self.repositories.order_plans.update(order_plan)
             raise RiskCheckRequired("fresh risk check is required before submission")
-        if policy.execution_mode.value == "approval_required" and order_plan.status != OrderStatus.user_approved:
-            raise ApprovalRequired("explicit user approval is required before submission")
+        if order_plan.status != OrderStatus.user_approved:
+            raise ApprovalRequired("an executable order must be in user_approved state")
 
         strategy_id = order_plan.explanation.strategy_id if order_plan.explanation else "unknown_strategy"
         fresh_risk = run_risk_check(
             policy=policy,
             order_plan=order_plan,
-            snapshot=fixture_portfolio_snapshot(),
+            snapshot=portfolio_snapshot,
             seen_idempotency_keys=self._seen_idempotency_keys(exclude_order_plan_id=order_plan.order_plan_id, submitted_only=True),
-            guardrail_state=self._guardrail_state(policy=policy, strategy_id=strategy_id, exclude_order_plan_id=order_plan.order_plan_id),
+            guardrail_state=self._guardrail_state(
+                policy=policy,
+                strategy_id=strategy_id,
+                exclude_order_plan_id=order_plan.order_plan_id,
+                now=submission_time,
+            ),
             quote_max_age_seconds=policy.stale_quote_max_age_seconds,
             strategy_id=strategy_id,
+            position_binding=position_binding,
+            market_quote=market_quote,
+            now=submission_time,
+            snapshot_max_age_seconds=(
+                policy.stale_quote_max_age_seconds
+                if order_plan.purpose in {"protective_exit", "strategy_retirement"}
+                else 900
+            ),
         )
         if not fresh_risk.passed:
             self.audit.emit(
@@ -1900,28 +2151,60 @@ class HarnessService:
                 after_state={"failed_checks": fresh_risk.failed_checks},
                 source="execution_service",
             )
+            order_plan.blocked_reason = "fresh_risk_check_failed"
+            transition_order_plan(
+                order_plan=order_plan,
+                new_status=OrderStatus.failed,
+                audit=self.audit,
+                user_id=policy.user_id,
+                source="execution_service",
+            )
+            self.repositories.order_plans.update(order_plan)
             raise RiskCheckRequired(f"fresh risk check failed: {fresh_risk.failed_checks}")
         order_plan.risk_check_id = fresh_risk.risk_check_id
         order_plan.risk_check_expires_at = fresh_risk.expires_at
 
-        batch_orders = self._orders_for_submit_batch(order_plan)
+        batch_orders = self._orders_for_submit_batch(
+            order_plan,
+            now=submission_time,
+        )
         batch_order_ids = {order.order_plan_id for order in batch_orders}
         batch_decision = run_batch_risk_gate(
             policy=policy,
             portfolio_plan=self._portfolio_plan_for_order_batch(policy=policy, order_plans=batch_orders),
-            snapshot=fixture_portfolio_snapshot(),
+            snapshot=portfolio_snapshot,
             quotes=self._quotes_for_intents([order.intent for order in batch_orders]),
             order_plans=batch_orders,
-            config=BatchRiskConfig(quote_max_age_seconds=policy.stale_quote_max_age_seconds),
+            config=BatchRiskConfig(
+                quote_max_age_seconds=policy.stale_quote_max_age_seconds,
+                snapshot_max_age_seconds=(
+                    policy.stale_quote_max_age_seconds
+                    if order_plan.purpose
+                    in {"protective_exit", "strategy_retirement"}
+                    else 900
+                ),
+            ),
             guardrail_state=self._guardrail_state(
                 policy=policy,
                 strategy_id=strategy_id,
                 exclude_order_plan_ids=batch_order_ids,
+                now=submission_time,
             ),
             seen_idempotency_keys=self._seen_idempotency_keys(
                 exclude_order_plan_ids=batch_order_ids,
                 submitted_only=True,
             ),
+            position_bindings=(
+                {order_plan.order_plan_id: position_binding}
+                if position_binding is not None
+                else None
+            ),
+            market_quotes=(
+                {order_plan.order_plan_id: market_quote}
+                if market_quote is not None
+                else None
+            ),
+            now=submission_time,
         )
         if not batch_decision.passed or order_plan.order_plan_id not in set(batch_decision.accepted_order_plan_ids):
             before_blocked = order_plan.model_copy(deep=True)
@@ -1936,7 +2219,66 @@ class HarnessService:
                 after_state=batch_decision,
                 source="execution_service",
             )
+            transition_order_plan(
+                order_plan=order_plan,
+                new_status=OrderStatus.failed,
+                audit=self.audit,
+                user_id=policy.user_id,
+                source="execution_service",
+            )
+            self.repositories.order_plans.update(order_plan)
             raise RiskCheckRequired(f"batch risk check failed: {batch_decision.failed_checks}")
+
+        def current_submission_safety_failures() -> list[str]:
+            failures: list[str] = []
+            current_policy = self.repositories.policies.require(
+                order_plan.policy_id
+            )
+            self._hydrate_operator_safety_state(policy_id=order_plan.policy_id)
+            if (
+                current_policy != policy
+                or order_plan.policy_version != current_policy.version
+            ):
+                failures.append("policy_version_match")
+            if current_policy.kill_switch_engaged:
+                failures.append("kill_switch_not_engaged")
+            if live_trading_flag_enabled():
+                failures.append("live_trading_disabled")
+            if operator_kill_switch_engaged():
+                failures.append("operator_kill_switch_not_engaged")
+            if self.autopilot_paused:
+                failures.append("operator_not_paused")
+            if not self.broker_healthy:
+                failures.append("broker_health")
+            return failures
+
+        def fail_final_submission(failures: list[str]) -> None:
+            before = order_plan.model_copy(deep=True)
+            order_plan.blocked_reason = "final_submission_safety_gate_failed"
+            self.audit.emit(
+                user_id=policy.user_id,
+                entity_type="order_plan",
+                entity_id=order_plan.order_plan_id,
+                action="risk_check_failed",
+                before_state=before,
+                after_state={"failed_checks": failures},
+                source="execution_service",
+            )
+            transition_order_plan(
+                order_plan=order_plan,
+                new_status=OrderStatus.failed,
+                audit=self.audit,
+                user_id=policy.user_id,
+                source="execution_service",
+            )
+            self.repositories.order_plans.update(order_plan)
+            raise RiskCheckRequired(
+                f"final submission safety gate failed: {failures}"
+            )
+
+        final_safety_failures = current_submission_safety_failures()
+        if final_safety_failures:
+            fail_final_submission(final_safety_failures)
 
         broker = self._broker_for_policy(policy)
         transition_order_plan(
@@ -1946,7 +2288,79 @@ class HarnessService:
             user_id=policy.user_id,
             source="execution_service",
         )
+        self.repositories.order_plans.update(order_plan)
+        if before_broker_submit is not None:
+            try:
+                before_broker_submit(order_plan.model_copy(deep=True))
+            except Exception as exc:
+                before = order_plan.model_copy(deep=True)
+                order_plan.blocked_reason = "prebroker_submission_guard_failed"
+                transition_order_plan(
+                    order_plan=order_plan,
+                    new_status=OrderStatus.failed,
+                    audit=self.audit,
+                    user_id=policy.user_id,
+                    source="execution_service",
+                )
+                self.repositories.order_plans.update(order_plan)
+                self.audit.emit(
+                    user_id=policy.user_id,
+                    entity_type="order_plan",
+                    entity_id=order_plan.order_plan_id,
+                    action="prebroker_submission_guard_failed",
+                    before_state=before,
+                    after_state={"error_type": type(exc).__name__},
+                    source="execution_service",
+                )
+                raise
+        final_safety_failures = current_submission_safety_failures()
+        if final_safety_failures:
+            fail_final_submission(final_safety_failures)
         broker_order, fills = broker.submit_order(order_plan)
+        evidence_failures: list[str] = []
+        if broker_order.order_plan_id != order_plan.order_plan_id:
+            evidence_failures.append("broker_order_plan_mismatch")
+        if broker_order.broker_mode != policy.broker:
+            evidence_failures.append("broker_mode_mismatch")
+        fill_ids = [fill.fill_id for fill in fills]
+        if len(fill_ids) != len(set(fill_ids)):
+            evidence_failures.append("duplicate_fill_id")
+        for fill in fills:
+            if fill.order_plan_id != order_plan.order_plan_id:
+                evidence_failures.append("fill_order_plan_mismatch")
+            if fill.broker_order_id != broker_order.broker_order_id:
+                evidence_failures.append("fill_broker_order_mismatch")
+            if fill.symbol.strip().upper() != order_plan.intent.symbol.strip().upper():
+                evidence_failures.append("fill_symbol_mismatch")
+            if fill.filled_at.tzinfo is None or fill.filled_at.utcoffset() is None:
+                evidence_failures.append("fill_timestamp_naive")
+            expected_notional = fill.quantity * fill.price
+            if not isclose(
+                fill.notional,
+                expected_notional,
+                rel_tol=0.000001,
+                abs_tol=0.01,
+            ):
+                evidence_failures.append("fill_notional_mismatch")
+        filled_quantity = sum(fill.quantity for fill in fills)
+        if filled_quantity > order_plan.intent.quantity + 0.000001:
+            evidence_failures.append("aggregate_fill_quantity_exceeded")
+        if evidence_failures:
+            order_plan.blocked_reason = "broker_submission_evidence_invalid"
+            self.repositories.order_plans.update(order_plan)
+            self.audit.emit(
+                user_id=policy.user_id,
+                entity_type="order_plan",
+                entity_id=order_plan.order_plan_id,
+                action="risk_check_failed",
+                before_state=order_plan,
+                after_state={"failed_checks": sorted(set(evidence_failures))},
+                source="broker_adapter",
+            )
+            raise RuntimeError(
+                "broker submission evidence invalid: "
+                f"{sorted(set(evidence_failures))}"
+            )
         self.repositories.broker_orders.add(broker_order)
         transition_order_plan(
             order_plan=order_plan,
@@ -1965,28 +2379,187 @@ class HarnessService:
                 after_state=fill,
                 source="broker_adapter",
             )
-        if len(fills) > 1:
+        if 0 < filled_quantity < order_plan.intent.quantity - 0.000001:
             transition_order_plan(
                 order_plan=order_plan,
                 new_status=OrderStatus.partially_filled,
                 audit=self.audit,
                 user_id=policy.user_id,
                 source="broker_adapter",
+                action="order_partially_filled",
             )
-        transition_order_plan(
-            order_plan=order_plan,
-            new_status=OrderStatus.filled,
-            audit=self.audit,
-            user_id=policy.user_id,
-            source="broker_adapter",
-        )
+        elif isclose(
+            filled_quantity,
+            order_plan.intent.quantity,
+            rel_tol=0,
+            abs_tol=0.000001,
+        ):
+            transition_order_plan(
+                order_plan=order_plan,
+                new_status=OrderStatus.filled,
+                audit=self.audit,
+                user_id=policy.user_id,
+                source="broker_adapter",
+            )
         self.repositories.order_plans.update(order_plan)
         return order_plan, broker_order, fills
 
+    def _persist_operator_safety_state(
+        self,
+        *,
+        policy_id: str,
+        autopilot_paused: bool | object = _SAFETY_FIELD_UNSET,
+        broker_healthy: bool | object = _SAFETY_FIELD_UNSET,
+        last_blocked_reason: str | None | object = _SAFETY_FIELD_UNSET,
+        require_healthy_broker: bool = False,
+    ) -> None:
+        provider = self.operator_safety_state_provider
+        if provider is None or not (
+            hasattr(provider, "load_operator_safety_state")
+            and hasattr(provider, "save_operator_safety_state")
+        ):
+            next_healthy = (
+                self.broker_healthy
+                if broker_healthy is _SAFETY_FIELD_UNSET
+                else bool(broker_healthy)
+            )
+            if require_healthy_broker and not next_healthy:
+                raise RiskCheckRequired(
+                    "broker health must recover before autopilot can resume"
+                )
+            if autopilot_paused is not _SAFETY_FIELD_UNSET:
+                self.autopilot_paused = bool(autopilot_paused)
+            if broker_healthy is not _SAFETY_FIELD_UNSET:
+                self.broker_healthy = bool(broker_healthy)
+            if last_blocked_reason is not _SAFETY_FIELD_UNSET:
+                self.last_blocked_reason = last_blocked_reason
+            return
+        if hasattr(provider, "patch_operator_safety_state"):
+            try:
+                persisted = provider.patch_operator_safety_state(
+                    policy_id=policy_id,
+                    autopilot_paused=(
+                        None
+                        if autopilot_paused is _SAFETY_FIELD_UNSET
+                        else bool(autopilot_paused)
+                    ),
+                    broker_healthy=(
+                        None
+                        if broker_healthy is _SAFETY_FIELD_UNSET
+                        else bool(broker_healthy)
+                    ),
+                    last_blocked_reason=(
+                        None
+                        if last_blocked_reason is _SAFETY_FIELD_UNSET
+                        else last_blocked_reason
+                    ),
+                    set_last_blocked_reason=(
+                        last_blocked_reason is not _SAFETY_FIELD_UNSET
+                    ),
+                    require_healthy_broker=require_healthy_broker,
+                    updated_at=utc_now(),
+                )
+            except Exception as exc:
+                if require_healthy_broker:
+                    self._hydrate_operator_safety_state(policy_id=policy_id)
+                    raise RiskCheckRequired(
+                        "broker health must recover before autopilot can resume"
+                    ) from exc
+                raise
+            self.autopilot_paused = persisted.autopilot_paused
+            self.broker_healthy = persisted.broker_healthy
+            self.last_blocked_reason = persisted.last_blocked_reason
+            return
+        existing = provider.load_operator_safety_state(policy_id)
+        now = utc_now()
+        paused_value = (
+            existing.autopilot_paused
+            if existing is not None
+            else self.autopilot_paused
+        )
+        healthy_value = (
+            existing.broker_healthy
+            if existing is not None
+            else self.broker_healthy
+        )
+        reason_value = (
+            existing.last_blocked_reason
+            if existing is not None
+            else self.last_blocked_reason
+        )
+        if autopilot_paused is not _SAFETY_FIELD_UNSET:
+            paused_value = bool(autopilot_paused)
+        if broker_healthy is not _SAFETY_FIELD_UNSET:
+            healthy_value = bool(broker_healthy)
+        if last_blocked_reason is not _SAFETY_FIELD_UNSET:
+            reason_value = last_blocked_reason
+        if require_healthy_broker and not healthy_value:
+            self.autopilot_paused = paused_value
+            self.broker_healthy = healthy_value
+            self.last_blocked_reason = reason_value
+            raise RiskCheckRequired(
+                "broker health must recover before autopilot can resume"
+            )
+        if existing is None:
+            state = OperatorSafetyState(
+                policy_id=policy_id,
+                autopilot_paused=paused_value,
+                broker_healthy=healthy_value,
+                last_blocked_reason=reason_value,
+                updated_at=now,
+            )
+        else:
+            state = existing.model_copy(
+                update={
+                    "autopilot_paused": paused_value,
+                    "broker_healthy": healthy_value,
+                    "last_blocked_reason": reason_value,
+                    "updated_at": max(
+                        now,
+                        existing.updated_at + timedelta(microseconds=1),
+                    ),
+                    "revision": existing.revision + 1,
+                }
+            )
+            state = OperatorSafetyState.model_validate(state.model_dump())
+        persisted = provider.save_operator_safety_state(state)
+        self.autopilot_paused = persisted.autopilot_paused
+        self.broker_healthy = persisted.broker_healthy
+        self.last_blocked_reason = persisted.last_blocked_reason
+
+    def record_broker_health(
+        self,
+        *,
+        policy_id: str,
+        healthy: bool,
+        reason: str | None = None,
+    ) -> None:
+        self._hydrate_operator_safety_state(policy_id=policy_id)
+        self.broker_healthy = healthy
+        if not healthy:
+            self.autopilot_paused = True
+            self.last_blocked_reason = reason or "broker_failure"
+        self._persist_operator_safety_state(
+            policy_id=policy_id,
+            broker_healthy=healthy,
+            autopilot_paused=(True if not healthy else _SAFETY_FIELD_UNSET),
+            last_blocked_reason=(
+                self.last_blocked_reason
+                if not healthy
+                else _SAFETY_FIELD_UNSET
+            ),
+        )
+
     def pause_guarded_autopilot(self, *, policy_id: str, reason: str = "user_paused") -> dict[str, object]:
         policy = self.repositories.policies.require(policy_id)
+        self._hydrate_operator_safety_state(policy_id=policy_id)
         self.autopilot_paused = True
         self.last_blocked_reason = "autopilot_paused"
+        self._persist_operator_safety_state(
+            policy_id=policy_id,
+            autopilot_paused=True,
+            last_blocked_reason="autopilot_paused",
+        )
         self.audit.emit(
             user_id=policy.user_id,
             entity_type="policy",
@@ -1999,7 +2572,13 @@ class HarnessService:
 
     def resume_guarded_autopilot(self, *, policy_id: str) -> dict[str, object]:
         policy = self.repositories.policies.require(policy_id)
-        self.autopilot_paused = False
+        self._hydrate_operator_safety_state(policy_id=policy_id)
+        self._persist_operator_safety_state(
+            policy_id=policy_id,
+            autopilot_paused=False,
+            last_blocked_reason=None,
+            require_healthy_broker=True,
+        )
         self.audit.emit(
             user_id=policy.user_id,
             entity_type="policy",

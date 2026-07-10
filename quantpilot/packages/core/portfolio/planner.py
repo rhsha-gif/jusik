@@ -303,13 +303,26 @@ def build_portfolio_plan(
         elif delta_notional < -1:
             notional = min(abs(delta_notional), policy.single_order_cash_limit, current * snapshot.equity)
             if notional > 1:
-                target = current - notional / snapshot.equity
+                held_quantity = sum(
+                    position.quantity
+                    for position in snapshot.positions
+                    if position.symbol.strip().upper() == signal.symbol.strip().upper()
+                )
+                quantity = min(notional / price, held_quantity)
+                notional = quantity * price
+                if quantity <= 0:
+                    continue
+                target = (
+                    max(0.0, current * (held_quantity - quantity) / held_quantity)
+                    if held_quantity > 0
+                    else 0.0
+                )
                 order_intents.append(
                     OrderIntent(
                         symbol=signal.symbol,
                         side="sell",
                         order_type=OrderType.limit,
-                        quantity=round(notional / price, 6),
+                        quantity=round(quantity, 6),
                         limit_price=price,
                         notional=round(notional, 2),
                         target_weight=round(max(target, 0.0), 6),

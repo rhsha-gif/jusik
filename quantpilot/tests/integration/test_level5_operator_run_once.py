@@ -139,7 +139,7 @@ def test_level5_dry_run_creates_proposals_but_submits_nothing(operator_enabled: 
     assert result.report.order_plan_ids
     assert service.repositories.broker_orders.list() == []
     for order_plan_id in result.report.order_plan_ids:
-        assert service.repositories.order_plans.require(order_plan_id).status.value == "proposed"
+        assert service.repositories.order_plans.require(order_plan_id).status.value == "cancelled"
 
 
 def test_level5_policy_flag_alone_enables_run_without_env(monkeypatch: pytest.MonkeyPatch) -> None:
@@ -333,9 +333,10 @@ def test_level5_duplicate_run_key_does_not_duplicate_orders(operator_enabled: No
     policy = _promoted_policy()
     service = _service_with_policy(policy)
 
-    first = service.run_once(_request(policy, key="level5-idempotent"))
+    request = _request(policy, key="level5-idempotent")
+    first = service.run_once(request)
     orders_after_first = len(service.repositories.order_plans.list())
-    second = service.run_once(_request(policy, key="level5-idempotent"))
+    second = service.run_once(request)
 
     assert first.run_id == second.run_id
     assert second.submitted_order_plan_ids == first.submitted_order_plan_ids
@@ -423,12 +424,13 @@ def test_level5_kill_switch_engaged_after_run_is_not_masked_by_duplicate_key(ope
     policy = _promoted_policy()
     service = _service_with_policy(policy)
 
-    first = service.run_once(_request(policy, key="level5-replay-guard"))
+    request = _request(policy, key="level5-replay-guard")
+    first = service.run_once(request)
     assert first.status == "completed"
 
     policy.kill_switch_engaged = True
     service.repositories.policies.update(policy)
-    second = service.run_once(_request(policy, key="level5-replay-guard"))
+    second = service.run_once(request)
 
     assert second.run_id != first.run_id
     assert second.status == "blocked"

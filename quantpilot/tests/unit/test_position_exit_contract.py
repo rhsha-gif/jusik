@@ -3,6 +3,7 @@ from __future__ import annotations
 import json
 import inspect
 from datetime import datetime, timedelta, timezone
+from math import inf, nan
 from pathlib import Path
 
 import pytest
@@ -149,3 +150,33 @@ def test_position_risk_decision_is_deterministic_and_preserves_identity() -> Non
     assert first == second
     assert first.strategy_id == request.strategy_id
     assert first.strategy_version == request.strategy_version
+
+
+def test_position_risk_symbol_is_canonical_across_input_and_decision() -> None:
+    request = _request(symbol=" ccc ")
+
+    decision = evaluate_position_risk(request)
+
+    assert request.symbol == "CCC"
+    assert decision.symbol == "CCC"
+
+
+@pytest.mark.parametrize(
+    "field",
+    [
+        "quantity",
+        "average_entry_price",
+        "current_price",
+        "completed_close",
+        "atr14",
+        "sma20",
+        "rsi14",
+    ],
+)
+@pytest.mark.parametrize("value", [inf, -inf, nan])
+def test_position_risk_inputs_reject_non_finite_numbers(
+    field: str,
+    value: float,
+) -> None:
+    with pytest.raises(ValueError):
+        _request(**{field: value})

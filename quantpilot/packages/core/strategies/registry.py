@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from collections.abc import Iterable
+from copy import deepcopy
 from typing import Literal
 
 from quantpilot.packages.core.schemas import HarnessModel
@@ -39,7 +40,7 @@ DEMOTION_LADDER: dict[str, str] = {
 # Deterministic underperformance thresholds. Breaching the disable thresholds removes the
 # strategy from automatic selection entirely; breaching only the demote threshold lowers
 # its validation level by one.
-UNDERPERFORMANCE_DISABLE_MAX_DRAWDOWN = -0.20
+UNDERPERFORMANCE_DISABLE_MAX_DRAWDOWN = 0.20
 UNDERPERFORMANCE_DISABLE_EXCESS_RETURN = -0.10
 UNDERPERFORMANCE_DEMOTE_EXCESS_RETURN = -0.05
 
@@ -72,18 +73,24 @@ class StrategyRegistry:
         lifecycle_records: Iterable[object] | None = None,
     ) -> None:
         self._entries: dict[str, StrategyRegistryEntry] = {}
-        self._lifecycle_records = list(lifecycle_records or [])
+        self._lifecycle_records = deepcopy(list(lifecycle_records or []))
         for entry in entries or []:
             self.add(entry)
 
+    @staticmethod
+    def _snapshot(entry: StrategyRegistryEntry) -> StrategyRegistryEntry:
+        return StrategyRegistryEntry.model_validate(entry.model_dump())
+
     def add(self, entry: StrategyRegistryEntry) -> StrategyRegistryEntry:
-        if entry.strategy_id in self._entries:
-            raise ValueError(f"duplicate registry entry: {entry.strategy_id}")
-        self._entries[entry.strategy_id] = entry
-        return entry
+        stored = self._snapshot(entry)
+        if stored.strategy_id in self._entries:
+            raise ValueError(f"duplicate registry entry: {stored.strategy_id}")
+        self._entries[stored.strategy_id] = stored
+        return self._snapshot(stored)
 
     def get(self, strategy_id: str) -> StrategyRegistryEntry | None:
-        return self._entries.get(strategy_id)
+        entry = self._entries.get(strategy_id)
+        return None if entry is None else self._snapshot(entry)
 
     def require(self, strategy_id: str) -> StrategyRegistryEntry:
         entry = self.get(strategy_id)
@@ -92,10 +99,10 @@ class StrategyRegistry:
         return entry
 
     def entries(self) -> list[StrategyRegistryEntry]:
-        return list(self._entries.values())
+        return [self._snapshot(entry) for entry in self._entries.values()]
 
     def set_lifecycle_records(self, records: Iterable[object]) -> None:
-        self._lifecycle_records = list(records)
+        self._lifecycle_records = deepcopy(list(records))
 
     def _lifecycle_rejection_reason(self, entry: StrategyRegistryEntry) -> str | None:
         from quantpilot.packages.core.strategies.lifecycle_binding import (
@@ -165,15 +172,33 @@ class StrategyRegistry:
             allowed = [level for level in allowed if level not in LEVEL5_EXECUTION_LEVELS]
         if next_status not in {"validated_l5", "validated_l4"}:
             allowed = [level for level in allowed if level not in LEVEL4_EXECUTION_LEVELS]
-        updated = entry.model_copy(update={"status": next_status, "allowed_execution_levels": allowed, "disabled_reason": reason if next_status == "disabled" else entry.disabled_reason})
-        self._entries[strategy_id] = updated
-        return updated
+        updated = StrategyRegistryEntry.model_validate(
+            entry.model_copy(
+                update={
+                    "status": next_status,
+                    "allowed_execution_levels": allowed,
+                    "disabled_reason": (
+                        reason if next_status == "disabled" else entry.disabled_reason
+                    ),
+                }
+            ).model_dump()
+        )
+        self._entries[strategy_id] = self._snapshot(updated)
+        return self._snapshot(updated)
 
     def disable(self, strategy_id: str, *, reason: str) -> StrategyRegistryEntry:
         entry = self.require(strategy_id)
-        updated = entry.model_copy(update={"status": "disabled", "allowed_execution_levels": [], "disabled_reason": reason})
-        self._entries[strategy_id] = updated
-        return updated
+        updated = StrategyRegistryEntry.model_validate(
+            entry.model_copy(
+                update={
+                    "status": "disabled",
+                    "allowed_execution_levels": [],
+                    "disabled_reason": reason,
+                }
+            ).model_dump()
+        )
+        self._entries[strategy_id] = self._snapshot(updated)
+        return self._snapshot(updated)
 
     def apply_performance_review(
         self,
@@ -182,7 +207,9 @@ class StrategyRegistry:
         excess_return: float,
         max_drawdown: float,
     ) -> Literal["disabled", "demoted", "unchanged"]:
-        if max_drawdown <= UNDERPERFORMANCE_DISABLE_MAX_DRAWDOWN or excess_return <= UNDERPERFORMANCE_DISABLE_EXCESS_RETURN:
+        if max_drawdown < 0:
+            raise ValueError("max_drawdown must be a positive loss ratio")
+        if max_drawdown >= UNDERPERFORMANCE_DISABLE_MAX_DRAWDOWN or excess_return <= UNDERPERFORMANCE_DISABLE_EXCESS_RETURN:
             self.disable(strategy_id, reason="underperformance_disable_threshold_breached")
             return "disabled"
         if excess_return <= UNDERPERFORMANCE_DEMOTE_EXCESS_RETURN:

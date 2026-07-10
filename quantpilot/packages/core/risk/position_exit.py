@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from datetime import datetime
 
-from pydantic import Field
+from pydantic import Field, field_validator
 
 from quantpilot.packages.core.schemas import HarnessModel, SignalAction
 
@@ -13,28 +13,36 @@ _ROUND_DECIMALS = 6
 
 
 class PositionRiskParameters(HarnessModel):
-    hard_stop_loss_fraction: float = Field(default=0.08, gt=0, lt=1)
-    atr_multiplier: float = Field(default=2.0, gt=0)
+    hard_stop_loss_fraction: float = Field(default=0.08, gt=0, lt=1, allow_inf_nan=False)
+    atr_multiplier: float = Field(default=2.0, gt=0, allow_inf_nan=False)
     max_quote_age_seconds: int = Field(default=30, gt=0)
-    risk_ma_ratio: float = Field(default=0.94, gt=0, le=1)
-    overheat_rsi: float = Field(default=72.0, ge=0, le=100)
-    overheat_ma_ratio: float = Field(default=1.20, ge=1)
-    trim_fraction: float = Field(default=0.50, gt=0, lt=1)
+    risk_ma_ratio: float = Field(default=0.94, gt=0, le=1, allow_inf_nan=False)
+    overheat_rsi: float = Field(default=72.0, ge=0, le=100, allow_inf_nan=False)
+    overheat_ma_ratio: float = Field(default=1.20, ge=1, allow_inf_nan=False)
+    trim_fraction: float = Field(default=0.50, gt=0, lt=1, allow_inf_nan=False)
 
 
 class PositionRiskInput(HarnessModel):
     strategy_id: str
     strategy_version: str
     symbol: str
-    quantity: float = Field(gt=0)
-    average_entry_price: float = Field(gt=0)
-    current_price: float = Field(gt=0)
-    completed_close: float = Field(gt=0)
-    atr14: float = Field(ge=0)
-    sma20: float = Field(gt=0)
-    rsi14: float = Field(ge=0, le=100)
+    quantity: float = Field(gt=0, allow_inf_nan=False)
+    average_entry_price: float = Field(gt=0, allow_inf_nan=False)
+    current_price: float = Field(gt=0, allow_inf_nan=False)
+    completed_close: float = Field(gt=0, allow_inf_nan=False)
+    atr14: float = Field(ge=0, allow_inf_nan=False)
+    sma20: float = Field(gt=0, allow_inf_nan=False)
+    rsi14: float = Field(ge=0, le=100, allow_inf_nan=False)
     quote_as_of: datetime
     evaluated_at: datetime
+
+    @field_validator("symbol")
+    @classmethod
+    def normalize_symbol(cls, value: str) -> str:
+        normalized = value.strip().upper()
+        if not normalized:
+            raise ValueError("symbol must not be empty")
+        return normalized
 
 
 class PositionRiskDecision(HarnessModel):
@@ -42,19 +50,27 @@ class PositionRiskDecision(HarnessModel):
     strategy_version: str
     symbol: str
     action: SignalAction
-    fixed_fraction_stop: float = Field(gt=0)
-    atr_stop: float
-    protective_stop: float = Field(gt=0)
-    technical_exit_level: float = Field(gt=0)
-    overheat_price_level: float = Field(gt=0)
-    quantity_held: float = Field(gt=0)
-    quantity_to_exit: float = Field(ge=0)
-    exit_fraction: float = Field(ge=0, le=1)
-    current_price: float = Field(gt=0)
-    completed_close: float = Field(gt=0)
-    quote_age_seconds: float
+    fixed_fraction_stop: float = Field(gt=0, allow_inf_nan=False)
+    atr_stop: float = Field(allow_inf_nan=False)
+    protective_stop: float = Field(gt=0, allow_inf_nan=False)
+    technical_exit_level: float = Field(gt=0, allow_inf_nan=False)
+    overheat_price_level: float = Field(gt=0, allow_inf_nan=False)
+    quantity_held: float = Field(gt=0, allow_inf_nan=False)
+    quantity_to_exit: float = Field(ge=0, allow_inf_nan=False)
+    exit_fraction: float = Field(ge=0, le=1, allow_inf_nan=False)
+    current_price: float = Field(gt=0, allow_inf_nan=False)
+    completed_close: float = Field(gt=0, allow_inf_nan=False)
+    quote_age_seconds: float = Field(allow_inf_nan=False)
     reason_codes: list[str] = Field(default_factory=list)
     reason: str
+
+    @field_validator("symbol")
+    @classmethod
+    def normalize_symbol(cls, value: str) -> str:
+        normalized = value.strip().upper()
+        if not normalized:
+            raise ValueError("symbol must not be empty")
+        return normalized
 
 
 def _is_aware(value: datetime) -> bool:

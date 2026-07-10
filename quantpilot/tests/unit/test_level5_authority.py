@@ -8,7 +8,14 @@ import pytest
 from pydantic import ValidationError
 
 from quantpilot.packages.core.execution.state_machine import authorize_level5
-from quantpilot.packages.core.portfolio.planner import fixture_portfolio_snapshot
+from quantpilot.packages.core.marketdata.types import Quote
+from quantpilot.packages.core.operator.position_ledger import (
+    ManagedPositionBinding,
+    ManagedPositionState,
+)
+from quantpilot.packages.core.portfolio.planner import (
+    fixture_portfolio_snapshot as _fixture_portfolio_snapshot,
+)
 from quantpilot.packages.core.schemas import (
     BrokerMode,
     ExecutionMode,
@@ -16,6 +23,8 @@ from quantpilot.packages.core.schemas import (
     OrderIntent,
     OrderPlan,
     OrderType,
+    PortfolioSnapshot,
+    ProposalExplanation,
     StrategyRecipe,
     UserPolicy,
 )
@@ -23,6 +32,12 @@ from quantpilot.packages.core.strategies.registry import StrategyRegistryEntry
 
 
 KRX_TRADING_TIME = datetime(2026, 6, 12, 10, 0, tzinfo=ZoneInfo("Asia/Seoul"))
+
+
+def fixture_portfolio_snapshot(*, monthly_loss_ratio: float = 0.0) -> PortfolioSnapshot:
+    return _fixture_portfolio_snapshot(
+        monthly_loss_ratio=monthly_loss_ratio
+    ).model_copy(update={"captured_at": KRX_TRADING_TIME})
 
 
 def _policy(**updates: Any) -> UserPolicy:
@@ -64,6 +79,7 @@ def _recipe(**updates: Any) -> StrategyRecipe:
 
 
 def _order(policy: UserPolicy, **intent_updates: Any) -> OrderPlan:
+    purpose = intent_updates.pop("purpose", "rebalance")
     intent_values: dict[str, Any] = {
         "symbol": "AAA",
         "side": "buy",
@@ -76,11 +92,69 @@ def _order(policy: UserPolicy, **intent_updates: Any) -> OrderPlan:
         "quote_time": KRX_TRADING_TIME,
     }
     intent_values.update(intent_updates)
+    intent = OrderIntent(**intent_values)
+    key = "idem-level5-auth"
+    explanation = None
+    if purpose != "rebalance":
+        explanation = ProposalExplanation(
+            symbol=intent.symbol,
+            action=intent.side,
+            quantity=intent.quantity,
+            target_weight_delta=intent.target_weight - 0.10,
+            reference_price=float(intent.limit_price or 0),
+            estimated_cash_impact=-intent.notional,
+            strategy_id="pullback_trend_v1",
+            strategy_version="1.0",
+            signal_reason="level 5 protective authority check",
+            current_weight=0.10,
+            target_weight=intent.target_weight,
+            weight_delta=intent.target_weight - 0.10,
+            quote_price=float(intent.limit_price or 0),
+            quote_age_seconds=0,
+            estimated_notional=intent.notional,
+            idempotency_key=key,
+            policy_version=policy.version,
+        )
     return OrderPlan(
         policy_id=policy.policy_id,
         policy_version=policy.version,
-        intent=OrderIntent(**intent_values),
-        idempotency_key="idem-level5-auth",
+        intent=intent,
+        purpose=purpose,
+        idempotency_key=key,
+        explanation=explanation,
+    )
+
+
+def _risk_evidence(
+    policy: UserPolicy,
+    snapshot: PortfolioSnapshot,
+    order: OrderPlan,
+) -> tuple[ManagedPositionBinding, Quote]:
+    position = next(
+        position
+        for position in snapshot.positions
+        if position.symbol == order.intent.symbol
+    )
+    state = ManagedPositionState(
+        policy_id=policy.policy_id,
+        strategy_id="pullback_trend_v1",
+        strategy_version="1.0",
+        symbol=position.symbol,
+        quantity=position.quantity,
+        average_entry_price=100,
+        atr14=2,
+        active_stop=96,
+        policy_version=policy.version,
+        opened_at=KRX_TRADING_TIME,
+        updated_at=snapshot.captured_at,
+        reconciled_snapshot_id=snapshot.snapshot_id,
+        reconciled_at=snapshot.captured_at,
+    )
+    return ManagedPositionBinding.from_position(state), Quote(
+        symbol=order.intent.symbol,
+        last=float(order.intent.limit_price or 100),
+        bid=order.intent.limit_price,
+        as_of=order.intent.quote_time,
     )
 
 
@@ -179,6 +253,49 @@ def test_level5_authority_blocks_on_monthly_loss_stop() -> None:
 
     assert not result.authorized
     assert result.first_failed_check == "monthly_loss_stop_not_triggered"
+
+
+def test_disabled_strategy_may_only_submit_verified_protective_sell() -> None:
+    policy = _policy()
+    snapshot = fixture_portfolio_snapshot(monthly_loss_ratio=-0.12)
+    protective = _order(
+        policy,
+        purpose="protective_exit",
+        symbol="CCC",
+        side="sell",
+        quantity=5_000,
+        limit_price=100,
+        notional=500_000,
+        target_weight=0.05,
+    )
+    ordinary = protective.model_copy(
+        update={"purpose": "rebalance", "idempotency_key": "ordinary-disabled-sell"}
+    )
+    disabled = _registry_entry(status="disabled", allowed_execution_levels=[])
+    binding, market_quote = _risk_evidence(policy, snapshot, protective)
+
+    protective_result = authorize_level5(
+        order_plan=protective,
+        policy=policy,
+        registry_entry=disabled,
+        strategy=_recipe(),
+        snapshot=snapshot,
+        now=KRX_TRADING_TIME,
+        position_binding=binding,
+        market_quote=market_quote,
+    )
+    ordinary_result = authorize_level5(
+        order_plan=ordinary,
+        policy=policy,
+        registry_entry=disabled,
+        strategy=_recipe(),
+        snapshot=snapshot,
+        now=KRX_TRADING_TIME,
+    )
+
+    assert protective_result.authorized
+    assert not ordinary_result.authorized
+    assert ordinary_result.first_failed_check == "strategy_registry_validated_l5"
 
 
 def test_level5_authority_blocks_duplicate_idempotency_key() -> None:

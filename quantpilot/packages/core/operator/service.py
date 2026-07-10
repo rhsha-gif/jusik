@@ -1,6 +1,8 @@
 from __future__ import annotations
 
-from datetime import datetime
+import hashlib
+import json
+from datetime import datetime, timedelta
 
 from quantpilot.packages.core.execution.fallback_manager import FallbackDecision, FallbackManager
 from quantpilot.packages.core.execution.state_machine import (
@@ -22,6 +24,20 @@ from quantpilot.packages.core.operator.schemas import (
     OperatorRunRequest,
     OperatorRunResult,
 )
+from quantpilot.packages.core.operator.position_ledger import (
+    OperatorCycleClaim,
+    PaperRunCheckpoint,
+)
+from quantpilot.packages.core.operator.professional_cycle import (
+    ProfessionalOperatorCoordinator,
+    ProfessionalPositionCycleResult,
+    ProfessionalStateStore,
+    StrategyHealthReviewResult,
+    risk_evaluation_due,
+)
+from quantpilot.packages.core.marketdata.types import Quote
+from quantpilot.packages.core.risk.position_exit import PositionRiskInput
+from quantpilot.packages.core.strategies.performance_review import StrategyHealthInput
 from quantpilot.packages.core.policy.versioning import PolicyVersionGuard, PolicyVersioningService
 from quantpilot.packages.core.risk.gatekeeper import market_orders_enabled
 from quantpilot.packages.core.schemas import (
@@ -56,11 +72,22 @@ CHECK_TO_FALLBACK_REASON = {
     "policy_version_match": "policy_review_required",
     "broker_health": "broker_unhealthy",
     "quote_not_stale": "stale_market_data",
+    "snapshot_not_stale": "stale_market_data",
     "order_type_allowed": "market_orders_disabled",
     "monthly_loss_stop_not_triggered": "monthly_loss_stop_engaged",
     "monthly_loss_pause_allows_order": "monthly_loss_pause_engaged",
     "fresh_risk_check_passed": "risk_check_failed",
 }
+
+
+def _run_request_fingerprint(request: OperatorRunRequest) -> str:
+    canonical = json.dumps(
+        request.model_dump(mode="json"),
+        ensure_ascii=True,
+        separators=(",", ":"),
+        sort_keys=True,
+    ).encode("utf-8")
+    return f"sha256:{hashlib.sha256(canonical).hexdigest()}"
 
 
 def _empty_selection(reason: str) -> StrategySelectionDecision:
@@ -81,6 +108,7 @@ class OperatorService:
         *,
         ohlcv_provider: OHLCVProvider | None = None,
         quote_provider: QuoteProvider | None = None,
+        professional_state_store: ProfessionalStateStore | None = None,
     ) -> None:
         self.harness = harness or HarnessService()
         self.registry = registry or default_strategy_registry()
@@ -97,6 +125,61 @@ class OperatorService:
         self.policy_versioning = PolicyVersioningService(self.harness.repositories, self.harness.audit)
         self.reports: list[OperatorReport] = []
         self._runs_by_key: dict[str, OperatorRunResult] = {}
+        self._run_fingerprints_by_key: dict[str, str] = {}
+        self.professional_state_store = professional_state_store
+        self.professional = (
+            ProfessionalOperatorCoordinator(
+                harness=self.harness,
+                registry=self.registry,
+                state_store=professional_state_store,
+            )
+            if professional_state_store is not None
+            else None
+        )
+
+    def review_professional_strategy_health(
+        self,
+        *,
+        policy: UserPolicy,
+        registry_entry,
+        evidence: StrategyHealthInput,
+        performance_record_id: str,
+        evaluated_at: datetime,
+        reapproved: bool = False,
+    ) -> StrategyHealthReviewResult:
+        if self.professional is None:
+            raise RuntimeError("professional state store is not configured")
+        return self.professional.review_strategy_health(
+            policy=policy,
+            registry_entry=registry_entry,
+            evidence=evidence,
+            performance_record_id=performance_record_id,
+            evaluated_at=evaluated_at,
+            reapproved=reapproved,
+        )
+
+    def run_professional_position_cycle(
+        self,
+        *,
+        policy: UserPolicy,
+        registry_entry,
+        strategy: StrategyRecipe,
+        snapshot: PortfolioSnapshot,
+        risk_inputs: dict[str, PositionRiskInput],
+        quotes: dict[str, Quote],
+        evaluated_at: datetime,
+    ) -> ProfessionalPositionCycleResult:
+        if self.professional is None:
+            raise RuntimeError("professional state store is not configured")
+        return self.professional.run_position_cycle(
+            policy=policy,
+            registry_entry=registry_entry,
+            strategy=strategy,
+            snapshot=snapshot,
+            risk_inputs=risk_inputs,
+            quotes=quotes,
+            evaluated_at=evaluated_at,
+        )
 
     @property
     def repositories(self):
@@ -119,8 +202,16 @@ class OperatorService:
         }
 
     def run_once(self, request: OperatorRunRequest, *, now: datetime | None = None) -> OperatorRunResult:
+        request_fingerprint = _run_request_fingerprint(request)
         cached = self._runs_by_key.get(request.idempotency_key)
         if cached is not None:
+            if (
+                self._run_fingerprints_by_key.get(request.idempotency_key)
+                != request_fingerprint
+            ):
+                raise ValueError(
+                    "operator idempotency key is bound to a different request"
+                )
             cached_policy = self.repositories.policies.get(request.policy_id)
             kill_switch_now = operator_kill_switch_engaged() or (
                 cached_policy is not None and cached_policy.kill_switch_engaged
@@ -142,6 +233,57 @@ class OperatorService:
         started_at = now or utc_now()
         decisions: list[OperatorDecision] = []
         policy = self.repositories.policies.get(request.policy_id)
+        if self.professional_state_store is not None:
+            durable = (
+                self.professional_state_store.find_run_checkpoint_by_idempotency_key(
+                    request.idempotency_key
+                )
+            )
+            if durable is not None:
+                if (
+                    durable.policy_id != request.policy_id
+                    or durable.user_id != request.user_id
+                    or durable.policy_version != request.requested_policy_version
+                    or durable.run_mode != request.run_mode
+                    or durable.requested_at != request.requested_at
+                    or durable.request_fingerprint != request_fingerprint
+                ):
+                    raise ValueError(
+                        "operator idempotency key is bound to a different durable request"
+                    )
+                if operator_kill_switch_engaged() or (
+                    policy is not None and policy.kill_switch_engaged
+                ):
+                    raise RuntimeError(
+                        "active kill switch blocks durable operator-run replay"
+                    )
+                if durable.result_payload is None:
+                    raise RuntimeError(
+                        "durable operator run requires recovery before retry"
+                    )
+                return OperatorRunResult.model_validate(durable.result_payload)
+            self.professional_state_store.insert_run_checkpoint(
+                PaperRunCheckpoint(
+                    run_id=run_id,
+                    idempotency_key=request.idempotency_key,
+                    policy_id=request.policy_id,
+                    user_id=request.user_id,
+                    # This checkpoint binds the request identity.  The authoritative
+                    # policy version remains available in the terminal report.
+                    policy_version=request.requested_policy_version,
+                    run_mode=request.run_mode,
+                    requested_at=request.requested_at,
+                    request_fingerprint=request_fingerprint,
+                    status="started",
+                    data_mode=(
+                        "paper_trading"
+                        if request.run_mode == "paper_submit"
+                        else "fixture"
+                    ),
+                    started_at=started_at,
+                    updated_at=started_at,
+                )
+            )
 
         self.audit.emit(
             user_id=request.user_id,
@@ -236,7 +378,31 @@ class OperatorService:
                 fallback=fallback,
                 report=report,
             )
+            if self.professional_state_store is not None:
+                durable = self.professional_state_store.find_run_checkpoint_by_idempotency_key(
+                    request.idempotency_key
+                )
+                if durable is None or durable.run_id != run_id:
+                    raise RuntimeError("durable operator run checkpoint disappeared")
+                terminal = durable.model_copy(
+                    update={
+                        "status": (
+                            "completed" if status == "completed" else "blocked"
+                        ),
+                        "updated_at": max(
+                            utc_now(),
+                            durable.updated_at + timedelta(microseconds=1),
+                        ),
+                        "result_payload": result.model_dump(mode="json"),
+                    }
+                )
+                self.professional_state_store.update_run_checkpoint(
+                    PaperRunCheckpoint.model_validate(terminal.model_dump())
+                )
             self._runs_by_key[request.idempotency_key] = result
+            self._run_fingerprints_by_key[request.idempotency_key] = (
+                request_fingerprint
+            )
             return result
 
         def blocked_by(reason_code: str, *, selection: StrategySelectionDecision | None = None) -> OperatorRunResult:
@@ -270,6 +436,11 @@ class OperatorService:
             return blocked_by("run_mode_broker_mismatch")
         if request.run_mode == "paper_submit" and policy.broker != BrokerMode.paper:
             return blocked_by("run_mode_broker_mismatch")
+        if (
+            request.run_mode == "paper_submit"
+            and self.professional_state_store is not None
+        ):
+            return blocked_by("paper_submission_journal_required")
 
         # Gate 6: the run must bind to the current policy version.
         review = self.version_guard.require_current_version(
@@ -318,6 +489,49 @@ class OperatorService:
         # Step: sync portfolio snapshot from the mock/paper broker and build the plan.
         broker = self.harness._broker_for_policy(policy)
         snapshot = broker.get_positions(request.user_id)
+        professional_weekly_eligible = False
+
+        # Professional runs are risk-first: ordinary planning cannot race ahead of
+        # the durable one-minute position cycle or a retirement/reconciliation phase.
+        if recipe.strategy_id == "pullback_trend_v2" and self.professional is not None:
+            state = self.professional._load_state(
+                policy_id=policy.policy_id,
+                strategy_id=registry_entry.strategy_id,
+                strategy_version=registry_entry.version,
+            )
+            if state is None:
+                decide(
+                    "noop",
+                    "professional_strategy_state_missing",
+                    strategy_id=registry_entry.strategy_id,
+                )
+                return finish("completed", selection=selection, order_plan_ids=[])
+            risk_due, risk_reason = risk_evaluation_due(
+                state.last_risk_evaluated_at,
+                started_at,
+            )
+            if risk_due or risk_reason not in {"risk_evaluation_not_due"}:
+                decide(
+                    "noop",
+                    "protective_risk_evaluation_required",
+                    strategy_id=registry_entry.strategy_id,
+                )
+                return finish("completed", selection=selection, order_plan_ids=[])
+            weekly = self.professional.claim_weekly_rebalance(
+                policy=policy,
+                strategy_id=registry_entry.strategy_id,
+                strategy_version=registry_entry.version,
+                evaluated_at=started_at,
+                acquire=False,
+            )
+            if not weekly.claimed:
+                decide(
+                    "noop",
+                    weekly.reason_code,
+                    strategy_id=registry_entry.strategy_id,
+                )
+                return finish("completed", selection=selection, order_plan_ids=[])
+            professional_weekly_eligible = True
 
         # Gate 8: monthly loss stop halts all automatic trading before any planning.
         if snapshot.monthly_loss_ratio <= policy.monthly_loss_stop_all_autotrading:
@@ -355,12 +569,46 @@ class OperatorService:
                 signals=signals,
                 snapshot=snapshot,
             )
-        proposals = self.harness.generate_order_proposals(portfolio_plan_id=plan.plan_id, snapshot=snapshot)
+        if not plan.order_intents:
+            decide("noop", "no_order_intents", strategy_id=registry_entry.strategy_id)
+            return finish("completed", selection=selection, order_plan_ids=[])
+
+        weekly_claim: OperatorCycleClaim | None = None
+        if professional_weekly_eligible and request.run_mode != "dry_run":
+            weekly = self.professional.claim_weekly_rebalance(
+                policy=policy,
+                strategy_id=registry_entry.strategy_id,
+                strategy_version=registry_entry.version,
+                evaluated_at=started_at,
+            )
+            if not weekly.claimed:
+                decide(
+                    "noop",
+                    weekly.reason_code,
+                    strategy_id=registry_entry.strategy_id,
+                )
+                return finish("completed", selection=selection, order_plan_ids=[])
+            if weekly.claim is None:
+                raise RuntimeError("weekly rebalance claim token is missing")
+            weekly_claim = weekly.claim
+
+        try:
+            proposals = self.harness.generate_order_proposals(
+                portfolio_plan_id=plan.plan_id,
+                snapshot=snapshot,
+            )
+        except Exception:
+            if weekly_claim is not None:
+                self.professional.release_weekly_rebalance(
+                    claim=weekly_claim,
+                )
+            raise
 
         if not proposals:
-            if not plan.order_intents:
-                decide("noop", "no_order_intents", strategy_id=registry_entry.strategy_id)
-                return finish("completed", selection=selection, order_plan_ids=[])
+            if weekly_claim is not None:
+                self.professional.release_weekly_rebalance(
+                    claim=weekly_claim,
+                )
             return blocked_by("risk_check_failed", selection=selection)
 
         if request.run_mode == "dry_run":
@@ -372,6 +620,15 @@ class OperatorService:
                     order_plan_id=proposal.order_plan_id,
                     risk_check_id=proposal.risk_check_id,
                 )
+                proposal.blocked_reason = "dry_run_no_submission"
+                transition_order_plan(
+                    order_plan=proposal,
+                    new_status=OrderStatus.cancelled,
+                    audit=self.audit,
+                    user_id=policy.user_id,
+                    source="operator_service",
+                )
+                self.repositories.order_plans.update(proposal)
             return finish(
                 "completed",
                 selection=selection,
@@ -379,7 +636,7 @@ class OperatorService:
                 risk_check_ids=[proposal.risk_check_id for proposal in proposals if proposal.risk_check_id],
             )
 
-        return self._submit_proposals(
+        result = self._submit_proposals(
             policy=policy,
             registry_entry=registry_entry,
             recipe=recipe,
@@ -389,7 +646,9 @@ class OperatorService:
             now=now,
             decide=decide,
             finish=finish,
+            weekly_claim=weekly_claim,
         )
+        return result
 
     def _load_recipe(self, strategy_id: str) -> StrategyRecipe | None:
         recipe = self.repositories.strategies.get(strategy_id)
@@ -448,6 +707,7 @@ class OperatorService:
         now: datetime | None,
         decide,
         finish,
+        weekly_claim: OperatorCycleClaim | None = None,
     ) -> OperatorRunResult:
         # Authorization must use the wall clock at decision time: proposals are created
         # after the run starts, so reusing the run start time would make every quote
@@ -458,6 +718,24 @@ class OperatorService:
         broker_order_ids: list[str] = []
         risk_check_ids: list[str] = []
         fallback: FallbackDecision | None = None
+
+        def fence_weekly_submission(_order: OrderPlan) -> None:
+            nonlocal weekly_claim
+            if weekly_claim is None:
+                return
+            if self.professional is None:
+                raise RuntimeError("weekly rebalance coordinator is missing")
+            fence_time = authorization_time if now is not None else utc_now()
+            if weekly_claim.completed_at is None:
+                weekly_claim = self.professional.commit_weekly_rebalance_submission(
+                    claim=weekly_claim,
+                    committed_at=fence_time,
+                )
+            else:
+                self.professional.require_weekly_rebalance_fence(
+                    weekly_claim,
+                    checked_at=fence_time,
+                )
 
         for proposal in proposals:
             state = self.harness._guardrail_state(
@@ -480,7 +758,6 @@ class OperatorService:
             if not result.authorized:
                 reason = result.first_failed_check or "operator_order_blocked"
                 proposal.blocked_reason = reason
-                self.repositories.order_plans.update(proposal)
                 self.harness.last_blocked_reason = reason
                 self.audit.emit(
                     user_id=policy.user_id,
@@ -490,6 +767,14 @@ class OperatorService:
                     after_state={"reason": reason, "checks": result.model_dump(mode="json")},
                     source="operator_service",
                 )
+                transition_order_plan(
+                    order_plan=proposal,
+                    new_status=OrderStatus.failed,
+                    audit=self.audit,
+                    user_id=policy.user_id,
+                    source="operator_service",
+                )
+                self.repositories.order_plans.update(proposal)
                 decide("block", reason, strategy_id=registry_entry.strategy_id, order_plan_id=proposal.order_plan_id)
                 blocked.append(proposal.order_plan_id)
                 if fallback is None and reason in CHECK_TO_FALLBACK_REASON:
@@ -507,7 +792,15 @@ class OperatorService:
             )
             self.repositories.order_plans.update(proposal)
             try:
-                order_plan, broker_order, fills = self.harness.submit_order_plan(proposal.order_plan_id)
+                order_plan, broker_order, fills = self.harness.submit_order_plan(
+                    proposal.order_plan_id,
+                    snapshot=snapshot,
+                    before_broker_submit=(
+                        fence_weekly_submission
+                        if weekly_claim is not None
+                        else None
+                    ),
+                )
             except (RiskCheckRequired, ApprovalRequired) as exc:
                 decide("block", str(exc), strategy_id=registry_entry.strategy_id, order_plan_id=proposal.order_plan_id)
                 blocked.append(proposal.order_plan_id)
@@ -546,6 +839,19 @@ class OperatorService:
             status = "fallback" if fallback.to_level > 0 else "blocked"
         else:
             status = "blocked"
+        if weekly_claim is not None:
+            if self.professional is None:
+                raise RuntimeError("weekly rebalance completion context is missing")
+            if weekly_claim.completed_at is not None:
+                self.professional.complete_weekly_rebalance(
+                    policy=policy,
+                    claim=weekly_claim,
+                    completed_at=(authorization_time if now is not None else utc_now()),
+                )
+            else:
+                self.professional.release_weekly_rebalance(
+                    claim=weekly_claim,
+                )
         return finish(
             status,
             fallback=fallback,
@@ -569,14 +875,17 @@ class OperatorService:
                 action="order_failed",
             )
             self.repositories.order_plans.update(current)
-        self.harness.autopilot_paused = True
-        self.harness.last_blocked_reason = "broker_failure"
+        self.harness.record_broker_health(
+            policy_id=policy.policy_id,
+            healthy=False,
+            reason="broker_failure",
+        )
         self.audit.emit(
             user_id=policy.user_id,
             entity_type="order_plan",
             entity_id=proposal.order_plan_id,
             action="broker_health_failed",
-            after_state={"error": str(error)},
+            after_state={"error_type": type(error).__name__},
             source="operator_service",
         )
         return self.fallbacks.for_reason("broker_failure")

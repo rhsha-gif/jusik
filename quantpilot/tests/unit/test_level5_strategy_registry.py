@@ -4,6 +4,8 @@ import json
 from pathlib import Path
 from typing import Any
 
+import pytest
+
 from quantpilot.packages.core.strategies.promotion import (
     StrategyLifecycleRecord,
     StrategyLifecycleStatus,
@@ -45,6 +47,40 @@ def test_strategy_registry_selects_only_validated_level5_entries() -> None:
 
     assert decision.selected_strategy_id == "candidate"
     assert decision.rejected["draft"] == "status_not_level5_eligible"
+
+
+def test_strategy_registry_snapshots_entries_on_write_and_read() -> None:
+    entry = StrategyRegistryEntry(
+        strategy_id="immutable-draft",
+        version="1.0",
+        status="draft",
+        allowed_execution_levels=[],
+    )
+    registry = StrategyRegistry([entry])
+
+    entry.status = "validated_l5"
+    entry.allowed_execution_levels.extend(["level_5", "fully_automated"])
+    stored = registry.require("immutable-draft")
+    assert stored.status == "draft"
+    assert stored.allowed_execution_levels == []
+
+    stored.status = "validated_l5"
+    stored.allowed_execution_levels.append("level_5")
+    assert registry.require("immutable-draft").status == "draft"
+    assert registry.require("immutable-draft").allowed_execution_levels == []
+
+
+def test_strategy_registry_snapshots_lifecycle_authority_evidence() -> None:
+    entry = _entry("immutable-lifecycle")
+    lifecycle = _record("immutable-lifecycle")
+    lifecycle.status = StrategyLifecycleStatus.draft
+    registry = StrategyRegistry([entry], lifecycle_records=[lifecycle])
+
+    lifecycle.status = StrategyLifecycleStatus.paper_validated
+
+    decision = registry.select_for_level5(policy_version=5)
+    assert decision.selected_strategy_id is None
+    assert decision.rejected["immutable-lifecycle"] == "lifecycle_status_insufficient"
 
 
 def _entry(strategy_id: str, **updates: Any) -> StrategyRegistryEntry:
@@ -111,7 +147,7 @@ def test_strategy_registry_selects_lowest_priority_and_respects_version_bounds()
 def test_underperformance_demotes_strategy_out_of_level5_selection() -> None:
     registry = StrategyRegistry([_entry("fading_alpha")])
 
-    action = registry.apply_performance_review("fading_alpha", excess_return=-0.06, max_drawdown=-0.10)
+    action = registry.apply_performance_review("fading_alpha", excess_return=-0.06, max_drawdown=0.10)
 
     assert action == "demoted"
     entry = registry.require("fading_alpha")
@@ -124,7 +160,7 @@ def test_underperformance_demotes_strategy_out_of_level5_selection() -> None:
 def test_severe_underperformance_disables_strategy() -> None:
     registry = StrategyRegistry([_entry("blown_up")])
 
-    action = registry.apply_performance_review("blown_up", excess_return=-0.02, max_drawdown=-0.25)
+    action = registry.apply_performance_review("blown_up", excess_return=-0.02, max_drawdown=0.25)
 
     assert action == "disabled"
     entry = registry.require("blown_up")
@@ -137,10 +173,21 @@ def test_severe_underperformance_disables_strategy() -> None:
 def test_acceptable_performance_leaves_strategy_unchanged() -> None:
     registry = StrategyRegistry([_entry("steady")])
 
-    action = registry.apply_performance_review("steady", excess_return=0.01, max_drawdown=-0.05)
+    action = registry.apply_performance_review("steady", excess_return=0.01, max_drawdown=0.05)
 
     assert action == "unchanged"
     assert registry.require("steady").status == "validated_l5"
+
+
+def test_performance_review_rejects_legacy_negative_drawdown_sign() -> None:
+    registry = StrategyRegistry([_entry("signed_wrong")])
+
+    with pytest.raises(ValueError, match="positive loss ratio"):
+        registry.apply_performance_review(
+            "signed_wrong",
+            excess_return=0.0,
+            max_drawdown=-0.20,
+        )
 
 
 def test_fixture_registry_selects_only_the_level5_candidate() -> None:

@@ -119,6 +119,10 @@ AUDIT_EVENT_ACTIONS = {
     "strategy_promoted",
     "strategy_revoked",
     "strategy_lifecycle_disabled",
+    "strategy_health_reviewed",
+    "risk_liquidation_proposed",
+    "risk_liquidation_authorized",
+    "prebroker_submission_guard_failed",
 }
 
 

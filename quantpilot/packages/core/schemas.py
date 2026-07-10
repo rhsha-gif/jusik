@@ -2,6 +2,7 @@ from __future__ import annotations
 
 from datetime import date, datetime, timedelta, timezone
 from enum import Enum
+from math import isfinite
 from typing import Any, Literal
 from uuid import uuid4
 
@@ -347,8 +348,8 @@ class RebalanceSuggestionReport(HarnessModel):
 
 class PortfolioPosition(HarnessModel):
     symbol: str
-    quantity: float = Field(ge=0)
-    market_price: float = Field(gt=0)
+    quantity: float = Field(ge=0, allow_inf_nan=False)
+    market_price: float = Field(gt=0, allow_inf_nan=False)
     sector: str = "unknown"
 
     @property
@@ -359,11 +360,11 @@ class PortfolioPosition(HarnessModel):
 class PortfolioSnapshot(HarnessModel):
     snapshot_id: str = Field(default_factory=lambda: new_id("snap"))
     user_id: str = "fixture-user"
-    cash: float = Field(ge=0)
-    equity: float = Field(gt=0)
+    cash: float = Field(ge=0, allow_inf_nan=False)
+    equity: float = Field(gt=0, allow_inf_nan=False)
     positions: list[PortfolioPosition] = Field(default_factory=list)
-    daily_loss_ratio: float = 0.0
-    monthly_loss_ratio: float = 0.0
+    daily_loss_ratio: float = Field(default=0.0, ge=-1, allow_inf_nan=False)
+    monthly_loss_ratio: float = Field(default=0.0, ge=-1, allow_inf_nan=False)
     captured_at: datetime = Field(default_factory=utc_now)
     source: str = "fixture_portfolio"
 
@@ -464,8 +465,8 @@ class AuthorityCheckResult(HarnessModel):
 
 
 class GuardrailState(HarnessModel):
-    daily_order_count: int = 0
-    daily_turnover_used: float = 0.0
+    daily_order_count: int = Field(default=0, ge=0)
+    daily_turnover_used: float = Field(default=0.0, ge=0, allow_inf_nan=False)
     monthly_loss_pause_active: bool = False
     monthly_loss_stop_active: bool = False
     kill_switch_engaged: bool = False
@@ -476,6 +477,23 @@ class GuardrailState(HarnessModel):
     last_blocked_reason: str | None = None
     unfilled_order_keys: list[str] = Field(default_factory=list)
     submitted_idempotency_keys: list[str] = Field(default_factory=list)
+    reserved_sell_quantities: dict[str, float] = Field(default_factory=dict)
+
+    @field_validator("reserved_sell_quantities")
+    @classmethod
+    def validate_reserved_sell_quantities(
+        cls,
+        value: dict[str, float],
+    ) -> dict[str, float]:
+        normalized: dict[str, float] = {}
+        for symbol, quantity in value.items():
+            key = symbol.strip().upper()
+            if not key:
+                raise ValueError("reserved sell quantity symbols must not be blank")
+            if not isfinite(quantity) or quantity < 0:
+                raise ValueError("reserved sell quantities must be finite and non-negative")
+            normalized[key] = normalized.get(key, 0.0) + quantity
+        return normalized
 
 
 class OrderPlan(HarnessModel):
@@ -483,6 +501,7 @@ class OrderPlan(HarnessModel):
     policy_id: str
     policy_version: int
     intent: OrderIntent
+    purpose: Literal["rebalance", "protective_exit", "strategy_retirement"] = "rebalance"
     status: OrderStatus = OrderStatus.draft
     idempotency_key: str
     risk_check_id: str | None = None
@@ -655,10 +674,68 @@ class Fill(HarnessModel):
     broker_order_id: str
     order_plan_id: str
     symbol: str
-    quantity: float = Field(gt=0)
-    price: float = Field(gt=0)
-    notional: float = Field(gt=0)
+    quantity: float = Field(gt=0, allow_inf_nan=False)
+    price: float = Field(gt=0, allow_inf_nan=False)
+    notional: float = Field(gt=0, allow_inf_nan=False)
     filled_at: datetime = Field(default_factory=utc_now)
+
+
+class ProcessedFillRecord(HarnessModel):
+    """Durable, secret-free evidence that one broker fill changed attribution."""
+
+    fill_id: str
+    broker_order_id: str
+    order_plan_id: str
+    policy_id: str
+    policy_version: int = Field(ge=1)
+    user_id: str
+    strategy_id: str
+    strategy_version: str
+    symbol: str
+    side: Literal["buy", "sell"]
+    quantity: float = Field(gt=0, allow_inf_nan=False)
+    price: float = Field(gt=0, allow_inf_nan=False)
+    notional: float = Field(gt=0, allow_inf_nan=False)
+    filled_at: datetime
+    recorded_at: datetime
+
+    @field_validator(
+        "fill_id",
+        "broker_order_id",
+        "order_plan_id",
+        "policy_id",
+        "user_id",
+        "strategy_id",
+        "strategy_version",
+        "symbol",
+    )
+    @classmethod
+    def processed_fill_identity_must_not_be_blank(cls, value: str) -> str:
+        normalized = value.strip()
+        if not normalized:
+            raise ValueError("processed-fill identity fields must not be blank")
+        return normalized
+
+    @field_validator("symbol")
+    @classmethod
+    def normalize_processed_fill_symbol(cls, value: str) -> str:
+        return value.upper()
+
+    @field_validator("filled_at", "recorded_at")
+    @classmethod
+    def processed_fill_timestamps_must_be_aware(cls, value: datetime) -> datetime:
+        if value.tzinfo is None or value.utcoffset() is None:
+            raise ValueError("processed-fill timestamps must include a UTC offset")
+        return value
+
+    @model_validator(mode="after")
+    def processed_fill_evidence_must_be_consistent(self) -> "ProcessedFillRecord":
+        if self.filled_at > self.recorded_at:
+            raise ValueError("processed fill cannot be recorded before it occurred")
+        expected_notional = self.quantity * self.price
+        if abs(expected_notional - self.notional) > max(0.01, self.notional * 0.000001):
+            raise ValueError("processed-fill notional must equal quantity times price")
+        return self
 
 
 class AuditLogEvent(HarnessModel):

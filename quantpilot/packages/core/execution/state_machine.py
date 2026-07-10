@@ -4,8 +4,15 @@ import os
 from datetime import datetime, time
 from zoneinfo import ZoneInfo
 
-from quantpilot.packages.core.risk.gatekeeper import run_risk_check
-from quantpilot.packages.core.risk.gatekeeper import market_orders_enabled
+from quantpilot.packages.core.risk.gatekeeper import (
+    RISK_REDUCING_PURPOSES,
+    aware_age_seconds,
+    is_verified_risk_reducing_order,
+    market_orders_enabled,
+    run_risk_check,
+)
+from quantpilot.packages.core.operator.position_ledger import ManagedPositionBinding
+from quantpilot.packages.core.marketdata.types import Quote
 from quantpilot.packages.core.strategies.registry import StrategyRegistryEntry
 from quantpilot.packages.core.schemas import (
     AuthorityCheckResult,
@@ -83,6 +90,23 @@ KRX_OPENING_AUCTION_BLOCK_MINUTES = 10
 KRX_CLOSING_AUCTION_BLOCK_MINUTES = 20
 
 
+def strategy_versions_match(left: str, right: str) -> bool:
+    def normalized(value: str) -> tuple[int, ...] | None:
+        parts = value.strip().split(".")
+        if not parts or any(not part.isdigit() for part in parts):
+            return None
+        numbers = [int(part) for part in parts]
+        while len(numbers) > 1 and numbers[-1] == 0:
+            numbers.pop()
+        return tuple(numbers)
+
+    left_numeric = normalized(left)
+    right_numeric = normalized(right)
+    if left_numeric is not None and right_numeric is not None:
+        return left_numeric == right_numeric
+    return left.strip() == right.strip()
+
+
 def is_krx_auto_order_window(now: datetime | None = None) -> bool:
     current = (now or utc_now()).astimezone(KRX_TIMEZONE)
     if current.weekday() >= 5:
@@ -154,6 +178,12 @@ def authorize_level4(
         return result
     if result := record("policy_version_match", order_plan.policy_version == policy.version, "plan policy version must match current policy"):
         return result
+    if result := record(
+        "policy_identity_match",
+        order_plan.policy_id == policy.policy_id and snapshot.user_id == policy.user_id,
+        "plan, policy, and reconciled account snapshot must share one identity",
+    ):
+        return result
     if result := record("broker_health", guardrail_state.broker_healthy, "broker heartbeat must be healthy"):
         return result
 
@@ -221,10 +251,22 @@ def authorize_level5(
     state: GuardrailState | None = None,
     seen_idempotency_keys: set[str] | None = None,
     now: datetime | None = None,
+    position_binding: ManagedPositionBinding | None = None,
+    market_quote: Quote | None = None,
 ) -> AuthorityCheckResult:
     current_time = now or utc_now()
     guardrail_state = state or GuardrailState()
     seen = seen_idempotency_keys or set()
+    claims_risk_reducing = order_plan.purpose in RISK_REDUCING_PURPOSES
+    verified_risk_reducing = is_verified_risk_reducing_order(
+        order_plan,
+        snapshot,
+        position_binding=position_binding,
+        market_quote=market_quote,
+        reserved_sell_quantities=guardrail_state.reserved_sell_quantities,
+        now=current_time,
+        quote_max_age_seconds=policy.stale_quote_max_age_seconds,
+    )
     steps: list[AuthorityCheckStep] = []
 
     def record(check_name: str, passed: bool, detail: str) -> AuthorityCheckResult | None:
@@ -263,20 +305,73 @@ def authorize_level5(
     if result := record("broker_health", guardrail_state.broker_healthy, "broker heartbeat must be healthy"):
         return result
 
-    quote_age = (current_time - order_plan.intent.quote_time).total_seconds()
-    if result := record("quote_not_stale", 0 <= quote_age <= policy.stale_quote_max_age_seconds, "quote must be fresh for automatic submission"):
+    snapshot_age = aware_age_seconds(current_time, snapshot.captured_at)
+    snapshot_max_age_seconds = (
+        policy.stale_quote_max_age_seconds if claims_risk_reducing else 900
+    )
+    if result := record(
+        "snapshot_not_stale",
+        snapshot_age is not None
+        and 0 <= snapshot_age <= snapshot_max_age_seconds,
+        "reconciled portfolio snapshot must be timezone-aware and fresh for the order purpose",
+    ):
         return result
 
-    registry_ok = registry_entry.status == "validated_l5"
-    if result := record("strategy_registry_validated_l5", registry_ok, "registry entry must be validated_l5"):
+    quote_age = aware_age_seconds(current_time, order_plan.intent.quote_time)
+    if result := record(
+        "quote_not_stale",
+        quote_age is not None and 0 <= quote_age <= policy.stale_quote_max_age_seconds,
+        "quote must be timezone-aware and fresh for automatic submission",
+    ):
         return result
-    level_ok = bool({"level_5", "fully_automated"}.intersection(set(registry_entry.allowed_execution_levels)))
-    if result := record("strategy_level_allowed", level_ok, "registry entry must allow fully automated execution"):
+
+    if result := record(
+        "risk_reducing_purpose_verified",
+        not claims_risk_reducing or verified_risk_reducing,
+        "protective and retirement purposes must be verified against the reconciled long position",
+    ):
+        return result
+
+    registry_ok = registry_entry.status == "validated_l5" or (
+        registry_entry.status == "disabled" and verified_risk_reducing
+    )
+    if result := record(
+        "strategy_registry_validated_l5",
+        registry_ok,
+        "registry entry must be validated_l5; disabled strategies may only reduce attributed risk",
+    ):
+        return result
+    level_ok = bool(
+        {"level_5", "fully_automated"}.intersection(set(registry_entry.allowed_execution_levels))
+    ) or (registry_entry.status == "disabled" and verified_risk_reducing)
+    if result := record(
+        "strategy_level_allowed",
+        level_ok,
+        "registry entry must allow fully automated execution unless closing disabled-strategy risk",
+    ):
         return result
     if result := record(
         "strategy_recipe_matches_registry",
-        strategy.strategy_id == registry_entry.strategy_id,
-        "signal recipe must match the selected registry entry",
+        strategy.strategy_id == registry_entry.strategy_id
+        and strategy_versions_match(strategy.version, registry_entry.version)
+        and (
+            order_plan.explanation is None
+            or (
+                order_plan.explanation.strategy_id == strategy.strategy_id
+                and (
+                    verified_risk_reducing
+                    or strategy_versions_match(
+                        order_plan.explanation.strategy_version,
+                        strategy.version,
+                    )
+                )
+            )
+        )
+        and (
+            not claims_risk_reducing
+            or order_plan.explanation is not None
+        ),
+        "signal recipe and risk-order attribution must match the registry version",
     ):
         return result
 
@@ -289,7 +384,10 @@ def authorize_level5(
     if result := record("order_type_allowed", order_type_allowed, "market orders require MARKET_ORDERS_ENABLED=true"):
         return result
 
-    monthly_stop = snapshot.monthly_loss_ratio <= policy.monthly_loss_stop_all_autotrading
+    monthly_stop = (
+        snapshot.monthly_loss_ratio <= policy.monthly_loss_stop_all_autotrading
+        and not verified_risk_reducing
+    )
     if result := record("monthly_loss_stop_not_triggered", not monthly_stop, "monthly stop blocks all automatic trading"):
         return result
     monthly_pause_buy = order_plan.intent.side == "buy" and snapshot.monthly_loss_ratio <= policy.monthly_loss_pause_new_buys
@@ -311,6 +409,9 @@ def authorize_level5(
         quote_max_age_seconds=policy.stale_quote_max_age_seconds,
         strategy_id=registry_entry.strategy_id,
         now=current_time,
+        position_binding=position_binding,
+        market_quote=market_quote,
+        snapshot_max_age_seconds=snapshot_max_age_seconds,
     )
     if result := record("fresh_risk_check_passed", risk_check.passed, ",".join(risk_check.failed_checks) or "risk check passed"):
         return result

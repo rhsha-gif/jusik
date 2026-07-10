@@ -91,9 +91,9 @@ These paths remain unowned unless a later task explicitly adopts them after Code
 
 ## Active focus
 
-- Codex: `QP-040 in_progress` — strategy health persistence, verified protective sells, retirement, and cadence
+- Codex: `QP-050 in_progress` — durable KIS paper boundary, reconciliation, provenance, and session job
 - Claude Code: `idle/done` — QP-110 and QP-120 reviewed; no additional Claude task is necessary
-- Next integration gate: `GATE-2` — verified risk-reducing order isolation plus restart-safe retirement/cadence proof
+- Next integration gate: `GATE-3` — process-kill-safe paper dispatch, broker reconciliation, and mode provenance
 
 ## Work queue
 
@@ -105,8 +105,8 @@ These paths remain unowned unless a later task explicitly adopts them after Code
 | QP-110 | claude | QP-010 | technical indicators, pure pullback signal module, focused tests/fixtures | done | Selected strategy emits deterministic, no-lookahead actions using the locked thresholds | Codex-reviewed targeted suite: 12 passed; canonical rules shared with v2 typed schema |
 | QP-030 | codex | QP-020, QP-110 | schemas, signal adapter, portfolio optimizer/planner, operator integration | done | Selected strategy alone drives plans; max positions and existing safety gates are enforced | post-review backend 379 passed/1 skipped/7 QP-120 xfailed; smoke mock/default-blocked; selected-v2 integration and blocked-no-sell proofs passed |
 | QP-120 | claude | QP-110 | pure position-risk evaluator and focused tests | done | 8%/2ATR stop and technical exit/trim precedence are deterministic and broker-free | Codex-reviewed targeted: 10 passed; completed-close contract and raw-boundary comparison added; backend 388 passed/1 manual skip |
-| QP-040 | codex | QP-030, QP-120 | strategy performance, retirement, liquidation, rebalance orchestration | in_progress | Retirement creates no buys; risk-reducing sells remain auditable and idempotent | pure strategy-health review: 13 passed; persistence/risk-order integration pending |
-| QP-050 | codex | QP-040 | KIS paper adapters, reconciliation, session job, fake-client tests | blocked | No production host accepted; fake tests pass; manual paper test stays opt-in | pending |
+| QP-040 | codex | QP-030, QP-120 | strategy performance, retirement, liquidation, rebalance orchestration | done | Retirement creates no buys; risk-reducing sells remain auditable and idempotent | independent audits found no P0/P1; backend 568 passed/1 skipped; smoke mock/default-blocked/live=false |
+| QP-050 | codex | QP-040 | KIS paper adapters, reconciliation, session job, fake-client tests | in_progress | Paper dispatch has a process-kill-safe journal and broker-query reconciliation; fixture/paper provenance is durable and cross-mode reuse fails closed; no production host is accepted; fake tests pass; manual paper test stays opt-in | claimed; durable dispatch/provenance hard gates recorded |
 | QP-060 | codex | QP-050 | operator status/report UI and final hardening | blocked | Safety state, position risk, strategy health, rebalance, and reconciliation are visible | pending |
 | QP-900 | codex | QP-060 | completion report and final verification only | blocked | Full acceptance audit passes; all required evidence is current | pending |
 
@@ -133,6 +133,10 @@ These paths remain unowned unless a later task explicitly adopts them after Code
   protective risk at one-minute cadence, and runs ordinary rebalance at most once per ISO week.
 - QP-050: thread the reconciled broker snapshot through the final submission-time risk check instead of silently
   substituting `fixture_portfolio_snapshot()`.
+- QP-050: persist a general paper-order submission journal before any external POST, record dispatch/accepted/
+  `outcome_unknown`, reconcile by broker query after restart, and never blindly resend an uncertain order.
+- QP-050: persist fixture/paper provenance at database, session, and relevant row boundaries; reject cross-mode
+  reopen or reuse before a KIS paper adapter can read state or submit an order.
 
 ## Blockers and human inputs
 
@@ -192,3 +196,21 @@ These paths remain unowned unless a later task explicitly adopts them after Code
   exposed both fixed-fraction and ATR stop components; and compare unrounded thresholds before rounding outputs.
   Exact stop, technical-exit, RSI/extension trim, stale/future/naive quote, precedence, and determinism proofs pass.
   Verification: QP-120 targeted `10 passed`; strategy-health targeted `13 passed`; backend `388 passed, 1 skipped`.
+- 2026-07-10 14:10 KST — Claude Code — Read-only verification pass during Codex QP-040 WIP; no Claude-owned task
+  is ready and no code was edited. Pure quant targeted suite `44 passed` (position-exit + pullback contracts,
+  including the working-tree NaN/inf and symbol-normalization hardening). Full backend snapshot: `559 tests,
+  2 failures`, both in Codex-owned paths: `test_level5_duplicate_run_key_does_not_duplicate_orders` and
+  `test_level5_kill_switch_engaged_after_run_is_not_masked_by_duplicate_key` hit
+  `ValueError: operator idempotency key is bound to a different request` at `operator/service.py:209`.
+  Diagnostic hint for QP-040: the new run fingerprint appears to include a per-request field (e.g. `requested_at`),
+  so a same-key replay no longer matches its stored fingerprint and raises instead of returning the cached result
+  or surfacing the kill switch. Observation only — mid-task snapshot, not a review verdict.
+- 2026-07-10 17:54 KST — Codex — QP-040 done after adversarial restart/concurrency review. Added durable managed
+  position attribution, protective/retirement order isolation, best-bid limit liquidation, strategy health and
+  retirement recovery, policy-portfolio weekly fencing, exact run replay binding, atomic safety-state patches,
+  prepared-order recovery, and daily attempted-order accounting. The earlier duplicate-run failures were contract
+  fixtures constructing different `requested_at` values for one idempotency key; they now reuse the exact request.
+  One full-run attempt also hit an inaccessible system pytest temp directory; rerunning the required command with
+  workspace-local `TEMP` passed `568 passed, 1 skipped in 10.26s`. Smoke passed with `broker=mock`, operator
+  default-blocked by `level5_flag_disabled`, and live trading false. Two independent final audits found no P0/P1.
+  QP-050 claimed with durable dispatch-journal, outcome-unknown reconciliation, and fixture/paper provenance gates.

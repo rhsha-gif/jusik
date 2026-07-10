@@ -14,10 +14,18 @@ from quantpilot.packages.core.marketdata.types import (
 )
 from quantpilot.packages.core.operator.schemas import OperatorRunRequest
 from quantpilot.packages.core.operator.service import OperatorService
-from quantpilot.packages.core.schemas import BrokerMode, ExecutionMode, UserPolicy, utc_now
+from quantpilot.packages.core.operator.position_ledger import StrategyOperatorState
+from quantpilot.packages.core.schemas import (
+    BrokerMode,
+    ExecutionMode,
+    OrderStatus,
+    UserPolicy,
+    utc_now,
+)
 from quantpilot.packages.core.signals.types import MultiFactorScore
 from quantpilot.packages.core.strategies.promotion import load_lifecycle_fixture
 from quantpilot.packages.core.strategies.registry import StrategyRegistry, StrategyRegistryEntry
+from quantpilot.packages.db.sqlite_repositories import PaperStateStore
 
 
 class FixedQuoteProvider:
@@ -76,11 +84,16 @@ def _score(symbol: str) -> MultiFactorScore:
 
 def test_selected_professional_strategy_uses_history_snapshot_and_actual_quote(
     monkeypatch: pytest.MonkeyPatch,
+    tmp_path,
 ) -> None:
     monkeypatch.setenv("FULLY_AUTOMATED_OPERATOR_ENABLED", "true")
     monkeypatch.setattr(
         "quantpilot.packages.core.signals.service.build_multi_factor_score",
         lambda signal, **_: _score(signal.symbol),
+    )
+    monkeypatch.setattr(
+        "quantpilot.packages.core.execution.state_machine.is_krx_auto_order_window",
+        lambda _now=None: True,
     )
     quote_time = utc_now()
     bars = _bars()
@@ -118,31 +131,137 @@ def test_selected_professional_strategy_uses_history_snapshot_and_actual_quote(
         fully_automated_operator_enabled=True,
     )
     harness.repositories.policies.add(policy)
-    service = OperatorService(
-        harness,
-        registry=registry,
-        ohlcv_provider=FakeOHLCVProvider(bars),
-        quote_provider=FixedQuoteProvider(quote),
-    )
+    with PaperStateStore(tmp_path / "professional-state.sqlite3") as store:
+        store.save_strategy_operator_state(
+            StrategyOperatorState(
+                policy_id=policy.policy_id,
+                strategy_id="pullback_trend_v2",
+                strategy_version="2.0",
+                health_status="active",
+                reason_codes=["healthy"],
+                last_risk_evaluated_at=quote_time,
+                updated_at=quote_time,
+            )
+        )
+        service = OperatorService(
+            harness,
+            registry=registry,
+            ohlcv_provider=FakeOHLCVProvider(bars),
+            quote_provider=FixedQuoteProvider(quote),
+            professional_state_store=store,
+        )
 
-    result = service.run_once(
-        OperatorRunRequest(
+        request = OperatorRunRequest(
             policy_id=policy.policy_id,
             requested_policy_version=policy.version,
             run_mode="dry_run",
             idempotency_key="professional-v2-selected-path",
-        ),
-        now=quote_time,
-    )
+        )
+        result = service.run_once(
+            request,
+            now=quote_time,
+        )
+        claims_after_dry_run = store.list_operator_cycle_claims()
+        dry_order_ids = {
+            order.order_plan_id
+            for order in service.repositories.order_plans.list()
+        }
+        dry_plans = service.repositories.portfolio_plans.list()
+        order_count = len(service.repositories.order_plans.list())
+        restarted = OperatorService(
+            HarnessService(harness.repositories),
+            registry=registry,
+            ohlcv_provider=FakeOHLCVProvider(bars),
+            quote_provider=FixedQuoteProvider(quote),
+            professional_state_store=store,
+        )
+        replayed = restarted.run_once(request, now=quote_time)
+        conflicting_restart = OperatorService(
+            HarnessService(harness.repositories),
+            registry=registry,
+            ohlcv_provider=FakeOHLCVProvider(bars),
+            quote_provider=FixedQuoteProvider(quote),
+            professional_state_store=store,
+        )
+        with pytest.raises(ValueError, match="different durable request"):
+            conflicting_restart.run_once(
+                request.model_copy(update={"user_id": "other-user"}),
+                now=quote_time,
+            )
+        order_count_after_replay = len(
+            restarted.repositories.order_plans.list()
+        )
+        actual_request = request.model_copy(
+            update={
+                "run_mode": "mock_submit",
+                "idempotency_key": "professional-v2-after-dry-run",
+            }
+        )
+        actual = restarted.run_once(actual_request)
 
     assert result.status == "completed"
     assert result.report.strategy_selection.selected_strategy_id == "pullback_trend_v2"
     assert result.report.order_plan_ids
+    assert replayed == result
+    assert order_count_after_replay == order_count
+    assert claims_after_dry_run == []
+    assert actual.status == "completed", {
+        "actual": actual.model_dump(mode="json"),
+        "orders": [
+            order.model_dump(mode="json")
+            for order in service.repositories.order_plans.list()
+        ],
+    }
+    assert actual.submitted_order_plan_ids
+    assert all(
+        service.repositories.order_plans.require(order_id).status
+        == OrderStatus.cancelled
+        for order_id in dry_order_ids
+    )
     generated = service.repositories.signals.list()
     assert {signal.strategy_id for signal in generated} == {"pullback_trend_v2"}
     assert {signal.source for signal in generated} == {"professional_pullback_trend_v2"}
-    plans = service.repositories.portfolio_plans.list()
-    assert len(plans) == 1
-    assert len(plans[0].order_intents) == 1
-    assert plans[0].order_intents[0].limit_price == quote.last
-    assert plans[0].order_intents[0].quote_time == quote_time
+    assert len(dry_plans) == 1
+    assert len(dry_plans[0].order_intents) == 1
+    assert dry_plans[0].order_intents[0].limit_price == quote.last
+    assert dry_plans[0].order_intents[0].quote_time == quote_time
+
+
+def test_policy_version_mismatch_request_replays_exactly_after_restart(
+    tmp_path,
+) -> None:
+    harness = HarnessService()
+    policy = UserPolicy(
+        version=2,
+        execution_mode=ExecutionMode.fully_automated,
+        broker=BrokerMode.mock,
+        authority_level=5,
+        fully_automated_operator_enabled=True,
+    )
+    harness.repositories.policies.add(policy)
+    request = OperatorRunRequest(
+        policy_id=policy.policy_id,
+        requested_policy_version=1,
+        run_mode="mock_submit",
+        idempotency_key="policy-version-mismatch-replay",
+    )
+    now = utc_now()
+    with PaperStateStore(tmp_path / "version-replay.sqlite3") as store:
+        first = OperatorService(
+            harness,
+            professional_state_store=store,
+        ).run_once(request, now=now)
+        replayed = OperatorService(
+            HarnessService(harness.repositories),
+            professional_state_store=store,
+        ).run_once(request, now=now)
+        checkpoint = store.find_run_checkpoint_by_idempotency_key(
+            request.idempotency_key
+        )
+
+    assert first.fallback is not None
+    assert first.fallback.reason_code == "policy_review_required"
+    assert replayed == first
+    assert checkpoint is not None
+    assert checkpoint.policy_version == request.requested_policy_version
+    assert first.report.policy_version == policy.version

@@ -37,6 +37,7 @@ class MockBroker(BrokerAdapter):
             order_plan_id=order_plan.order_plan_id,
             broker_mode=BrokerMode.mock,
             broker_reference=f"mock-{order_plan.order_plan_id}",
+            accepted_at=order_plan.intent.quote_time,
         )
         fill = Fill(
             broker_order_id=broker_order.broker_order_id,
@@ -45,5 +46,6 @@ class MockBroker(BrokerAdapter):
             quantity=order_plan.intent.quantity,
             price=price,
             notional=round(order_plan.intent.quantity * price, 2),
+            filled_at=order_plan.intent.quote_time,
         )
         return broker_order, [fill]

@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from copy import deepcopy
 from datetime import datetime
 from typing import Any
 
@@ -11,6 +12,7 @@ from quantpilot.packages.db.repositories import RepositoryRegistry
 
 
 POLICY_UPDATE_CONFIRMATION = "confirm policy update"
+IMMUTABLE_POLICY_FIELDS = {"policy_id", "user_id", "version", "created_at"}
 
 # Material fields change risk exposure, broker access, or authority. Updating any of
 # them must never silently mutate an active policy: the update stays pending until the
@@ -88,13 +90,23 @@ class PolicyVersioningService:
 
     def pending_change(self, policy_id: str) -> PolicyVersionChange | None:
         pending = self._pending.get(policy_id)
-        return pending[1] if pending else None
+        return (
+            None
+            if pending is None
+            else PolicyVersionChange.model_validate(pending[1].model_dump())
+        )
 
     def propose_update(self, *, policy_id: str, changes: dict[str, Any], changed_by: str) -> PolicyVersionChange:
         policy = self.repositories.policies.require(policy_id)
         changed_fields = sorted(changes)
         if not changed_fields:
             raise ValueError("policy update requires at least one changed field")
+        immutable_changes = sorted(IMMUTABLE_POLICY_FIELDS.intersection(changed_fields))
+        if immutable_changes:
+            raise ValueError(
+                "policy identity fields are immutable: "
+                + ", ".join(immutable_changes)
+            )
         requires_review = bool(MATERIAL_POLICY_FIELDS.intersection(changed_fields))
         change = PolicyVersionChange(
             policy_id=policy_id,
@@ -114,10 +126,11 @@ class PolicyVersioningService:
             source="policy_versioning_service",
         )
         if requires_review:
-            self._pending[policy_id] = (dict(changes), change)
-            return change
-        self._apply(policy=policy, changes=dict(changes), change=change)
-        return change
+            stored_change = PolicyVersionChange.model_validate(change.model_dump())
+            self._pending[policy_id] = (deepcopy(changes), stored_change)
+            return PolicyVersionChange.model_validate(stored_change.model_dump())
+        self._apply(policy=policy, changes=deepcopy(changes), change=change)
+        return PolicyVersionChange.model_validate(change.model_dump())
 
     def confirm_update(self, *, policy_id: str, confirmation: str) -> UserPolicy:
         pending = self._pending.get(policy_id)
@@ -127,11 +140,24 @@ class PolicyVersioningService:
             raise PolicyUpdateConfirmationRequired(
                 f"explicit confirmation '{POLICY_UPDATE_CONFIRMATION}' is required for material policy changes"
             )
-        changes, change = self._pending.pop(policy_id)
         policy = self.repositories.policies.require(policy_id)
+        changes, change = pending
+        if policy.version != change.previous_version:
+            self._pending.pop(policy_id, None)
+            raise PolicyUpdateConfirmationRequired(
+                "pending policy update is stale and must be proposed again"
+            )
+        self._pending.pop(policy_id, None)
         return self._apply(policy=policy, changes=changes, change=change)
 
     def _apply(self, *, policy: UserPolicy, changes: dict[str, Any], change: PolicyVersionChange) -> UserPolicy:
+        if (
+            policy.version != change.previous_version
+            or change.next_version != policy.version + 1
+        ):
+            raise PolicyUpdateConfirmationRequired(
+                "policy update version compare-and-swap failed"
+            )
         before = policy.model_copy(deep=True)
         updated = policy.model_copy(update={**changes, "version": change.next_version})
         # Re-validate the merged policy so an update cannot smuggle in values the

@@ -30,9 +30,13 @@ KIS_BUYING_POWER_ENDPOINT = "/uapi/domestic-stock/v1/trading/inquire-psbl-order"
 KIS_BUYING_POWER_TR_ID = "VTTC8908R"
 KIS_DAILY_ORDERS_ENDPOINT = "/uapi/domestic-stock/v1/trading/inquire-daily-ccld"
 KIS_DAILY_ORDERS_TR_ID = "VTTC0081R"
+KIS_CANCELABLE_ORDERS_ENDPOINT = "/uapi/domestic-stock/v1/trading/inquire-psbl-rvsecncl"
+KIS_CANCELABLE_ORDERS_TR_ID = "VTTC0084R"
 KIS_CASH_ORDER_ENDPOINT = "/uapi/domestic-stock/v1/trading/order-cash"
 KIS_CASH_BUY_TR_ID = "VTTC0012U"
 KIS_CASH_SELL_TR_ID = "VTTC0011U"
+KIS_CANCEL_ORDER_ENDPOINT = "/uapi/domestic-stock/v1/trading/order-rvsecncl"
+KIS_CANCEL_ORDER_TR_ID = "VTTC0013U"
 
 _PAPER_HOST = "openapivts.koreainvestment.com"
 _PAPER_PORT = 29443
@@ -44,7 +48,9 @@ _ALLOWED_ENDPOINTS = frozenset(
         KIS_BALANCE_ENDPOINT,
         KIS_BUYING_POWER_ENDPOINT,
         KIS_DAILY_ORDERS_ENDPOINT,
+        KIS_CANCELABLE_ORDERS_ENDPOINT,
         KIS_CASH_ORDER_ENDPOINT,
+        KIS_CANCEL_ORDER_ENDPOINT,
     }
 )
 _SAFE_CODE = re.compile(r"[A-Za-z0-9_.-]{1,32}\Z")
@@ -90,6 +96,10 @@ class KisPaperBusinessError(KisPaperError):
 
 class KisPaperOrderOutcomeUnknown(KisPaperError):
     """An order may have reached KIS, but no definitive outcome was received."""
+
+
+class KisPaperCancelOutcomeUnknown(KisPaperError):
+    """A cancellation may have reached KIS, but its outcome is not definitive."""
 
 
 @dataclass(frozen=True)
@@ -399,6 +409,34 @@ class KisDailyOrdersResult:
 
 
 @dataclass(frozen=True)
+class KisCancelableOrder:
+    order_branch_number: str
+    order_number: str
+    original_order_number: str
+    order_division_name: str
+    symbol: str
+    product_name: str
+    revision_cancel_division_name: str
+    order_quantity: int
+    order_price: Decimal
+    order_time: str
+    total_filled_quantity: int
+    total_filled_amount: Decimal
+    cancelable_quantity: int
+    side: Literal["buy", "sell"]
+    order_division_code: str
+    exchange_division_code: str
+    exchange_id: str
+
+
+@dataclass(frozen=True)
+class KisCancelableOrdersResult:
+    rows: tuple[KisCancelableOrder, ...]
+    pages_fetched: int
+    transaction_id: str = KIS_CANCELABLE_ORDERS_TR_ID
+
+
+@dataclass(frozen=True)
 class KisCashOrderResult:
     symbol: str
     side: Literal["buy", "sell"]
@@ -409,6 +447,17 @@ class KisCashOrderResult:
     order_time: str
     message_code: str
     transaction_id: str
+
+
+@dataclass(frozen=True)
+class KisCancelOrderResult:
+    original_order_number: str
+    cancel_order_number: str
+    order_branch_number: str
+    cancelled_quantity: int
+    order_time: str
+    message_code: str
+    transaction_id: str = KIS_CANCEL_ORDER_TR_ID
 
 
 class KisPaperClient:
@@ -599,6 +648,41 @@ class KisPaperClient:
             rows.extend(_parse_daily_order(row) for row in raw_rows)
         return KisDailyOrdersResult(tuple(rows), pages)
 
+    def get_cancelable_orders(self) -> KisCancelableOrdersResult:
+        """Return every currently cancelable domestic paper order."""
+
+        params = {
+            "CANO": self._config.account_number,
+            "ACNT_PRDT_CD": self._config.product_code,
+            "INQR_DVSN_1": "0",
+            "INQR_DVSN_2": "0",
+            "CTX_AREA_FK100": "",
+            "CTX_AREA_NK100": "",
+        }
+        rows: list[KisCancelableOrder] = []
+        seen_order_numbers: set[str] = set()
+        pages = 0
+        for response in self._paginated_get(
+            KIS_CANCELABLE_ORDERS_ENDPOINT,
+            KIS_CANCELABLE_ORDERS_TR_ID,
+            params,
+        ):
+            pages += 1
+            raw_rows = _required_list(
+                response.payload,
+                "output",
+                "cancelable-order response",
+            )
+            for raw_row in raw_rows:
+                row = _parse_cancelable_order(raw_row)
+                if row.order_number in seen_order_numbers:
+                    raise KisPaperProtocolError(
+                        "KIS paper cancelable-order response repeated an order number"
+                    )
+                seen_order_numbers.add(row.order_number)
+                rows.append(row)
+        return KisCancelableOrdersResult(tuple(rows), pages)
+
     def get_buying_power(
         self,
         symbol: str,
@@ -747,6 +831,114 @@ class KisPaperClient:
             order_time=order_time,
             message_code=message_code,
             transaction_id=tr_id,
+        )
+
+    def cancel_full_remaining_order(
+        self,
+        *,
+        order_branch_number: str,
+        original_order_number: str,
+        order_division_code: str,
+        cancelable_quantity: int,
+        original_order_price: Decimal,
+        exchange: str = "KRX",
+    ) -> KisCancelOrderResult:
+        """Submit one full-remaining cancellation attempt for a paper order."""
+
+        _validate_exchange(exchange)
+        branch_number = _validate_digit_identifier(
+            order_branch_number,
+            "cancel order branch number",
+            maximum_length=8,
+        )
+        original_number = _validate_digit_identifier(
+            original_order_number,
+            "cancel original order number",
+            maximum_length=16,
+        )
+        division_code = _validate_digit_identifier(
+            order_division_code,
+            "cancel order division code",
+            maximum_length=2,
+        )
+        if len(division_code) != 2:
+            raise KisPaperConfigurationError(
+                "KIS paper cancel order division code must contain two digits"
+            )
+        if (
+            isinstance(cancelable_quantity, bool)
+            or not isinstance(cancelable_quantity, int)
+            or cancelable_quantity <= 0
+        ):
+            raise KisPaperConfigurationError(
+                "KIS paper cancelable quantity must be a positive integer"
+            )
+        price = _coerce_limit_price(original_order_price)
+        body = {
+            "CANO": self._config.account_number,
+            "ACNT_PRDT_CD": self._config.product_code,
+            "KRX_FWDG_ORD_ORGNO": branch_number,
+            "ORGN_ODNO": original_number,
+            "ORD_DVSN": division_code,
+            "RVSE_CNCL_DVSN_CD": "02",
+            "ORD_QTY": str(cancelable_quantity),
+            "ORD_UNPR": format(price, "f"),
+            "QTY_ALL_ORD_YN": "Y",
+            "EXCG_ID_DVSN_CD": "KRX",
+            "CNDT_PRIC": "",
+        }
+        try:
+            response = self._request(
+                "POST",
+                KIS_CANCEL_ORDER_ENDPOINT,
+                headers=self._auth_headers(KIS_CANCEL_ORDER_TR_ID),
+                body=body,
+            )
+            _ensure_http_success(response, "cancel-order request")
+            _assert_business_success(response, "cancel-order request")
+            output = _required_mapping(response.payload, "output", "cancel-order response")
+            forwarding_number = _required_text(
+                output,
+                "KRX_FWDG_ORD_ORGNO",
+                "cancel-order output",
+            )
+            cancel_order_number = _required_text(
+                output,
+                "ODNO",
+                "cancel-order output",
+            )
+            order_time = _required_text(output, "ORD_TMD", "cancel-order output")
+            if not re.fullmatch(r"\d{6}", order_time):
+                raise KisPaperProtocolError(
+                    "KIS paper cancel-order output has an invalid order time"
+                )
+            message_code = _required_safe_code(
+                response.payload,
+                "msg_cd",
+                "cancel-order response",
+            )
+        except KisPaperBusinessError:
+            raise
+        except KisPaperCancelOutcomeUnknown:
+            raise
+        except (
+            KisPaperTransportError,
+            KisPaperProtocolError,
+            http.client.HTTPException,
+            TimeoutError,
+            ConnectionError,
+            OSError,
+        ):
+            raise KisPaperCancelOutcomeUnknown(
+                "KIS paper cancel-order outcome is unknown; reconcile before any retry"
+            ) from None
+        return KisCancelOrderResult(
+            original_order_number=original_number,
+            cancel_order_number=cancel_order_number,
+            order_branch_number=forwarding_number,
+            cancelled_quantity=cancelable_quantity,
+            order_time=order_time,
+            message_code=message_code,
         )
 
     def _paginated_get(
@@ -1048,6 +1240,81 @@ def _parse_daily_order(raw: Any) -> KisDailyOrderFill:
         ),
         total_filled_amount=_required_decimal(raw, "tot_ccld_amt", "daily-order row"),
     )
+
+
+def _parse_cancelable_order(raw: Any) -> KisCancelableOrder:
+    if not isinstance(raw, Mapping):
+        raise KisPaperProtocolError("KIS paper cancelable-order row must be an object")
+    context = "cancelable-order row"
+    side_code = _required_text(raw, "sll_buy_dvsn_cd", context)
+    if side_code not in {"01", "02"}:
+        raise KisPaperProtocolError("KIS paper cancelable-order row has an unknown side")
+    symbol = _required_text(raw, "pdno", context).upper()
+    if not _SYMBOL.fullmatch(symbol):
+        raise KisPaperProtocolError("KIS paper cancelable-order row has an invalid symbol")
+    order_time = _required_text(raw, "ord_tmd", context)
+    if not re.fullmatch(r"\d{6}", order_time):
+        raise KisPaperProtocolError("KIS paper cancelable-order row has an invalid order time")
+    raw_original_order_number = raw.get("orgn_odno", "")
+    if not isinstance(raw_original_order_number, str):
+        raise KisPaperProtocolError(
+            "KIS paper cancelable-order row has an invalid orgn_odno field"
+        )
+    order_price = _required_decimal(raw, "ord_unpr", context)
+    total_filled_amount = _required_decimal(raw, "tot_ccld_amt", context)
+    if order_price < 0 or total_filled_amount < 0:
+        raise KisPaperProtocolError(
+            "KIS paper cancelable-order row contains a negative amount"
+        )
+    exchange_id = _required_text(raw, "excg_id_dvsn_cd", context).upper()
+    if exchange_id != "KRX":
+        raise KisPaperProtocolError(
+            "KIS paper cancelable-order row is outside the KRX boundary"
+        )
+    return KisCancelableOrder(
+        order_branch_number=_required_text(raw, "ord_gno_brno", context),
+        order_number=_required_text(raw, "odno", context),
+        original_order_number=raw_original_order_number.strip(),
+        order_division_name=_required_text(raw, "ord_dvsn_name", context),
+        symbol=symbol,
+        product_name=_required_text(raw, "prdt_name", context),
+        revision_cancel_division_name=_required_text(
+            raw,
+            "rvse_cncl_dvsn_name",
+            context,
+        ),
+        order_quantity=_required_int(raw, "ord_qty", context, minimum=0),
+        order_price=order_price,
+        order_time=order_time,
+        total_filled_quantity=_required_int(
+            raw,
+            "tot_ccld_qty",
+            context,
+            minimum=0,
+        ),
+        total_filled_amount=total_filled_amount,
+        cancelable_quantity=_required_int(raw, "psbl_qty", context, minimum=0),
+        side="sell" if side_code == "01" else "buy",
+        order_division_code=_required_text(raw, "ord_dvsn_cd", context),
+        exchange_division_code=_required_text(raw, "excg_dvsn_cd", context),
+        exchange_id=exchange_id,
+    )
+
+
+def _validate_digit_identifier(
+    value: str,
+    label: str,
+    *,
+    maximum_length: int,
+) -> str:
+    if not isinstance(value, str):
+        raise KisPaperConfigurationError(f"KIS paper {label} must be a string")
+    normalized = value.strip()
+    if not normalized or len(normalized) > maximum_length or not normalized.isascii():
+        raise KisPaperConfigurationError(f"KIS paper {label} is invalid")
+    if not normalized.isdigit():
+        raise KisPaperConfigurationError(f"KIS paper {label} must contain only digits")
+    return normalized
 
 
 def _coerce_limit_price(value: Decimal) -> Decimal:

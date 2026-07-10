@@ -161,3 +161,16 @@ integration_requests:
 - 거래·비밀·외부 상태 변경은 사용자 승인 없이는 실행하지 않음
 
 구체적인 프로젝트 명령과 안전 불변식은 루트 `AGENTS.md`를 따른다.
+
+## 9. Tabletop acceptance scenarios
+
+| Scenario | Expected protocol result |
+|---|---|
+| Codex가 상태 저장 기능을 접수 | Codex가 리드를 유지하고 적합도 우위 시 구현을 맡으며 Claude는 계약 또는 적대 테스트를 독립 소유한다. |
+| Claude가 퀀트 전략 기능을 접수 | Claude가 리드와 알고리즘 구현을 맡고 Codex는 저장소 통합 또는 전체 실행 검증을 독립 소유한다. |
+| UI와 외부 연구가 섞인 기능 | 연구와 구현을 점수별로 분리하고 겹치지 않는 worktree에서 병렬 실행한다. |
+| 같은 결함이 두 번 반복 | 소유자는 수정을 멈추고 상대 진단을 받는다. 진단 후 다시 실패하면 재배정 또는 사용자 에스컬레이션한다. |
+| main workspace에 사용자 dirty 파일 존재 | 깨끗한 기준 commit에서 별도 worktree를 만들고 사용자 파일을 복사, 정리, stage 또는 commit하지 않는다. |
+
+위 다섯 결과 중 하나라도 작업보드에 표현할 수 없거나 어댑터 규칙과 충돌하면 프로토콜 변경을 완료로
+간주하지 않는다.

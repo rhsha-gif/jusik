@@ -12,9 +12,8 @@ agent) can read this file alone and decide which agent instance should execute i
 confidence, and what evidence would change that decision.
 
 Governance for new missions is the root `AGENTS.md` plus `docs/agent_collaboration_protocol.md`
-(mission-lead-owned; not yet present in this worktree at authoring time — it arrives via mainline
-integration). Under that protocol each agent commits in its own isolated worktree and the mission
-lead is the sole mainline integrator. `docs/professional_operator_workboard.md` is a **completed
+(mission-lead-owned). Under that protocol each agent commits in its own isolated worktree and the
+mission lead is the sole mainline integrator. `docs/professional_operator_workboard.md` is a **completed
 historical artifact**: its checkpoint log remains valid *evidence* (§8), but its execution rules —
 including rules 4–6 and the old main-repo Git authority — are **not** policy constraints for new
 missions.
@@ -62,9 +61,9 @@ instance. Weights are fixed at 30/25/25/10/10 and may only be changed by the use
 
 | # | Dimension | Weight | What it asks | Anchor 5 | Anchor 3 | Anchor 1 |
 |---|---|---|---|---|---|---|
-| R1 | Problem/domain fit | 30 | Does the mission's core difficulty match this instance's strengths? | Core difficulty squarely in the instance's strongest demonstrated class | Adjacent class; partial overlap with demonstrated strengths | Known weak class, or difficulty type never demonstrated |
+| R1 | Problem/domain fit | 30 | Does the mission's core difficulty match this instance's strengths? | Core difficulty squarely in the instance's strongest demonstrated class | Adjacent class, partial overlap, or no comparable evidence yet (unknown is neutral) | Negative evidence only: demonstrated weakness in this difficulty type, or an actual structural mismatch — never mere absence of samples |
 | R2 | Repository/tool fit | 25 | Can this instance's harness, tools, and environment do the work natively? | All required tools/permissions native and already configured | Workable with minor adaptation or one missing convenience | Requires tools, access, or environment the instance lacks |
-| R3 | Comparable track record | 25 | What does §4 retrospective evidence say for this task class and model version? | ≥3 comparable samples, mean rating ≥4.5, no open P0/P1 | 1–2 samples, or ≥3 with mixed (3–4) ratings | Recorded failures (mean ≤2), an unresolved P0/P1, or contradicting evidence |
+| R3 | Comparable track record | 25 | What does §4 retrospective evidence say for this task class and model version? | ≥3 comparable samples, mean rating ≥4.5, no open P0/P1 | 1–2 samples, ≥3 with mixed (3–4) ratings, or **n=0** (no comparable samples — unknown is neutral) | Negative evidence only: recorded failures (mean ≤2), an unresolved P0/P1, or directly contradicting evidence — never mere absence of samples |
 | R4 | Current context continuity | 10 | How much mission context does the instance already hold? | Already holds the mission's full context (same worktree/session, directly preceding related work) | Partial context; moderate re-derivation needed | Cold start; must re-derive everything |
 | R5 | Handoff/conflict cost | 10 | What does routing here cost in handoffs and conflicts? | No handoff artifacts needed; no overlap with the other agent's active paths | One clean artifact handoff, or minor serialization | Heavy multi-artifact handoff, or would conflict/serialize with active work |
 
@@ -75,6 +74,26 @@ justify pulling a mission away from its recipient.
 R3 is the only dimension fed by accumulated evidence; R1/R2/R4/R5 are assessed per mission at
 dispatch time. Score each candidate honestly even when only one candidate is plausible — the recorded
 scores become auditable routing rationale.
+
+**Unknown is neutral, never weakness.** Across R1 and R3, the absence of comparable samples scores
+**3** (neutral/unknown), never 1. A score of 1 requires *negative* evidence: recorded failures, an
+actual capability mismatch, or an unresolved serious defect. Without this rule the instance with the
+head start wins every class forever simply because the other instance was never measured — evidence
+starvation, not evidence.
+
+**Bounded capability seeding (evidence-starvation guard, not a quota).** When all of the following
+hold for an eligible challenger in a task class:
+
+- the challenger has `n=0` comparable samples in that class, and
+- its R1 and R2 each score ≥4 for the slice, and
+- the slice is low/medium risk, reversible, and isolated, and
+- it does not cross any project safety or authority constraint (§1),
+
+the mission lead assigns **at most one small seed slice** in that class to the challenger as its
+substantive role in the mission. This is deliberate evidence exploration so R3 can eventually be
+scored on samples rather than silence — it is **not** a 50:50 workload quota, creates no entitlement
+to further slices, and **never** applies to live trading, secrets, external side effects, or mainline
+integration authority.
 
 ## 4. Post-task retrospective evidence (performance, not routing)
 

@@ -103,10 +103,10 @@ These paths remain unowned unless a later task explicitly adopts them after Code
 
 ## Active focus
 
-- Codex: `QP-900 in_progress` — full acceptance audit, exact staging, and completion report
+- Codex: `complete` — QP-000 through QP-900 accepted; no implementation task is active
 - Claude Code: `standby` — QP-110/QP-120 done; responds to stuck-task escalations (rule 9) and owns
   Fable5-suited research/forensics/design/review tasks (rule 10)
-- Next integration gate: `GATE-5` — final acceptance with live trading still disabled
+- Next integration gate: `GATE-5 passed` — manual KIS paper soak remains an explicit human-input phase
 
 ## Work queue
 
@@ -120,8 +120,8 @@ These paths remain unowned unless a later task explicitly adopts them after Code
 | QP-120 | claude | QP-110 | pure position-risk evaluator and focused tests | done | 8%/2ATR stop and technical exit/trim precedence are deterministic and broker-free | Codex-reviewed targeted: 10 passed; completed-close contract and raw-boundary comparison added; backend 388 passed/1 manual skip |
 | QP-040 | codex | QP-030, QP-120 | strategy performance, retirement, liquidation, rebalance orchestration | done | Retirement creates no buys; risk-reducing sells remain auditable and idempotent | independent audits found no P0/P1; backend 568 passed/1 skipped; smoke mock/default-blocked/live=false |
 | QP-050 | codex | QP-040 | KIS paper adapters, reconciliation, session job, fake-client tests | done | Paper dispatch has a process-kill-safe journal and broker-query reconciliation; fixture/paper provenance is durable and cross-mode reuse fails closed; no production host is accepted; fake tests pass; manual paper test stays opt-in | independent final audits found no P0/P1; backend 757 passed/2 skipped; smoke mock/default-blocked/live=false; paper job default-disabled/no-network |
-| QP-060 | codex | QP-050 | operator status/report UI and final hardening | done | Safety state, position risk, strategy health, rebalance, and reconciliation are visible | secret-free read-only SQLite projection/API plus five-area responsive UI; independent audits found no P0/P1; backend 788 passed/2 skipped; frontend 23/build passed; smoke mock/default-blocked/live=false |
-| QP-900 | codex | QP-060 | completion report and final verification only | in_progress | Full acceptance audit passes; all required evidence is current | QP-060 gate passed; final exact-diff and repository acceptance audit claimed |
+| QP-060 | codex | QP-050 | operator status/report UI and final hardening | done | Safety state, position risk, strategy health, rebalance, and reconciliation are visible | secret-free read-only SQLite projection/API plus five-area responsive UI; independent audits found no P0/P1; clean commit backend 785 passed/2 skipped; frontend 23/build passed; smoke mock/default-blocked/live=false |
+| QP-900 | codex | QP-060 | completion report and final verification only | done | Full acceptance audit passes; all required evidence is current | isolated `fa5e76a`: backend 785/2, frontend 23/build, smoke mock/default-blocked/live=false, paper job default-disabled; secret scan clean; user paths excluded |
 
 ## Integration requests
 
@@ -264,7 +264,16 @@ These paths remain unowned unless a later task explicitly adopts them after Code
   health, weekly rebalance, and reconciliation with explicit unavailable/stale/critical states. Hardened the KIS
   three-calendar-month order-history boundary so expired uncertain orders are persistently blocked for manual
   evidence review without hiding current reconciliation or ever being resent; the session emits a distinct reason.
-  Independent backend/frontend audits found no P0/P1. Focused hardening passed `74 passed`; full backend passed
-  `788 passed, 2 skipped`; frontend passed `23 passed` and production build; smoke stayed `broker=mock`, operator
-  default-blocked by `level5_flag_disabled`, live false; the paper job default remained `paper_session_disabled`.
-  QP-900 claimed for exact-diff staging and final acceptance.
+  Independent backend/frontend audits found no P0/P1. Focused hardening passed `74 passed`; the working tree,
+  including three unowned user tests, passed `788 passed, 2 skipped`; frontend passed `23 passed` and production
+  build; smoke stayed `broker=mock`, operator default-blocked by `level5_flag_disabled`, live false; the paper job
+  default remained `paper_session_disabled`. QP-900 claimed for exact-diff staging and final acceptance.
+- 2026-07-11 00:14 KST — Codex — QP-900 done. Committed the collaboration protocol as `a8867f0` and the QP-060
+  implementation as `fa5e76a`, excluding every kickoff user-owned path. Re-ran acceptance from an isolated
+  detached worktree containing only `fa5e76a`: backend `785 passed, 2 skipped`, frontend `23 passed`, production
+  build success, smoke `broker=mock` with operator blocked by `level5_flag_disabled` and live false, and the KIS
+  paper job default `paper_session_disabled`. The three-test difference from the main working-tree count is the
+  untracked user-owned `test_api_cors.py`, not missing committed coverage. Added-line scanning found no key,
+  private-key, bearer-token, secret-assignment, TODO, or placeholder patterns; exact staged diff check passed.
+  GATE-5 accepted with live trading disabled. Remaining external work is the credentialed manual KIS paper soak
+  and, if ever needed, a separately designed audited resolver for orders older than the broker history window.

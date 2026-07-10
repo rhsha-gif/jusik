@@ -217,6 +217,27 @@ record in pure modules (2 samples, one P2 corrected in review) and a perfect 2/2
 root-cause diagnosis. No class has enough same-class samples to satisfy the ≥3 rule for a *change*
 yet; the table in §6 is the starting prior, nothing more.
 
+### 8.1 COLLAB-V1 mission evidence (2026-07-11 KST)
+
+First evidence recorded under the new protocol itself. Source: this branch's commit history
+(`8b903a0`, `5774fab`, `f05ecb6`), branch `codex/collab-v1-core` (protocol `6d7bfec`, scenarios
+`aeab47f`, transferred scorecard commits, bounded-exploration `22eee85`), and the Codex mission
+lead's consolidated review record of the Opus audit.
+
+| task_id | instance | task_class | first_pass_result | defects | rework | checks_run (verbatim core) | elapsed | reviewer | rating |
+|---|---|---|---|---|---|---|---|---|---|
+| COLLAB-V1-scorecard | `fable5-cc` (claude-fable-5, Claude Code) | capability-scorecard design | rework-required | P2: pre-task routing initially conflated with post-task performance dimensions; P2: obsolete Codex-only Git authority initially treated as active policy; second review found a stale integration note and evidence-starvation clarity gaps | 2 | `git diff --check` passed at each of the three commits (`8b903a0`, `5774fab`, `f05ecb6`); staged path verified single-file each time | ~647s across the three Claude executions (excluding reviewer wait) | Codex mission lead + Claude Opus | 2 |
+| COLLAB-V1-opus-audit | `opus4x-cc` (claude-opus alias; exact resolved version unrecorded) | independent protocol audit | accepted | [] — the audit itself was defect-free; it correctly found three P2 issues in the target documents, all confirmed and fixed | 0 | read-only verification of `82945d6..HEAD` | 258.4s | Codex mission lead | 5 |
+| COLLAB-V1-codex-core | `codex-gpt5x` (GPT-5 Codex; exact resolved version unrecorded) | protocol authoring & integration | rework-required | P2 (process): `apply_patch` initially targeted the dirty main workspace instead of the sibling worktree; work was mechanically transferred and main restored without touching user-owned dirty files; P2 (documentation): mainline-integration wording and the evidence-starvation guard needed Opus-driven revision | 2 | `git diff --check 82945d6..HEAD` passed; local links 9 files passed; nine final contracts passed; no legacy fixed-ownership wording; historical workboard unchanged | not recorded | Claude Opus + Fable revisions | 2 |
+
+Ratings follow §4.2 strictly: two rework cycles score 2 regardless of final artifact quality — the
+rubric measures the path, not the destination, and is not rewritten upward after acceptance.
+
+**Learning note.** (1) Next mission must explicitly verify patch/edit tool working-directory
+semantics before parallel edits — the COLLAB-V1-codex-core process defect was a working-directory
+assumption, not a content error. (2) The bounded capability-seed rule (§3) was learned from the Opus
+audit during this mission and is now active.
+
 ## 9. Operating notes
 
 - Append new evidence records to §8 (or a successor evidence log split out when it grows) at each

@@ -66,6 +66,18 @@ the same decisions against KIS paper trading. Live trading remains out of scope 
 7. Move a task to `review` only after recording exact targeted-test output. Codex moves it to `done` only after
    reviewing the diff and running the required broader checks.
 8. Existing user changes are never overwritten or included in a task without explicit ownership.
+9. Stuck-task escalation (user-directed, 2026-07-10): when Codex judges a task is persistently stuck — for
+   example the same test or defect survives two or more fix attempts — Codex records the blocker here (failing
+   command, error summary) and pauses further attempts until Fable5 (Claude Code) posts a diagnostic. Fable5
+   responds read-only on Codex-owned paths: a root-cause diagnosis in the checkpoint log, never a direct edit.
+   The fix itself stays with the path owner. Precedent: the QP-040 idempotency-fingerprint and QP-050
+   `signals/service.py` NameError diagnoses in this log.
+10. Strength-based routing (user-directed, 2026-07-10): tasks whose core difficulty is research synthesis,
+    statistical-bias auditing (backtest forensics: lookahead, overfitting, data snooping, survivorship),
+    quant recipe or risk-matrix design, or independent contract/evidence review are assigned to Fable5 and
+    executed end-to-end in Claude Code (using its specialist agents where useful), with only the finished
+    artifact handed to Codex for integration. Stateful integration work — DB, broker, API, scheduler, UI,
+    Git — stays with Codex regardless of workload.
 
 ## Current baseline
 
@@ -91,9 +103,10 @@ These paths remain unowned unless a later task explicitly adopts them after Code
 
 ## Active focus
 
-- Codex: `QP-060 in_progress` — professional operator status/report UI and final hardening
-- Claude Code: `idle/done` — QP-110 and QP-120 reviewed; no additional Claude task is necessary
-- Next integration gate: `GATE-4` — durable operator visibility without exposing secrets or enabling live trading
+- Codex: `QP-900 in_progress` — full acceptance audit, exact staging, and completion report
+- Claude Code: `standby` — QP-110/QP-120 done; responds to stuck-task escalations (rule 9) and owns
+  Fable5-suited research/forensics/design/review tasks (rule 10)
+- Next integration gate: `GATE-5` — final acceptance with live trading still disabled
 
 ## Work queue
 
@@ -107,8 +120,8 @@ These paths remain unowned unless a later task explicitly adopts them after Code
 | QP-120 | claude | QP-110 | pure position-risk evaluator and focused tests | done | 8%/2ATR stop and technical exit/trim precedence are deterministic and broker-free | Codex-reviewed targeted: 10 passed; completed-close contract and raw-boundary comparison added; backend 388 passed/1 manual skip |
 | QP-040 | codex | QP-030, QP-120 | strategy performance, retirement, liquidation, rebalance orchestration | done | Retirement creates no buys; risk-reducing sells remain auditable and idempotent | independent audits found no P0/P1; backend 568 passed/1 skipped; smoke mock/default-blocked/live=false |
 | QP-050 | codex | QP-040 | KIS paper adapters, reconciliation, session job, fake-client tests | done | Paper dispatch has a process-kill-safe journal and broker-query reconciliation; fixture/paper provenance is durable and cross-mode reuse fails closed; no production host is accepted; fake tests pass; manual paper test stays opt-in | independent final audits found no P0/P1; backend 757 passed/2 skipped; smoke mock/default-blocked/live=false; paper job default-disabled/no-network |
-| QP-060 | codex | QP-050 | operator status/report UI and final hardening | in_progress | Safety state, position risk, strategy health, rebalance, and reconciliation are visible | claimed after QP-050 gate; clean existing operator API/page paths selected |
-| QP-900 | codex | QP-060 | completion report and final verification only | blocked | Full acceptance audit passes; all required evidence is current | pending |
+| QP-060 | codex | QP-050 | operator status/report UI and final hardening | done | Safety state, position risk, strategy health, rebalance, and reconciliation are visible | secret-free read-only SQLite projection/API plus five-area responsive UI; independent audits found no P0/P1; backend 788 passed/2 skipped; frontend 23/build passed; smoke mock/default-blocked/live=false |
+| QP-900 | codex | QP-060 | completion report and final verification only | in_progress | Full acceptance audit passes; all required evidence is current | QP-060 gate passed; final exact-diff and repository acceptance audit claimed |
 
 ## Integration requests
 
@@ -139,14 +152,17 @@ These paths remain unowned unless a later task explicitly adopts them after Code
   reopen or reuse before a KIS paper adapter can read state or submit an order.
 - QP-060: expose a secret-free, read-only professional status projection from the existing operator API route;
   the dashboard must never migrate or mutate the paper database and missing/stale evidence must not render green.
-- QP-060: surface unresolved paper dispatches and local recovery gaps; retain explicit manual resolution for
-  orders older than the broker's historical query window instead of allowing one old row to hide current status.
+- QP-060: surface unresolved paper dispatches and local recovery gaps; retain an explicit manual-resolution-required
+  state for orders older than the broker's historical query window instead of allowing one old row to hide current
+  status. No arbitrary manual resolver exists yet; these rows remain safely blocked and are never resent.
 
 ## Blockers and human inputs
 
 - KIS paper credentials are intentionally absent. They are needed only for the manual integration/soak phase,
   never for unit tests or implementation of the fake-client boundary.
 - A local Windows machine must remain awake for an actual paper-session worker.
+- An unresolved order left beyond KIS paper's historical query window has no supported resolver yet. It remains
+  blocked for external evidence review; direct SQLite edits and automatic resubmission are prohibited.
 
 ## Verification policy
 
@@ -237,3 +253,18 @@ These paths remain unowned unless a later task explicitly adopts them after Code
   default-blocked by `level5_flag_disabled`, and live trading false. The paper job default exited with
   `paper_session_disabled` and no network. QP-060 claimed on clean existing operator API/page paths; Claude Code
   remains idle because its completed pure-signal/risk modules need no additional task.
+- 2026-07-10 23:42 KST — Claude Code — Collaboration protocol updated at the user's direction: added rule 9
+  (stuck-task escalation: Codex records a persistent blocker and pauses for a Fable5 read-only diagnostic) and
+  rule 10 (strength-based routing: research synthesis, backtest forensics, quant recipe/risk design, and
+  independent review run end-to-end in Claude Code; stateful DB/broker/API/scheduler/UI/Git integration stays
+  with Codex). Claude active-focus set to `standby`. Matching sections added to `AGENTS.md` and `CLAUDE.md`.
+  No code, ownership-table, or safety-invariant changes.
+- 2026-07-11 00:08 KST — Codex — QP-060 done. Added a query-only, secret-free projection over the durable KIS
+  paper SQLite state, exposed it through the existing operator API, and rendered safety, position risk, strategy
+  health, weekly rebalance, and reconciliation with explicit unavailable/stale/critical states. Hardened the KIS
+  three-calendar-month order-history boundary so expired uncertain orders are persistently blocked for manual
+  evidence review without hiding current reconciliation or ever being resent; the session emits a distinct reason.
+  Independent backend/frontend audits found no P0/P1. Focused hardening passed `74 passed`; full backend passed
+  `788 passed, 2 skipped`; frontend passed `23 passed` and production build; smoke stayed `broker=mock`, operator
+  default-blocked by `level5_flag_disabled`, live false; the paper job default remained `paper_session_disabled`.
+  QP-900 claimed for exact-diff staging and final acceptance.

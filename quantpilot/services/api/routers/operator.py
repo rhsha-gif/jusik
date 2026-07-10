@@ -10,7 +10,13 @@ from quantpilot.packages.core.execution.state_machine import (
 from quantpilot.packages.core.operator.reporting import render_operator_report_text
 from quantpilot.packages.core.operator.schemas import OperatorRunRequest, OperatorRunResult
 from quantpilot.packages.core.operator.service import OperatorService
-from quantpilot.services.api.dependencies import get_operator_service
+from quantpilot.packages.core.operator.status_snapshot import (
+    ProfessionalOperatorStatusSnapshot,
+)
+from quantpilot.services.api.dependencies import (
+    get_operator_service,
+    get_professional_operator_status_snapshot,
+)
 
 
 router = APIRouter()
@@ -45,6 +51,18 @@ def operator_status(service: OperatorService = Depends(get_operator_service)) ->
         ],
         "runs": len(service.reports),
     }
+
+
+@router.get(
+    "/operator/professional-status",
+    response_model=ProfessionalOperatorStatusSnapshot,
+)
+def professional_operator_status(
+    snapshot: ProfessionalOperatorStatusSnapshot = Depends(
+        get_professional_operator_status_snapshot
+    ),
+) -> ProfessionalOperatorStatusSnapshot:
+    return snapshot
 
 
 @router.get("/operator/reports/latest")

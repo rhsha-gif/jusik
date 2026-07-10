@@ -13,6 +13,7 @@ from quantpilot.packages.core.kis_paper import (
     KisDailyOrderFill,
     KisDailyOrdersResult,
     KisPaperClient,
+    kis_recent_three_month_start,
 )
 from quantpilot.packages.core.operator.position_ledger import (
     PaperDispatchFillEvidence,
@@ -92,11 +93,18 @@ class PaperBrokerReconciler:
                 "partially_filled",
             }
         ]
+        end_date = now.astimezone(KST).date()
+        earliest_queryable_date = kis_recent_three_month_start(end_date)
+        history_expired = [
+            item
+            for item in unresolved
+            if _dispatch_business_date(item) < earliest_queryable_date
+        ]
+        queryable = [item for item in unresolved if item not in history_expired]
         try:
             balance = self._client.get_balance(exchange="KRX")
-            if unresolved:
-                start_date = min(_dispatch_business_date(item) for item in unresolved)
-                end_date = now.astimezone(KST).date()
+            if queryable:
+                start_date = min(_dispatch_business_date(item) for item in queryable)
                 query = self._client.get_daily_orders_and_fills(
                     start_date,
                     end_date,
@@ -110,8 +118,17 @@ class PaperBrokerReconciler:
                 "KIS paper reconciliation query is unavailable"
             ) from None
 
+        expired_ids = {item.order_plan_id for item in history_expired}
         updated = tuple(
-            self.reconcile_dispatch(item, query.rows, reconciled_at=now)
+            (
+                self._blocked(
+                    item,
+                    observed_at=now,
+                    error_code="broker_history_window_manual_resolution_required",
+                )
+                if item.order_plan_id in expired_ids
+                else self.reconcile_dispatch(item, query.rows, reconciled_at=now)
+            )
             for item in unresolved
         )
         return PaperReconciliationResult(

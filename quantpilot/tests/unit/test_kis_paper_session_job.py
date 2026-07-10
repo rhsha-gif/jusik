@@ -451,12 +451,61 @@ class _Applier:
         )
 
 
+def _blocked_dispatch(error_code: str) -> SimpleNamespace:
+    return SimpleNamespace(
+        order_plan_id="blocked-order",
+        last_error_code=error_code,
+        attempt_count=1,
+        dispatch_claimed_at=NOW,
+        fill_evidence=(),
+        purpose="rebalance",
+        reconciliation_status="blocked",
+        order_plan_payload=None,
+    )
+
+
+class _BlockedReconciler:
+    def __init__(self, dispatch: SimpleNamespace) -> None:
+        self.dispatch = dispatch
+
+    def reconcile_unresolved(self) -> PaperReconciliationResult:
+        return PaperReconciliationResult(
+            updated_dispatches=(self.dispatch,),
+            pending_order_plan_ids=(),
+            blocked_order_plan_ids=(self.dispatch.order_plan_id,),
+            broker_balance=_balance(),
+            reconciled_at=NOW,
+        )
+
+
+class _BlockedApplier:
+    def apply(
+        self,
+        dispatches: tuple[SimpleNamespace, ...],
+    ) -> PaperReconciliationApplyResult:
+        order_plan_ids = tuple(item.order_plan_id for item in dispatches)
+        return PaperReconciliationApplyResult(
+            applied_order_plan_ids=(),
+            missing_order_plan_ids=(),
+            blocked_order_plan_ids=order_plan_ids,
+            pending_order_plan_ids=(),
+            new_fill_ids=(),
+            blocked_reasons=tuple(
+                (order_plan_id, "broker_reconciliation_blocked")
+                for order_plan_id in order_plan_ids
+            ),
+        )
+
+
 class _Store:
+    def __init__(self, *dispatches: SimpleNamespace) -> None:
+        self.dispatches = list(dispatches)
+
     def list_positions(self):
         return []
 
     def list_paper_order_dispatches(self):
-        return []
+        return self.dispatches
 
 
 class _Broker:
@@ -533,6 +582,42 @@ def test_one_shot_runtime_reconciles_then_runs_risk_before_weekly_operator(
     assert result.reason_code == "paper_session_cycle_completed"
     assert result.operator_run_id == "run-001"
     assert operator.calls == ["position", "operator"]
+
+
+@pytest.mark.parametrize(
+    ("error_code", "expected_reason"),
+    [
+        (
+            "broker_history_window_manual_resolution_required",
+            "paper_broker_history_manual_resolution_required",
+        ),
+        ("broker_match_ambiguous", "paper_broker_reconciliation_ambiguous"),
+    ],
+)
+def test_one_shot_runtime_reports_specific_broker_reconciliation_block(
+    error_code: str,
+    expected_reason: str,
+) -> None:
+    dispatch = _blocked_dispatch(error_code)
+    runtime = KisPaperSessionRuntime(
+        config=SimpleNamespace(),  # type: ignore[arg-type]
+        store=_Store(dispatch),  # type: ignore[arg-type]
+        session=SimpleNamespace(),  # type: ignore[arg-type]
+        coordinator=_Coordinator(),  # type: ignore[arg-type]
+        reconciler=_BlockedReconciler(dispatch),  # type: ignore[arg-type]
+        applier=_BlockedApplier(),  # type: ignore[arg-type]
+        broker=SimpleNamespace(),  # type: ignore[arg-type]
+        market_data=SimpleNamespace(),  # type: ignore[arg-type]
+        historical_market_data=SimpleNamespace(),  # type: ignore[arg-type]
+        operator=SimpleNamespace(),  # type: ignore[arg-type]
+        policy=_policy(),
+    )
+
+    result = execute_runtime(runtime, evaluated_at=NOW, clock=lambda: NOW)
+
+    assert result.status == "blocked"
+    assert result.reason_code == expected_reason
+    assert result.reconciliation_blocked_order_plan_ids == ("blocked-order",)
 
 
 def test_runtime_wiring_binds_one_fenced_store_without_network(tmp_path) -> None:

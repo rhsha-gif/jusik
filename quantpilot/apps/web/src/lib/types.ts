@@ -554,6 +554,147 @@ export interface OperatorStatusResponse {
   runs: number;
 }
 
+export type ProfessionalDisplayStatus =
+  | "safe"
+  | "attention"
+  | "critical"
+  | "unavailable";
+
+export interface ProfessionalEvidenceFreshness {
+  status: "fresh" | "stale" | "unavailable";
+  latest_evidence_at: string | null;
+  stale_after_seconds: number;
+  reason_codes: string[];
+}
+
+export interface ProfessionalSafetyPolicyStatus {
+  policy_id: string;
+  status: ProfessionalDisplayStatus;
+  autopilot_paused: boolean;
+  broker_healthy: boolean;
+  updated_at: string;
+  stale: boolean;
+  reason_codes: string[];
+}
+
+export interface ProfessionalSafetyStatus {
+  status: ProfessionalDisplayStatus;
+  policies: ProfessionalSafetyPolicyStatus[];
+  latest_session: {
+    status: "active" | "closed" | "abandoned" | "none";
+    started_at: string | null;
+    lease_expires_at: string | null;
+    updated_at: string | null;
+    lease_valid: boolean;
+  };
+  reason_codes: string[];
+}
+
+export interface ProfessionalPositionRiskStatus {
+  policy_id: string;
+  policy_version: number;
+  strategy_id: string;
+  strategy_version: string;
+  symbol: string;
+  quantity: number;
+  average_entry_price: number;
+  atr14: number;
+  active_stop: number;
+  attribution_status: "active" | "conflicted";
+  reconciled_at: string;
+  status: ProfessionalDisplayStatus;
+  stale: boolean;
+  reason_codes: string[];
+}
+
+export interface ProfessionalStrategyHealthStatus {
+  policy_id: string;
+  strategy_id: string;
+  strategy_version: string;
+  health_status: "active" | "review_unavailable" | "paused_reapproval" | "disabled";
+  retirement_phase: string;
+  pending_order_count: number;
+  last_risk_evaluated_at: string | null;
+  updated_at: string;
+  status: ProfessionalDisplayStatus;
+  stale: boolean;
+  reason_codes: string[];
+}
+
+export interface ProfessionalRebalanceStatus {
+  policy_id: string;
+  strategy_id: string;
+  strategy_version: string;
+  current_week: string;
+  last_rebalance_session: string | null;
+  claim_status:
+    | "completed"
+    | "in_progress"
+    | "expired"
+    | "evidence_mismatch"
+    | "not_recorded";
+  claimed_at: string | null;
+  completed_at: string | null;
+  status: ProfessionalDisplayStatus;
+  reason_codes: string[];
+}
+
+export interface ProfessionalReconciliationDispatch {
+  order_plan_id: string;
+  policy_id: string;
+  strategy_id: string;
+  strategy_version: string;
+  symbol: string;
+  side: "buy" | "sell";
+  purpose: "rebalance" | "protective_exit" | "strategy_retirement";
+  status: string;
+  reconciliation_status: "pending" | "reconciled" | "blocked";
+  quantity: number;
+  cumulative_filled_quantity: number;
+  remaining_quantity: number;
+  updated_at: string;
+  last_error_code: string | null;
+}
+
+export interface ProfessionalPendingLiquidation {
+  order_plan_id: string;
+  policy_id: string;
+  strategy_id: string;
+  strategy_version: string;
+  symbol: string;
+  purpose: "protective_exit" | "strategy_retirement";
+  status: string;
+  quantity_requested: number;
+  cumulative_filled_quantity: number;
+  remaining_quantity: number;
+  updated_at: string;
+  last_error_code: string | null;
+}
+
+export interface ProfessionalOperatorStatusResponse {
+  available: boolean;
+  overall_status: ProfessionalDisplayStatus;
+  reason_code: string | null;
+  source: "paper_state_sqlite";
+  observed_at: string;
+  live_trading_enabled: false;
+  schema_version: number | null;
+  freshness: ProfessionalEvidenceFreshness;
+  safety: ProfessionalSafetyStatus;
+  positions: ProfessionalPositionRiskStatus[];
+  strategy_health: ProfessionalStrategyHealthStatus[];
+  rebalance: ProfessionalRebalanceStatus[];
+  reconciliation: {
+    status: ProfessionalDisplayStatus;
+    unresolved_count: number;
+    blocked_count: number;
+    outcome_unknown_count: number;
+    dispatches: ProfessionalReconciliationDispatch[];
+    pending_liquidations: ProfessionalPendingLiquidation[];
+    reason_codes: string[];
+  };
+}
+
 /** GET /api/operator/reports/latest returns dict[str, object]. */
 export interface OperatorReportEnvelope {
   report: OperatorReport | null;

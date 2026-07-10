@@ -10,6 +10,13 @@ from quantpilot.packages.core.data.mode import DataModeConfigError
 from quantpilot.packages.core.data.providers import ProviderError
 from quantpilot.packages.core.harness_service import HarnessService
 from quantpilot.packages.core.operator.service import OperatorService
+from quantpilot.packages.core.operator.status_snapshot import (
+    ProfessionalOperatorStatusSnapshot,
+)
+from quantpilot.packages.core.schemas import utc_now
+from quantpilot.packages.db.paper_status_reader import (
+    read_professional_operator_status,
+)
 from quantpilot.packages.db.repositories import RepositoryRegistry
 
 
@@ -69,6 +76,13 @@ def get_operator_service() -> OperatorService:
     if _operator_service is None:
         raise HTTPException(status_code=503, detail={"error": "operator service is not configured"})
     return _operator_service
+
+
+def get_professional_operator_status_snapshot(
+) -> ProfessionalOperatorStatusSnapshot:
+    """Read the durable paper operator through the non-mutating status boundary."""
+
+    return read_professional_operator_status(observed_at=utc_now())
 
 
 def require_latest(items: Sequence[T], *, resource: str, next_step: str) -> T:

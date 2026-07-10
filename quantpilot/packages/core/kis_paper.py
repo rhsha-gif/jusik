@@ -10,8 +10,9 @@ import urllib.error
 import urllib.parse
 import urllib.request
 from collections.abc import Mapping
+from calendar import monthrange
 from dataclasses import dataclass, field, replace
-from datetime import date
+from datetime import date, datetime
 from decimal import Decimal, InvalidOperation
 from types import MappingProxyType
 from typing import Any, Literal, Protocol, runtime_checkable
@@ -50,6 +51,21 @@ _SAFE_CODE = re.compile(r"[A-Za-z0-9_.-]{1,32}\Z")
 _SYMBOL = re.compile(r"[A-Z0-9]{6}\Z")
 _MAX_RESPONSE_BYTES = 1_000_000
 _MAX_PAGES = 100
+
+
+def kis_recent_three_month_start(reference_date: date) -> date:
+    """Return the inclusive calendar-three-month KIS history boundary."""
+
+    if isinstance(reference_date, datetime) or not isinstance(
+        reference_date,
+        date,
+    ):
+        raise KisPaperConfigurationError("daily-order as-of date must be a date value")
+    month_index = reference_date.year * 12 + (reference_date.month - 1) - 3
+    year, zero_based_month = divmod(month_index, 12)
+    month = zero_based_month + 1
+    day = min(reference_date.day, monthrange(year, month)[1])
+    return date(year, month, day)
 
 
 class KisPaperError(RuntimeError):
@@ -537,16 +553,22 @@ class KisPaperClient:
         as_of_date: date | None = None,
     ) -> KisDailyOrdersResult:
         _validate_exchange(exchange)
-        if not isinstance(start_date, date) or not isinstance(end_date, date):
+        if any(
+            isinstance(value, datetime) or not isinstance(value, date)
+            for value in (start_date, end_date)
+        ):
             raise KisPaperConfigurationError("daily-order dates must be date values")
         if start_date > end_date:
             raise KisPaperConfigurationError("daily-order start date cannot follow end date")
         reference_date = as_of_date or date.today()
-        if not isinstance(reference_date, date):
+        if isinstance(reference_date, datetime) or not isinstance(
+            reference_date,
+            date,
+        ):
             raise KisPaperConfigurationError("daily-order as-of date must be a date value")
         if end_date > reference_date:
             raise KisPaperConfigurationError("daily-order end date cannot be in the future")
-        if (reference_date - start_date).days > 90:
+        if start_date < kis_recent_three_month_start(reference_date):
             raise KisPaperConfigurationError(
                 "daily-order reconciliation is limited to the recent-three-month paper TR"
             )

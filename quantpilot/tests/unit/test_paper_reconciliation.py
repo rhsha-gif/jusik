@@ -171,8 +171,13 @@ def _balance() -> KisBalanceResult:
 class FakeClient:
     account_scope_fingerprint = FINGERPRINT
 
-    def __init__(self, *rows: KisDailyOrderFill) -> None:
+    def __init__(
+        self,
+        *rows: KisDailyOrderFill,
+        expected_start: str = "2026-07-10",
+    ) -> None:
         self.rows = tuple(rows)
+        self.expected_start = expected_start
         self.daily_calls = 0
         self.balance_calls = 0
 
@@ -189,7 +194,7 @@ class FakeClient:
         exchange: str = "KRX",
         as_of_date=None,
     ) -> KisDailyOrdersResult:
-        assert start_date.isoformat() == "2026-07-10"
+        assert start_date.isoformat() == self.expected_start
         assert end_date.isoformat() == "2026-07-10"
         assert as_of_date == end_date
         assert exchange == "KRX"
@@ -203,6 +208,130 @@ def _reconciler(store: PaperStateStore, client: FakeClient) -> PaperBrokerReconc
         client=client,  # type: ignore[arg-type]
         clock=lambda: NOW + timedelta(seconds=20),
     )
+
+
+def _old_unknown(store: PaperStateStore) -> PaperOrderDispatch:
+    old = datetime(2026, 3, 1, 1, 0, tzinfo=timezone.utc)
+    session = store.start_paper_execution_session(
+        started_at=old - timedelta(minutes=1),
+        lease_expires_at=old + timedelta(hours=1),
+    )
+    prepared = _prepared(
+        order_plan_id="plan-old",
+        broker_order_id="broker-old",
+        idempotency_key="paper-idempotency-old",
+        quote_as_of=old - timedelta(seconds=5),
+        risk_check_expires_at=old + timedelta(minutes=5),
+        submission_evidence_expires_at=old + timedelta(seconds=25),
+        reconciled_snapshot_at=old - timedelta(seconds=4),
+        store_id=store.provenance.store_id,
+        session_id=session.session_id,
+        fencing_token=session.fencing_token,
+        prepared_at=old,
+        updated_at=old,
+    )
+    store.insert_paper_order_dispatch(prepared)
+    claimed = store.claim_dispatch_attempt(
+        prepared.order_plan_id,
+        session=session,
+        claimed_at=old + timedelta(microseconds=1),
+    )
+    unknown = PaperOrderDispatch.model_validate(
+        claimed.model_copy(
+            update={
+                "status": "outcome_unknown",
+                "last_error_code": "process_interrupted",
+                "updated_at": old + timedelta(microseconds=2),
+                "revision": claimed.revision + 1,
+            }
+        ).model_dump()
+    )
+    return store.update_paper_order_dispatch(unknown)
+
+
+def _current_protective_claimed(store: PaperStateStore) -> PaperOrderDispatch:
+    session = store.start_paper_execution_session(
+        started_at=NOW - timedelta(minutes=1),
+        lease_expires_at=NOW + timedelta(hours=1),
+    )
+    prepared = _prepared(
+        order_plan_id="plan-current-protective",
+        broker_order_id="broker-current-protective",
+        idempotency_key="paper-idempotency-current-protective",
+        purpose="protective_exit",
+        side="sell",
+        quote_last=69900,
+        quote_reference_basis="best_bid",
+        snapshot_symbol_quantity=2,
+        snapshot_symbol_orderable_quantity=2,
+        broker_orderable_cash=None,
+        broker_orderable_buy_quantity=None,
+        store_id=store.provenance.store_id,
+        session_id=session.session_id,
+        fencing_token=session.fencing_token,
+    )
+    store.insert_paper_order_dispatch(prepared)
+    return store.claim_dispatch_attempt(
+        prepared.order_plan_id,
+        session=session,
+        claimed_at=NOW + timedelta(microseconds=1),
+    )
+
+
+def test_expired_history_window_isolated_for_manual_resolution(tmp_path) -> None:
+    with PaperStateStore(
+        tmp_path / "history-window.sqlite3",
+        data_mode="paper_trading",
+        account_scope_fingerprint=FINGERPRINT,
+    ) as store:
+        old = _old_unknown(store)
+        current = _current_protective_claimed(store)
+        client = FakeClient()
+
+        result = _reconciler(store, client).reconcile_unresolved()
+
+        by_id = {item.order_plan_id: item for item in result.updated_dispatches}
+        assert client.balance_calls == 1
+        assert client.daily_calls == 1
+        assert by_id[old.order_plan_id].reconciliation_status == "blocked"
+        assert by_id[old.order_plan_id].last_error_code == (
+            "broker_history_window_manual_resolution_required"
+        )
+        assert by_id[current.order_plan_id].status == "dispatch_claimed"
+        assert by_id[current.order_plan_id].reconciliation_status == "pending"
+        assert result.blocked_order_plan_ids == (old.order_plan_id,)
+
+
+def test_all_expired_history_skips_daily_query_and_persists_block(tmp_path) -> None:
+    database_path = tmp_path / "all-history-expired.sqlite3"
+    with PaperStateStore(
+        database_path,
+        data_mode="paper_trading",
+        account_scope_fingerprint=FINGERPRINT,
+    ) as store:
+        old = _old_unknown(store)
+        client = FakeClient()
+
+        result = _reconciler(store, client).reconcile_unresolved()
+
+        assert client.balance_calls == 1
+        assert client.daily_calls == 0
+        assert result.pending_order_plan_ids == ()
+        assert result.blocked_order_plan_ids == (old.order_plan_id,)
+
+    with PaperStateStore(
+        database_path,
+        data_mode="paper_trading",
+        account_scope_fingerprint=FINGERPRINT,
+    ) as reopened:
+        persisted = reopened.load_paper_order_dispatch(old.order_plan_id)
+        assert persisted is not None
+        assert persisted.status == "outcome_unknown"
+        assert persisted.attempt_count == 1
+        assert persisted.reconciliation_status == "blocked"
+        assert persisted.last_error_code == (
+            "broker_history_window_manual_resolution_required"
+        )
 
 
 def test_unique_match_creates_idempotent_delta_evidence_then_completes(tmp_path) -> None:

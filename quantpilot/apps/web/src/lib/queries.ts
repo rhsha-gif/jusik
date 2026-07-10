@@ -14,6 +14,7 @@ import type {
   OperatorRunRequest,
   OperatorRunResult,
   OperatorStatusResponse,
+  ProfessionalOperatorStatusResponse,
   ParsePolicyRequest,
   PolicyPreviewResponse,
   SignalBoardResponse,
@@ -270,6 +271,10 @@ export function useApproveStrategyTicket() {
 }
 
 export const OPERATOR_STATUS_KEY = ["operator", "status"] as const;
+export const PROFESSIONAL_OPERATOR_STATUS_KEY = [
+  "operator",
+  "professional-status",
+] as const;
 export const OPERATOR_REPORT_LATEST_KEY = ["operator", "report", "latest"] as const;
 
 export function useOperatorStatus() {
@@ -279,6 +284,20 @@ export function useOperatorStatus() {
       apiFetch<OperatorStatusResponse>("/api/operator/status", { signal }),
     retry: 1,
     staleTime: 10_000,
+  });
+}
+
+export function useProfessionalOperatorStatus() {
+  return useQuery({
+    queryKey: PROFESSIONAL_OPERATOR_STATUS_KEY,
+    queryFn: ({ signal }) =>
+      apiFetch<ProfessionalOperatorStatusResponse>(
+        "/api/operator/professional-status",
+        { signal },
+      ),
+    retry: 1,
+    staleTime: 10_000,
+    refetchInterval: 30_000,
   });
 }
 
@@ -299,6 +318,9 @@ export function useOperatorRunOnce() {
       apiFetch<OperatorRunResult>("/api/operator/run-once", { method: "POST", body }),
     onSuccess: () => {
       void queryClient.invalidateQueries({ queryKey: OPERATOR_STATUS_KEY });
+      void queryClient.invalidateQueries({
+        queryKey: PROFESSIONAL_OPERATOR_STATUS_KEY,
+      });
       void queryClient.invalidateQueries({ queryKey: OPERATOR_REPORT_LATEST_KEY });
     },
   });

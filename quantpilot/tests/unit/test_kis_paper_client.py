@@ -6,7 +6,7 @@ import re
 import ssl
 import urllib.request
 from collections.abc import Mapping
-from datetime import date
+from datetime import date, datetime
 from decimal import Decimal
 from typing import Any, Literal
 
@@ -37,6 +37,7 @@ from quantpilot.packages.core.kis_paper import (
     KisPaperOrderOutcomeUnknown,
     KisPaperProtocolError,
     StrictUrllibKisPaperTransport,
+    kis_recent_three_month_start,
 )
 
 
@@ -363,6 +364,52 @@ def test_daily_order_query_uses_exact_paper_tr_and_preserves_fill_evidence() -> 
     assert call["params"]["INQR_END_DT"] == "20260710"
     assert call["params"]["CANO"] == "00000000"
     assert call["params"]["EXCG_ID_DVSN_CD"] == "KRX"
+
+
+def test_daily_order_window_uses_calendar_months_instead_of_fixed_days() -> None:
+    assert kis_recent_three_month_start(date(2026, 7, 10)) == date(2026, 4, 10)
+    assert kis_recent_three_month_start(date(2026, 5, 31)) == date(2026, 2, 28)
+    assert kis_recent_three_month_start(date(2024, 5, 31)) == date(2024, 2, 29)
+    assert kis_recent_three_month_start(date(2026, 1, 31)) == date(2025, 10, 31)
+
+    accepted_transport = RecordingTransport(
+        _response({"rt_cd": "0", "output1": []}, tr_cont="D")
+    )
+    accepted = KisPaperClient(_config(), transport=accepted_transport)
+    result = accepted.get_daily_orders_and_fills(
+        date(2026, 4, 10),
+        date(2026, 7, 10),
+        as_of_date=date(2026, 7, 10),
+    )
+    assert result.rows == ()
+
+    rejected = KisPaperClient(_config(), transport=RecordingTransport())
+    with pytest.raises(KisPaperConfigurationError, match="recent-three-month"):
+        rejected.get_daily_orders_and_fills(
+            date(2026, 4, 9),
+            date(2026, 7, 10),
+            as_of_date=date(2026, 7, 10),
+        )
+
+
+def test_daily_order_window_rejects_datetime_values_instead_of_truncating() -> None:
+    client = KisPaperClient(_config(), transport=RecordingTransport())
+    timestamp = datetime(2026, 7, 10, 9, 0)
+
+    with pytest.raises(KisPaperConfigurationError, match="date value"):
+        kis_recent_three_month_start(timestamp)  # type: ignore[arg-type]
+    with pytest.raises(KisPaperConfigurationError, match="date values"):
+        client.get_daily_orders_and_fills(  # type: ignore[arg-type]
+            timestamp,
+            date(2026, 7, 10),
+            as_of_date=date(2026, 7, 10),
+        )
+    with pytest.raises(KisPaperConfigurationError, match="as-of date"):
+        client.get_daily_orders_and_fills(
+            date(2026, 7, 10),
+            date(2026, 7, 10),
+            as_of_date=timestamp,  # type: ignore[arg-type]
+        )
 
 
 @pytest.mark.parametrize(

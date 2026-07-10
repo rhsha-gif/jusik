@@ -466,7 +466,11 @@ def execute_runtime(
     )
     _hydrate_durable_order_plans(runtime, journal_dispatches)
     applied = runtime.applier.apply(journal_dispatches)
-    if applied.blocked_order_plan_ids or applied.missing_order_plan_ids:
+    reconciliation_blocked_ids = set(reconciliation.blocked_order_plan_ids)
+    local_only_blocked_ids = (
+        set(applied.blocked_order_plan_ids) - reconciliation_blocked_ids
+    )
+    if local_only_blocked_ids or applied.missing_order_plan_ids:
         return PaperSessionCycleResult(
             status="blocked",
             reason_code="paper_reconciliation_local_state_blocked",
@@ -486,13 +490,36 @@ def execute_runtime(
             applied_order_plan_ids=applied.applied_order_plan_ids,
             new_fill_ids=applied.new_fill_ids,
         )
-    if reconciliation.blocked_order_plan_ids:
+    if reconciliation_blocked_ids:
+        blocked_errors = {
+            item.last_error_code
+            for item in reconciliation.updated_dispatches
+            if item.order_plan_id in reconciliation_blocked_ids
+        }
+        history_window_only = blocked_errors == {
+            "broker_history_window_manual_resolution_required"
+        }
         return PaperSessionCycleResult(
             status="blocked",
-            reason_code="paper_broker_reconciliation_ambiguous",
-            reconciliation_blocked_order_plan_ids=(
-                reconciliation.blocked_order_plan_ids
+            reason_code=(
+                "paper_broker_history_manual_resolution_required"
+                if history_window_only
+                else "paper_broker_reconciliation_ambiguous"
             ),
+            expired_pre_dispatch_order_plan_ids=tuple(
+                item.order_plan_id for item in expired
+            ),
+            reconciliation_pending_order_plan_ids=(
+                reconciliation.pending_order_plan_ids
+            ),
+            reconciliation_blocked_order_plan_ids=tuple(
+                sorted(
+                    reconciliation_blocked_ids
+                    | set(applied.blocked_order_plan_ids)
+                )
+            ),
+            applied_order_plan_ids=applied.applied_order_plan_ids,
+            new_fill_ids=applied.new_fill_ids,
         )
 
     _synchronize_pending_liquidations(

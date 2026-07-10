@@ -238,6 +238,22 @@ semantics before parallel edits — the COLLAB-V1-codex-core process defect was 
 assumption, not a content error. (2) The bounded capability-seed rule (§3) was learned from the Opus
 audit during this mission and is now active.
 
+### 8.2 QP-WORKFLOW-DOC mission evidence (2026-07-11 KST)
+
+Source: `docs/current_project_workflow_workboard.md` and commits `ab816c2` (counterpart draft),
+`e879a67` (lead integration), plus the final documentation commit on `codex/qp-workflow-doc-core`.
+Claude Code 2.1.205 with the Opus alias was selected first but returned `429 session limit` before
+producing output, so this mission records no Claude quality evidence.
+
+| task_id | instance | task_class | first_pass_result | defects | rework | checks_run | reviewer | rating |
+|---|---|---|---|---|---:|---|---|---:|
+| QP-WD-01 | Codex GPT-5 sub-agent (point release not exposed) | repository-wide workflow research and documentation | accepted | [] | 0 | local links resolved; `git show --check`; safe-default smoke passed | GPT-5.4 Codex lead | 5 |
+| QP-WD-02 | GPT-5.4 Codex | documentation integration and executable verification | accepted | [] | 0 | backend `785 passed, 2 skipped`; smoke mock/live=false/operator blocked; frontend `23 passed`; build and 48 local links passed | independent draft cross-check | 5 |
+
+This is one documentation sample, not enough to change a routing preference. The useful operational
+evidence is that a bounded same-family fallback can complete a documentation mission when the selected
+counterpart is unavailable, provided the deviation and missing cross-vendor review are explicit.
+
 ## 9. Operating notes
 
 - Append new evidence records to §8 (or a successor evidence log split out when it grows) at each

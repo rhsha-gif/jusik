@@ -1,10 +1,15 @@
 # QuantPilot 현재 워크플로우와 작동 방식
 
-> 기준: `0434aa41581936b24c2464aa922f4b22f156d212` (`2026-07-11` 조사)
+> 코드 기준: `ffbdc20617e248a833ab313fa28f7ec3de172fd1` (`2026-07-11` 조사)
 >
 > 이 문서는 미래 설계가 아니라 **현재 저장소에서 실행되는 경로**를 설명한다. 보고서의 완료 주장보다 코드와
 > 테스트를 우선했고, 아직 연결되지 않았거나 기본 설정에서 잠긴 기능은 그 사실을 따로 표시한다. QuantPilot은
 > fixture-first 안전 하네스이며 live 주문 경로는 구현·활성화되어 있지 않다.
+
+조사 시작 시 메인 working tree에는 CORS 설정과 API router 분리에 관한 미커밋 사용자 변경이 있었다. 이 문서는
+재현 가능한 기준을 위해 위 커밋의 동작을 본문 기준으로 삼고, 미커밋 변경은 안정 동작으로 단정하지 않은 채
+14절의 진행 중 변경으로만 구분한다. 문서화 작업 자체는 별도 worktree에서 수행해 사용자 변경을 수정·stage하지
+않았다.
 
 ## 1. 한눈에 보는 시스템
 
@@ -402,7 +407,48 @@ npm run build
 기본 smoke의 성공 기준은 단순 exit code가 아니다. fixture 정책/신호/계획/감사 흐름이 성공하고 broker가 mock,
 live가 false이며 operator가 `blocked`, fallback=`level5_flag_disabled`, submitted=[]를 출력해야 한다.
 
-## 12. 작동방식을 발전시킬 때 보존할 불변조건
+### 11.1 이 문서 작성 시점의 검증 스냅샷
+
+`2026-07-11 KST`에 기준 커밋을 격리 worktree에서 다시 검증한 결과는 다음과 같다.
+
+| 검증 | 결과 | 비고 |
+|---|---|---|
+| `python -m pytest quantpilot/tests` | 환경 오류 | 코드 실패가 아니라 `C:\Users\goyan\AppData\Local\Temp\pytest-of-goyan` 접근 거부 |
+| `python -m pytest quantpilot/tests -p no:cacheprovider --basetemp=.pytest_tmp` | `785 passed, 2 skipped` | Windows 권한 우회 후 전체 backend 통과 |
+| `python -m quantpilot.jobs.run_smoke` | 통과 | `broker=mock`, live=false, Level 5 blocked, 제출 ID 없음 |
+| `npm run test` | `23 passed` | 기존 메인 workspace의 설치된 `node_modules`를 사용해 기준 frontend source 검증 |
+| `npm run build` | 통과 | 번들 크기 경고가 있으나 typecheck/Vite build 성공 |
+
+## 12. 개발 변경과 에이전트 협업 워크플로우
+
+프로젝트의 기능 작동 방식뿐 아니라 **변경을 반영하는 방식**도 안전 계약의 일부다. 기준 문서는
+[`AGENTS.md`](../AGENTS.md), [`agent_collaboration_protocol.md`](agent_collaboration_protocol.md),
+[`agent_workboard_template.md`](agent_workboard_template.md)다.
+
+### 12.1 단순 작업 fast path
+
+목표와 수정 지점이 명확한 한두 파일의 국소 변경, 짧은 설명, 오탈자처럼 저위험·가역적이고 외부 side effect가
+없는 작업은 최초 수신자가 바로 처리한다. 별도 작업보드, 상대 에이전트, 라우팅 점수, 전용 worktree를 만들지
+않고 필요한 최소 검증만 실행한다. 다만 안전 규칙과 필수 검증은 단순 작업에서도 생략할 수 없다.
+
+### 12.2 비단순 미션
+
+저장소 전반 조사, 다중 모듈 변경, 원인 미상의 버그, 거래·데이터·상태 계약 변경처럼 비단순한 작업은 다음
+순서를 따른다.
+
+1. 최초 수신자가 mission lead가 되어 목표, 범위, 안전 경계, 완료 조건을 작업보드에 확정한다.
+2. 능력 점수표로 구현자와 검토자를 정하고 서로 겹치지 않는 소유 경로와 별도 worktree/branch를 배정한다.
+3. 상대 에이전트가 구현 전에 분해와 검증 계획을 검토하고, 독립 구현·구속력 있는 연구/설계·차단 가능한 감사 중
+   최소 하나의 실질 산출물을 커밋한다.
+4. 각 작업자는 자기 경로만 stage/commit하고 정확한 검사 결과와 한계를 handoff한다.
+5. mission lead가 상대 커밋을 검토해 mainline에 통합하고 최종 커밋 상태에서 프로젝트 전체 검증을 반복한다.
+6. 작업 중 단순 범위를 벗어났다면 그 시점에 작업보드를 만들고 비단순 절차로 승격한다.
+
+이 절차는 작업량을 나누기 위한 것이 아니라 dirty workspace의 사용자 변경 보존, 독립 검증, 안전 중요 변경의
+단일 통합 책임을 확보하기 위한 것이다. 완료된 과거 작업보드는 증거일 뿐 새 미션의 활성 상태판으로 재사용하지
+않는다.
+
+## 13. 작동방식을 발전시킬 때 보존할 불변조건
 
 1. 새 기능은 데이터 출처, 전략 evidence, 실행 권한을 한 flag로 합치지 않는다.
 2. API/UI/LLM/RL이 broker adapter를 직접 호출하지 않고 service→risk→state machine→broker 경계를 유지한다.
@@ -421,7 +467,7 @@ live가 false이며 operator가 `blocked`, fallback=`level5_flag_disabled`, subm
     audit retention 계약을 먼저 설계한다.
 12. 계약이나 API를 바꾸면 tests, OpenAPI snapshot, generated frontend types, 운영 문서를 같은 변경에서 갱신한다.
 
-## 13. 현재 문서와 코드의 간극·알려진 한계
+## 14. 현재 문서와 코드의 간극·알려진 한계
 
 - README의 첫 문장은 fixture-only라고 하지만 코드는 local/external historical과 opt-in KIS paper runtime까지
   확장되어 있다. 다만 **기본 경로가 fixture이고 live가 미구현**이라는 핵심은 맞다.
@@ -442,10 +488,12 @@ live가 false이며 operator가 `blocked`, fallback=`level5_flag_disabled`, subm
   Level 4/5 mock 경로의 시간 함수는 공휴일 달력을 모른다.
 - 브리핑은 fixture read-only이며 실제 뉴스 수집기나 신호 통합이 없다.
 - strategy studio와 strategy ticket, notification endpoint가 한 `execution.py` router에 함께 있어 모듈 경계가
-  느슨하다. 기능 오류는 아니지만 확장 전 분리가 유리하다.
+  느슨하다. 조사 시작 시 메인 working tree에는 이를 세 router로 분리하고 CORS origin 설정을 확장하는 미커밋
+  변경이 있었지만 기준 커밋에는 아직 통합되지 않았다. 해당 변경이 검토·커밋되기 전에는 완료된 구조로 간주하지
+  않는다.
 - OpenAPI snapshot/generated type이 실제 app과 동기화됐는지는 API 계약 변경 때마다 재생성 검증이 필요하다.
 
-## 14. 근거를 찾는 빠른 경로
+## 15. 근거를 찾는 빠른 경로
 
 - 안전 기본값과 명령: [`README.md`](../README.md), [`.env.example`](../.env.example)
 - 전체 도메인 모델: [`schemas.py`](../quantpilot/packages/core/schemas.py)

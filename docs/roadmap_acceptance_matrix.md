@@ -127,7 +127,7 @@ authoritative evidence, and its fake-vs-manual split.
 - **Fake-only:** all of the above. **Manual:** `VTTC0084R` remains an open manual
   gate; it blocks operational kill use only, not downstream development.
 
-### Gate 1 — `QP-RISK-RES-V1` atomic risk reservation (schema v10)
+### Gate 1 — `QP-RISK-RES-V1` atomic risk reservation (schema v10; status: done — fake-only development readiness, Gate P pending)
 
 - **Depends on:** Gate 0 baseline and this matrix (`QP-RM-00A`).
 - **Scope:** durable, atomic cash + sell-quantity + incremental long-gross
@@ -157,10 +157,15 @@ authoritative evidence, and its fake-vs-manual split.
   6. Migration v9→v10 adds the reservation table empty and backfills a `held`
      reservation for every open (non-terminal) dispatch from that dispatch's own
      durable evidence; terminal dispatches need none (contract §9).
-- **Authoritative evidence:** §2 backend suite green with new reservation
-  concurrency/crash/migration tests (contract §10) added and passing; §2 smoke
-  unchanged (`broker=mock`, `live=false`); `git diff --check` clean. Independent
-  auditor reports **zero P0/P1**.
+- **Authoritative evidence:** baseline integration head `5eb70a9`; backend
+  `885 passed, 2 skipped` with reservation concurrency/crash/migration tests;
+  smoke `broker=mock`, `live=false`, operator blocked with
+  fallback=`level5_flag_disabled`; kill CLI default-blocked with
+  `paper_kill_disabled`; `git diff --check` clean. Claude Code
+  `claude-fable-5` audit `c021a50` plus follow-up `b280bef` report
+  **residual P0=0/P1=0** and close QP-RES-A1. Non-blocking residuals are
+  QP-RES-A2 P2 (conservative cross-policy over-blocking) and QP-RES-A3 P3
+  (diagnostic error wording).
 - **Fake-only:** every automatic test uses the deterministic fake KIS client and
   fixed clocks; no network, no secrets. This proves *development readiness* of the
   reservation arithmetic, atomicity, and crash behavior.
@@ -245,7 +250,7 @@ authoritative evidence, and its fake-vs-manual split.
 | Gate | Backend evidence | Smoke evidence | P0/P1 | Fake-only met | Manual met | Status |
 |---|---|---|---|---|---|---|
 | Gate 0 `QP-RM-00` | `819 passed, 2 skipped` | mock/live=false/blocked | 0 | yes | `VTTC0084R` pending | done |
-| Gate 1 `QP-RISK-RES-V1` | pending | pending | pending | pending | n/a for dev | proposed |
+| Gate 1 `QP-RISK-RES-V1` | `885 passed, 2 skipped` | mock/live=false/operator blocked; kill CLI blocked | 0/0 | yes | n/a for dev; Gate P pending | done |
 | Gate 2 `QP-EXEC-EVENTS-V1` | pending | pending | pending | pending | n/a | proposed |
 | Gate 3 `QP-KERNEL-V2` | pending | pending | pending | pending | n/a | proposed |
 | Gate 4 `QP-LEDGER-RUNTIME` | pending | pending | pending | pending | folded into P | proposed |

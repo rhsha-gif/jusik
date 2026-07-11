@@ -2,7 +2,7 @@
 
 > 이 문서는 시점별 보고서가 아니라 **갱신형 현황판**입니다.
 > 스테이지가 끝날 때마다 이 파일을 덮어쓰고, 상세 근거는 기존 `docs/*_report.md`에 남깁니다.
-> 마지막 갱신: **2026-07-06**
+> 마지막 갱신: **2026-07-11**
 
 ## 목적 (한 줄)
 
@@ -24,7 +24,9 @@ Level 1~5 자율화 전 과정을 먼저 완성하고, 사람 승인 게이트�
 | 데이터: external_historical (KIS) | 🟡 코드 완성, 실서버 미검증 | 가짜 transport로 단위 테스트됨; 실 키 확보 시 `RUN_KIS_MANUAL_INTEGRATION=1` 수동 테스트 준비됨 |
 | KIS 토큰 발급 (`/oauth2/tokenP`) | ✅ 헬퍼 구현 (실서버 미검증) | `request_access_token(_from_env)` — 앱키/시크릿으로 발급; fake transport 단위 테스트 완료, 실 키 확보 시 수동 검증 |
 | 뉴스 브리핑 (구상 ①) | 🟡 골격 완료 (fixture) | 읽기 전용 격리 경계 + `GET /api/briefing/daily`; 실제 수집기·프론트 페이지는 후속 |
-| 실시간 시세 / paper trading | ❌ 범위 밖 | 라이브 체크리스트 선행조건 |
+| 실시간 일반 provider | ❌ 미구현, fail closed | 일반 provider factory는 realtime/paper 요청을 fixture로 fallback하지 않음 |
+| KIS paper managed-order kill v1 | 🟡 schema v9 개발 검증 완료, 운영 미승인 | fake-client cancel journal/kill 검증 완료; `VTTC0084R`와 cancel POST는 Gate P 수동 검증 대기 |
+| KIS paper atomic reservation v1 | ✅ schema v10 Gate 1 개발 완료 | baseline `5eb70a9`; Gate P buying-power/실서버 semantics는 미검증 |
 | 라이브 트레이딩 | ❌ 의도적 미구현 | `docs/live_trading_enablement_checklist.md` 12항목 전부 사람 체크 필요 (현재 0/12) |
 
 ## 안전 불변식 (변경 금지 기본값)
@@ -33,7 +35,18 @@ Level 1~5 자율화 전 과정을 먼저 완성하고, 사람 승인 게이트�
 `FULLY_AUTOMATED_OPERATOR_ENABLED=false` · `MARKET_ORDERS_ENABLED=false` ·
 `BROKER_MODE=mock` · `DATA_MODE=fixture`
 
-## 최근 완료 (2026-07-06)
+## 최근 완료 (2026-07-11)
+
+- **Roadmap Gate 1 — Atomic Risk Reservation v1 완료**: KIS paper의 현금,
+  매도 가능수량, incremental long-gross를 schema v10 SQLite에서 주문과
+  원자적으로 예약한다. 모호한 POST 결과와 부분체결은 reservation을
+  유지하고, 확정 terminal에서만 같은 transaction으로 해제한다.
+- Claude Code `claude-fable-5` 독립 감사와 QP-RES-A1 후속 재감사를 완료했다.
+  잔여 P0=0/P1=0이며 A1은 closed다. 기준선 재검증은 `885 passed,
+  2 skipped`, smoke `mock/live=false/operator blocked`, kill CLI
+  `paper_kill_disabled`다. 실제 KIS 호출은 하지 않았다.
+- 다음 활성 개발 Gate는 `QP-EXEC-EVENTS-V1` canonical order events와
+  deterministic reducer다. Gate P/manual KIS 운영 검증은 별도 보류한다.
 
 - Level 1-2 모의체결 + 승인 티켓 레일 + Execution 페이지 커밋 (`pytest 274 passed`, `vitest 20 passed`, `build ok`)
 - `quantpilot/jobs/fetch_krx_local_data.py` 추가 — pykrx로 실 KRX 일봉을 받아
@@ -99,19 +112,20 @@ Level 1~5 자율화 전 과정을 먼저 완성하고, 사람 승인 게이트�
 > 제품 구상(대화형 전략 수립 → 전략 단위 승인 → 자동 운용)과의 정렬 설계 및
 > 전체 로드맵: `docs/product_vision_alignment_design.md`
 
-1. 승인 기준(acceptance thresholds) 확정 — 표본이 생겼으므로 이제 논의 가능 (사람 입력)
-2. §4.4 잔여: 동일 종목 충돌 규칙(`conflict_rule`)·상관 예산 — 다중 전략 동시
-   운용 시작 시 (예산 게이트 자체는 ✅ 제출 경로에서 강제됨)
-3. DriftMonitor 개선: 일별 종가 재평가·수수료 반영 (통지 인박스 UI는 ✅ 완료)
-4. 라우터 분리 부채: strategy-studio·strategy-tickets·notifications 엔드포인트가
-   execution.py에 동거 (main.py에 타 세션 미커밋 CORS 변경 있음 — 커밋 전 주의)
-5. KIS 앱키 확보 시: `RUN_KIS_MANUAL_INTEGRATION=1` 수동 통합 테스트 (토큰 헬퍼는 ✅ 준비됨)
-6. 소소한 부채: ~~`MARKET_ORDERS_ENABLED` 판독 중복 제거~~ ✅ (gatekeeper 단일화),
-   `.env.example` 동기화 코드 가드 (파일에 타 세션 미커밋 변경 있어 보류)
+1. `QP-EXEC-EVENTS-V1`: canonical execution events, deterministic reducer,
+   기존 schema v10 상태와의 shadow parity 구현
+2. `QP-KERNEL-V2`: Level 3/4/5 공통 execution kernel을 shadow부터 점진 전환
+3. durable outbox + account single-writer + authoritative execution/position/cash ledger
+4. continuous OMS/risk/reconciliation runtime과 운영 health/metric
+5. Gate P: 명시적 사용자 권한 아래 실제 KIS paper 수동 검증
+6. 제품 backlog: 승인 기준, `conflict_rule`/상관 예산, DriftMonitor,
+   router 분리, `.env.example` 동기화 가드
 
 ## 사람 입력 대기
 
 - [ ] KIS 오픈API 앱키/시크릿 (계좌 개설 필요; 모의투자 도메인 `openapivts.koreainvestment.com:29443`)
+- [ ] Gate P 명시적 수동 권한: `VTTC0084R`, real buying-power field mapping,
+  session-calendar 경계, 소량 paper round trip과 cancel 결과 확인
 - [x] ~~Stage 03 거래비용·세금 가정치~~ → 확정: 한투 실거래 API·일반 개인 기준
   (`backtest/costs.py`; 뱅키스 온라인이 아닌 영업점 계좌면 `--fee-bps 14.7` 오버라이드)
 - [ ] 슬리피지(현 5bps)·체결버퍼 가정치 — 연구용 가정 유지 중, 브로커 확인 전
@@ -129,7 +143,9 @@ Level 1~5 자율화 전 과정을 먼저 완성하고, 사람 승인 게이트�
 ## 검증 명령
 
 ```powershell
-python -m pytest quantpilot/tests -p no:cacheprovider --basetemp=.pytest_tmp
+python -m pytest quantpilot/tests -p no:cacheprovider --basetemp=.pytest_tmp `
+  --junitxml=.pytest_tmp/results.xml
 python -m quantpilot.jobs.run_smoke
+python -m quantpilot.jobs.run_kis_paper_kill engage
 # 프론트 (quantpilot/apps/web): npm run test && npm run build
 ```

@@ -23,10 +23,10 @@
 ## Counterpart plan review
 
 - Reviewer/model: Claude Code, exact resolved model to be recorded at handoff.
-- Review status: `blocked_pending_retry` — Claude Code `fable` and `sonnet`
-  attempts received account-level HTTP 429 with reset at
-  `2026-07-11 15:40 KST`. No runtime implementation starts before this initial
-  decomposition review succeeds.
+- Review status: `ready_pending_claude_review` — Gate 1 is accepted and the
+  isolated Claude worktree is prepared. Historical `fable`/`sonnet` attempts
+  were rate-limited without an artifact; no runtime implementation starts before
+  this initial decomposition review succeeds.
 - Requested substantive counterpart artifact: review and correct
   `docs/contracts/canonical_order_events_v1.md`, including aggregate boundaries,
   event identity, migration truthfulness, duplicate/order semantics, and the
@@ -64,8 +64,8 @@ Score formula: `domain*0.30 + tools*0.25 + track*0.25 + continuity*0.10 + coordi
 
 | Task ID | Owner/model | Reviewer/model | Depends on | Worktree/branch | Owned paths | Status | Acceptance | Evidence/commit |
 |---|---|---|---|---|---|---|---|---|
-| `QP-EVT-000` | GPT-5 Codex lead + read-only inventory/test/audit agents | Claude Code | Gate 1 candidate | `주식트레이더-exec-events-v1` / `codex/qp-exec-events-v1-contract` | repository inventory, contract draft, workboard | review_ready | Every mutation path, identifier meaning, and migration risk is grounded in code. | inventory + test design; two corrected re-audits P0/P1=0; draft pending Claude review |
-| `QP-EVT-010` | Claude Code | GPT-5 Codex lead | `QP-EVT-000` | `주식트레이더-claude-exec-events-review` / `claude/qp-exec-events-v1-review` | contract corrections + adversarial acceptance artifact | blocked | Initial decomposition review is substantive, decision-complete, committed, and contains no runtime/network changes. | clean worktree created at `c0a625e`; retry after 15:40 KST reset |
+| `QP-EVT-000` | GPT-5 Codex lead + read-only inventory/test/audit agents | Claude Code | Gate 1 accepted | `주식트레이더-exec-events-v1` / `codex/qp-exec-events-v1-contract` | repository inventory, contract draft, workboard | review_ready | Every mutation path, identifier meaning, and migration risk is grounded in code. | inventory + test design; two corrected re-audits P0/P1=0; Gate 1 merged; draft pending Claude review |
+| `QP-EVT-010` | Claude Code | GPT-5 Codex lead | `QP-EVT-000` | `주식트레이더-claude-exec-events-review` / `claude/qp-exec-events-v1-review` | contract corrections + adversarial acceptance artifact | ready | Initial decomposition review is substantive, decision-complete, committed, and contains no runtime/network changes. | isolated review worktree prepared; runtime remains blocked until review commit is integrated |
 | `QP-EVT-020` | routed after review | counterpart reviewer | `QP-EVT-010`, Gate 1 accepted | separate implementation branch | event model, canonical hash, pure reducer, focused tests | proposed | Deterministic replay; strict duplicate/gap/hash/provenance behavior; no side effects. | pending |
 | `QP-EVT-030` | GPT-5 Codex lead | independent auditor | `QP-EVT-020` | implementation worktree | schema v11, append helpers, exhaustive dual-write, migration | proposed | Authoritative row/event batch commits or rolls back together at every mutation site. | pending |
 | `QP-EVT-040` | GPT-5 Codex lead | Claude/internally independent reviewer | `QP-EVT-030` | integration worktree | parity corpus, race/fault/restart tests, report | proposed | Replay equals all authoritative observable fields; no broker side effects; full suite/smoke green. | pending |
@@ -107,10 +107,10 @@ No later gate can be waived because an earlier test count is high.
 
 ## Blockers and authority requests
 
-- Gate 1 remains in review until Claude's final implementation audit can be
-  retried after the account-level 429 reset. Gate 2 contract work may proceed,
-  but implementation cannot.
-- Claude's Gate 2 initial review is likewise pending rate-limit recovery.
+- Gate 1 is accepted and no longer blocks Gate 2.
+- Claude's Gate 2 initial contract/decomposition review remains the only current
+  implementation blocker; the prepared review worktree must produce a committed
+  artifact before QP-EVT-020 starts.
 - Real KIS paper validation remains manual and is not needed for this fake-only
   development gate.
 - No request for live, secrets, network access, or user-owned dirty-tree changes
@@ -132,6 +132,9 @@ No later gate can be waived because an earlier test count is high.
 - `2026-07-11 12:55 KST` — a clean Claude review worktree/branch was created at
   `c0a625e`. A safe-mode Claude Code `sonnet` audit retry returned HTTP 429 with
   zero token/cost usage and an explicit `15:40 KST` reset; no files changed.
+- `2026-07-11 KST` — accepted Gate 1 baseline `0a9b644` was merged into the
+  event mission while retaining the event contract inventory and review queue.
+  Gate 1 dependency is satisfied; no event runtime code has started.
 
 ## Handoff record
 

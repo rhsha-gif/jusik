@@ -1,6 +1,6 @@
 # QuantPilot 현재 워크플로우와 작동 방식
 
-> 코드 기준: `ffbdc20617e248a833ab313fa28f7ec3de172fd1` (`2026-07-11` 조사)
+> 코드 기준: `5eb70a9db32b59d41ebd1e7878df5c2314621554` (`2026-07-11` Gate 1 통합 검증)
 >
 > 이 문서는 미래 설계가 아니라 **현재 저장소에서 실행되는 경로**를 설명한다. 보고서의 완료 주장보다 코드와
 > 테스트를 우선했고, 아직 연결되지 않았거나 기본 설정에서 잠긴 기능은 그 사실을 따로 표시한다. QuantPilot은
@@ -29,7 +29,7 @@ QuantPilot은 하나의 거대한 자동매매 루프가 아니라 권한이 다
 - Level 5는 한 번의 bounded operator cycle이다. 기본 레지스트리에는 Level 5 전략이 없고 플래그도 꺼져 있어
   기본 실행은 결정적인 no-op/차단 결과를 낸다.
 - 실제 외부 연결이 있는 유일한 주문 경계는 **KIS 모의투자 전용 CLI 세션**이다. 이 경로는 일반 API가 아니라
-  명시적 환경 게이트, 로컬 과거데이터, KIS paper 호가, SQLite 디스패치 저널을 함께 사용한다.
+  명시적 환경 게이트, 로컬 과거데이터, KIS paper 호가, schema v10 SQLite 디스패치·위험예약 저널을 함께 사용한다.
 - LLM 분석과 RL 출력은 브로커 주문을 직접 생성·승인·제출할 권한이 없다. RL 계약은 전략 선택 또는 제한된
   목표비중 변화만 표현한다 ([`RLOutput`](../quantpilot/packages/core/rl/outputs.py)).
 
@@ -279,9 +279,14 @@ kill switch가 발동되면 전략 승인 티켓도 revoke된다. release에는 
 
 ### 7.2 SQLite paper state
 
-`PaperStateStore`는 opt-in이며 schema version 8, foreign keys, `synchronous=FULL`, 파일 DB의 WAL을 사용한다.
-주요 테이블은 store provenance, managed positions, run checkpoints, strategy states, pending liquidations,
-cycle claims, processed fills, safety state, execution sessions, order dispatches, loss baselines다.
+`PaperStateStore`는 opt-in이며 schema version 10, foreign keys,
+`synchronous=FULL`, 파일 DB의 WAL을 사용한다. schema v9에서 managed-order
+kill operation과 cancel request journal이 추가됐고, v10에서
+`paper_risk_reservations`가 추가됐다. 주요 테이블은 store provenance,
+managed positions, run checkpoints, strategy states, pending liquidations,
+cycle claims, processed fills, safety state, execution sessions, order
+dispatches, risk reservations, kill operations, cancel requests, loss
+baselines다.
 
 - DB는 `data_mode`, broker environment, 계정번호 자체가 아닌 SHA-256 account scope fingerprint에 묶인다.
 - 다른 계정/환경 DB를 열거나 provenance가 불완전하면 fail closed한다.
@@ -289,21 +294,29 @@ cycle claims, processed fills, safety state, execution sessions, order dispatche
 - weekly rebalance는 bucket 단위 unique claim과 lease/fence로 중복 cycle을 막는다.
 - optimistic revision과 immutable identity 비교가 충돌/변조된 복구를 막는다.
 - raw credential, access token, 계좌번호를 DB나 저장소에 기록하지 않는다.
+- v9→v10 migration은 열린 legacy dispatch마다 보수적인 `held` reservation을
+  같은 migration transaction에서 backfill한다. 안전한 증거를 만들 수 없으면
+  `PaperStateMigrationRequired`로 전체 migration을 rollback하고 v9를 유지한다.
 
 ### 7.3 외부 POST 전후 계약
 
 `DurablePaperSubmissionCoordinator`만 KIS 주문 POST 권한을 가진다.
 
 ```text
-prepared (SQLite commit)
+risk reservation + prepared dispatch (same SQLite commit)
   -> dispatch_claimed (단 한 번의 원자적 claim)
   -> accepted / partially_filled / filled / rejected
   -> 응답이 모호하면 outcome_unknown -> broker 조회 reconciliation만 허용
+  -> definitive terminal이면 dispatch CAS + reservation release (same transaction)
 ```
 
 `dispatch_claimed` 이후 예외가 나면 재전송하지 않는다. `outcome_unknown`을 포함한 비-prepared 상태를 다시
 호출하면 broker POST 없이 기존 증거를 replay하거나 reconciliation 필요 오류를 낸다. prepared 당시 order,
 risk check, quote, snapshot, strategy, account fingerprint의 immutable evidence가 현재 제출과 정확히 일치해야 한다.
+`outcome_unknown`, `accepted`, `partially_filled`에서는 전체 reservation을
+`held`로 유지한다. `filled`, `cancelled`, `rejected`,
+`expired_pre_dispatch`, `failed_pre_dispatch`처럼 확정된 terminal 증거가
+있을 때만 dispatch 갱신과 같은 transaction에서 release한다.
 
 KIS 일별 조회의 최근 3개월 범위를 벗어난 미해결 주문은 자동 추측하지 않고
 `paper_broker_history_manual_resolution_required`로 차단한다. 현재 DB 직접 수정이나 임의 확정 명령은 없다.
@@ -414,10 +427,11 @@ live가 false이며 operator가 `blocked`, fallback=`level5_flag_disabled`, subm
 | 검증 | 결과 | 비고 |
 |---|---|---|
 | `python -m pytest quantpilot/tests` | 환경 오류 | 코드 실패가 아니라 `C:\Users\goyan\AppData\Local\Temp\pytest-of-goyan` 접근 거부 |
-| `python -m pytest quantpilot/tests -p no:cacheprovider --basetemp=.pytest_tmp` | `785 passed, 2 skipped` | Windows 권한 우회 후 전체 backend 통과 |
+| `python -m pytest quantpilot/tests -p no:cacheprovider --basetemp=.pytest_tmp_gate1` | `885 passed, 2 skipped` | schema v10 Gate 1 통합 후 전체 backend 통과 |
 | `python -m quantpilot.jobs.run_smoke` | 통과 | `broker=mock`, live=false, Level 5 blocked, 제출 ID 없음 |
-| `npm run test` | `23 passed` | 기존 메인 workspace의 설치된 `node_modules`를 사용해 기준 frontend source 검증 |
-| `npm run build` | 통과 | 번들 크기 경고가 있으나 typecheck/Vite build 성공 |
+| `python -m quantpilot.jobs.run_kis_paper_kill engage` | 기본 차단 | `paper_kill_disabled`; 실제 KIS 호출 없음 |
+| `npm run test` | `23 passed` | Gate 1 이전 frontend snapshot; Gate 1은 frontend를 변경하지 않음 |
+| `npm run build` | 통과 | Gate 1 이전 snapshot; 번들 크기 경고가 있으나 typecheck/Vite build 성공 |
 
 ## 12. 개발 변경과 에이전트 협업 워크플로우
 
@@ -471,15 +485,19 @@ live가 false이며 operator가 `blocked`, fallback=`level5_flag_disabled`, subm
 
 - README의 첫 문장은 fixture-only라고 하지만 코드는 local/external historical과 opt-in KIS paper runtime까지
   확장되어 있다. 다만 **기본 경로가 fixture이고 live가 미구현**이라는 핵심은 맞다.
-- `docs/STATUS.md`는 realtime/paper를 범위 밖이라고 요약하지만 현재 저장소에는 hardened KIS paper session
-  코드와 테스트가 있다. 정확히는 일반 API의 realtime/paper provider가 미구현이고 전용 CLI paper runtime만
-  존재한다.
+- `docs/STATUS.md`는 일반 realtime provider와 전용 KIS paper runtime을
+  구분한다. 전용 runtime의 kill v1과 atomic reservation v1은 fake-client
+  개발 검증을 마쳤지만 Gate P/manual KIS 검증 전에는 운영 준비로 보지 않는다.
 - `AGENTS.md`의 8개 data mode와 코드의 6개 `DataMode`가 다르다. candidate/canary/scaled를 코드에 넣을지,
   문서의 운영 stage vocabulary로만 둘지 먼저 결정해야 한다.
 - README의 uvicorn 명령은 기본 8000 포트지만 UI 기본값은 8010이다. 함께 실행할 때 `--port 8010`을 붙이거나
   UI API base를 바꿔야 한다.
 - 기본 API repository와 operator report는 in-memory다. `professional-status`만 SQLite를 read-only로 보며,
   API에서 KIS paper session을 시작하거나 DB를 수정하지 않는다.
+- held sell reservation의 guardrail projection은 현재 policy scope를 별도
+  저장하지 않아 one-policy-per-paper-store 운용 가정 아래 보수적으로
+  동작한다(QP-RES-A2). 다중 policy를 한 store에 넣기 전에 dispatch
+  `policy_id`와의 join 또는 reservation scope 확장이 필요하다.
 - 기본 registry에는 의도적으로 `validated_l5`가 없다. Level 5 코드가 존재한다는 사실은 기본 자동주문이
   가능하다는 뜻이 아니다.
 - KIS historical/token/paper connector는 fake transport로 자동 검증되었지만 실제 서버는 자격증명과 명시적

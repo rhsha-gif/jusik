@@ -98,6 +98,10 @@ cutover gates are accepted.
   capability model do not yet exist.
 - `AuthorityCheckResult` is the current Level 4/5 check result but does not by
   itself bind a human actor or approval ticket.
+- The direct Level 3 approval endpoint currently accepts no approver identity
+  and `approve_order_plan()` does not set `OrderPlan.approved_by`. It proves a
+  local approval transition and audit source, not an authenticated human
+  signature.
 - `run_risk_check()`, `authorize_level4()`, and `authorize_level5()` read
   environment-derived feature state. They therefore cannot be called from the
   pure kernel unless those reads are first moved behind an adapter.
@@ -108,6 +112,11 @@ cutover gates are accepted.
   aggregates. They are not a general OMS ledger.
 - `partial_allow` is still a boolean at several API and risk boundaries. Its
   portfolio semantics are a later, separate change.
+- The current `submit_order_plan()` checks `risk_check_expires_at` but does not
+  explicitly reject the current order's own `OrderPlan.expires_at`. The helper
+  that excludes expired pre-submission orders from guardrail calculations
+  excludes the current order during submit-time evaluation. This is a known
+  fail-closed hardening delta, not parity evidence to normalize away.
 
 ## 3. Bounded mission outcome
 
@@ -162,8 +171,9 @@ An AST/import-boundary test enforces this list.
 
 ### 4.2 Versioned input
 
-`KernelEvaluationInputV1` is a frozen value object. It contains projections of
-current authoritative objects; it is not a new persisted order schema.
+`KernelEvaluationInputV1` is a deeply immutable value object. It contains
+primitive frozen projections of current authoritative objects; it is not a new
+persisted order schema. It must not embed a mutable `HarnessModel` instance.
 
 Required fields:
 
@@ -177,17 +187,19 @@ broker: BrokerCapabilitySnapshotV1
 evaluated_at: aware datetime
 ```
 
-Every nested value is frozen, deeply copied at the adapter boundary, and JSON
-serializable with a canonical ordering.
+Every nested value uses `ConfigDict(frozen=True, extra="forbid")` or an
+equivalent frozen standard-library value type, is copied at the adapter
+boundary, and is JSON serializable with a canonical ordering.
 
 #### `KernelOrderCandidateV1`
 
-This is a read-only projection of an existing `OrderPlan` and its
-`OrderIntent`:
+This is a read-only projection of an existing `OrderPlan`. The mutable
+`OrderIntent` model is converted to `KernelIntentSnapshotV1` rather than
+embedded directly:
 
 ```text
 order_plan_id
-intent                 # existing OrderIntent value, never mutated
+intent: KernelIntentSnapshotV1
 policy_id
 policy_version
 purpose
@@ -199,9 +211,14 @@ approved_by
 order_expires_at
 ```
 
-It must retain the existing IDs rather than generate new ones. The adapter
-validates that the intent, policy identity, and idempotency key came from one
-`OrderPlan` snapshot.
+`KernelIntentSnapshotV1` contains the existing intent ID, normalized symbol,
+side, order type, quantity, limit price, notional, target weight, reason, and
+aware quote time as scalar values. Numeric source values are converted with
+`Decimal(str(value))`, must be finite, and serialize as canonical decimal
+strings; the evaluator does not perform portfolio arithmetic on them. It must
+retain the existing IDs rather than generate new ones. The adapter validates
+that the intent, policy identity, and idempotency key came from one `OrderPlan`
+snapshot.
 
 #### `AuthorizationEvidenceV1`
 
@@ -219,6 +236,12 @@ policy_id
 policy_version
 actor_id: optional string
 approval_reference: optional ticket/run/claim reference
+assurance:
+  simulated
+  unverified_local
+  ticket_attested
+  policy_authorized
+  operator_authorized
 evaluated_at: aware datetime
 checks: ordered immutable list of {name, passed, detail_code}
 first_failed_check: optional string
@@ -227,9 +250,12 @@ first_failed_check: optional string
 Level adapters bind current evidence as follows:
 
 - Level 1-2: simulated authorization marker and mock-only policy evidence;
-- Level 3 direct: approved order state and explicit approver identity;
+- Level 3 direct: approved order state plus `unverified_local` assurance at the
+  current baseline. An actor may be included only when a caller actually
+  supplies and persists it; policy user ID alone is not treated as
+  authentication;
 - Level 3 ticket: immutable ticket ID, approved actor, ticket data mode, and
-  ticket/order/policy identity;
+  ticket/order/policy identity with `ticket_attested` assurance;
 - Level 4: the complete `AuthorityCheckResult` plus the policy authority
   identity;
 - Level 5 ordinary: the complete `AuthorityCheckResult`, operator run ID, and
@@ -239,6 +265,9 @@ Level adapters bind current evidence as follows:
 
 The kernel does not perform authentication or call `authorize_level4()` /
 `authorize_level5()`. It verifies internal consistency of supplied evidence.
+`unverified_local` is accepted only for fixture/mock shadow evidence. It cannot
+qualify external paper, a later live candidate, or a Level 3 cutover without a
+separately reviewed identity-binding change.
 
 #### `RiskEvidenceV1`
 
@@ -298,6 +327,22 @@ session_id: optional opaque value
 fencing_token: optional integer
 ```
 
+`data_mode` uses the project-wide closed deployment values from `AGENTS.md`.
+`run_mode` is one of:
+
+```text
+level_1_2_mock
+level_3_direct
+level_3_ticket
+guarded_level_4
+operator_dry_run
+operator_mock_submit
+operator_paper_submit
+professional_risk_reduction
+```
+
+No caller may place an arbitrary route or endpoint string in the evidence.
+
 Secrets, account IDs, tokens, request headers, and raw KIS payloads are
 forbidden.
 
@@ -324,7 +369,7 @@ The first slice accepts no live environment and no unknown capability value.
 ```text
 schema_version = 1
 order_plan_id
-verdict: would_dispatch | blocked
+verdict: eligible_for_legacy_submit | blocked
 blocked_stage: authorization | risk | final_safety | capability | none
 reason_codes: sorted unique immutable list
 would_require_durable_prepare: bool
@@ -334,9 +379,11 @@ evaluated_at
 evidence_fingerprint
 ```
 
-`would_dispatch` means only that the immutable evidence bundle is eligible to
+`eligible_for_legacy_submit` means only that the immutable evidence bundle may
 continue through the existing legacy handoff. It never means that an order was
-prepared, submitted, accepted, or filled.
+prepared, submitted, accepted, or filled. In particular, it does not predict
+the `before_broker_submit` callback or the second final-safety check that the
+legacy path performs immediately before durable preparation/broker submission.
 
 `evidence_fingerprint` is SHA-256 over a canonical JSON projection of all input
 fields except no fields are omitted for nondeterminism: there must be no random
@@ -355,16 +402,53 @@ The evaluator applies these closed stages in order:
 6. final safety snapshot (live off, kill off, not paused, healthy broker);
 7. required explicit paper evidence and provenance fields;
 8. broker capability compatibility; and
-9. return `would_dispatch` with declarative requirements only.
+9. return `eligible_for_legacy_submit` with declarative requirements only.
 
 All applicable failures within the first failing stage are returned as sorted
 reason codes. Later stages are not evaluated after a failed stage. Unknown
 enum values, missing required evidence, naive timestamps, fingerprint mismatch,
 or inconsistent policy/order identities fail closed.
 
+The v1 output reason vocabulary is closed:
+
+```text
+invalid_evidence_schema
+naive_or_invalid_timestamp
+order_identity_mismatch
+policy_identity_mismatch
+policy_version_mismatch
+order_not_user_approved
+order_expired
+authorization_denied
+authorization_evidence_mismatch
+risk_evidence_missing
+risk_check_mismatch
+risk_check_expired
+single_order_risk_failed
+batch_risk_failed
+batch_order_not_accepted
+live_trading_enabled
+policy_kill_switch_engaged
+operator_kill_switch_engaged
+autopilot_paused
+broker_unhealthy
+market_order_disabled
+explicit_snapshot_missing
+explicit_quote_missing
+paper_run_id_missing
+account_provenance_missing
+paper_session_fence_missing
+broker_capability_mismatch
+```
+
+Adapters map existing check names and exceptions to this vocabulary for parity;
+arbitrary exception messages and human-readable authority details never become
+kernel reason codes.
+
 ## 5. Mode and composition contract
 
-The later shadow runner has a closed mode enum:
+The later shadow runner reads `EXECUTION_KERNEL_V2_MODE` at the composition
+boundary and converts it to a closed mode enum:
 
 ```text
 off       # default; kernel is not constructed or called
@@ -374,7 +458,8 @@ shadow    # pure evaluate + non-authoritative comparison only
 There is no `cutover`, `enforce`, or `live` value in the first feature. An
 unknown value fails application composition before any order work. Parsing the
 configuration is outside `kernel.py`; the pure evaluator never reads the
-environment.
+environment. The missing-variable default is exactly `off`; no `.env.example`
+edit is required for the first slice.
 
 In `shadow` mode:
 
@@ -398,15 +483,24 @@ and runner are a separate audited task after the contract is accepted.
 ### 6.1 Integration point
 
 The first runner is attached only after the legacy path has produced immutable
-authorization, fresh single-risk, batch-risk, and final-safety evidence, and
-before any of these actions:
+authorization, fresh single-risk, batch-risk, and the first final-safety
+snapshot. Within that same `submit_order_plan()` call, it runs before the first
+submission-phase authoritative mutation:
 
 ```text
 OrderStatus.submitted transition
 DurablePaperSubmissionCoordinator.prepare_order
 broker.submit_order
-any repository, audit, reservation, dispatch, or event write
+any repository, audit, reservation, dispatch, or event write caused by the
+  submission phase after the evidence snapshot
 ```
+
+Planning, approval, and professional checkpoint writes that occur before
+`submit_order_plan()` are explicitly outside the initial shadow boundary. The
+shadow evaluator itself still performs zero writes. After it returns, the
+legacy path remains free to perform its existing submission mutations,
+`before_broker_submit` callback, second TOCTOU safety snapshot, durable prepare,
+and sole broker call.
 
 Adding the runner must not add a second broker adapter or submission callable.
 The runner constructor has no broker/store/repository/audit parameter.
@@ -420,7 +514,7 @@ Parity compares:
 
 ```text
 order_plan_id
-allow/block
+eligible-for-legacy-submit/block
 first blocked stage
 normalized reason-code set
 durable-prepare requirement
@@ -439,6 +533,13 @@ It does not compare:
 
 Legacy parity evidence must be derived from the same captured inputs. It may
 not be inferred from a later fill or terminal order state.
+
+The known current-order expiry delta is handled explicitly: a kernel
+`order_expired` block versus a legacy allow is a real mismatch. `QP-KER-020`
+must add a separately reviewed legacy fail-closed expiry check (before the
+`submitted` transition) or otherwise resolve the contract with stronger
+repository evidence. Tests may not delete the kernel check, suppress the
+mismatch, or add it to an ignore list merely to obtain parity.
 
 ### 6.3 Mismatch policy
 
@@ -467,7 +568,7 @@ not be inferred from a later fill or terminal order state.
    single risk, failed batch, absent batch membership, kill, live, pause,
    unhealthy broker, unsupported order type, and missing paper provenance all
    fail closed at the correct stage;
-6. a valid mock Level 3 bundle returns `would_dispatch`;
+6. a valid mock Level 3 bundle returns `eligible_for_legacy_submit`;
 7. valid Level 4/5 evidence can be represented without the kernel calling the
    authorization functions;
 8. external KIS evidence returns only declarative durable requirements;
@@ -479,7 +580,8 @@ The shadow-runner task additionally proves:
 
 - mode defaults to `off` and rejects unknown values;
 - off mode constructs no evaluator;
-- shadow execution occurs before the first authoritative mutation;
+- shadow execution occurs before the first submission-phase authoritative
+  mutation after its evidence snapshot;
 - repository, audit, event-store, coordinator, broker, and fake-client
   snapshots/counters are identical before and after shadow-only evaluation;
 - Level 1-2 mock, Level 3 direct, Level 3 ticket, Level 4 blocked/success,

@@ -66,9 +66,9 @@ Statuses: `proposed`, `ready`, `in_progress`, `review`, `integrated`, `done`,
 | `QP-KER-000A` | GPT-5 Codex lead | Claude Code | Gate 2 | `주식트레이더-kernel-v2-contract` / `codex/qp-kernel-v2-contract` | `docs/execution_kernel_v2_contract.md`, `docs/execution_kernel_v2_workboard.md` | review | Repository inventory and decision-complete draft; no runtime edits; original main untouched. | draft `d3023a2` |
 | `QP-KER-000B` | Claude Code exact model to be recorded | GPT-5 Codex lead | `QP-KER-000A` | `주식트레이더-claude-kernel-v2-review` / `claude/qp-kernel-v2-review` | the same two docs in an isolated review branch only | ready | Independent decomposition/revision committed; P0/P1 contract defects zero after lead cross-check; only two docs changed. | session reset required at 12:20 KST |
 | `QP-KER-010` | GPT-5 Codex lead | Claude Code + independent read-only audit | accepted `QP-KER-000B` | new `주식트레이더-kernel-v2-pure` / `codex/qp-kernel-v2-pure` | `quantpilot/packages/core/execution/kernel.py`, `quantpilot/tests/unit/test_execution_kernel_v2.py` | proposed | Frozen pure input/output, closed decision order, deterministic fingerprint, forbidden-import and zero-side-effect tests. | pending |
-| `QP-KER-020` | GPT-5 Codex lead | independent audit | `QP-KER-010` | new isolated worktree / `codex/qp-kernel-v2-shadow` | `quantpilot/packages/core/execution/kernel_shadow.py`, focused tests, minimal composition/config boundary | proposed | `off` default; unknown mode fails closed; shadow has no authoritative mutation; no second broker callable. | pending |
+| `QP-KER-020` | GPT-5 Codex lead | independent audit | `QP-KER-010` | new isolated worktree / `codex/qp-kernel-v2-shadow` | `quantpilot/packages/core/execution/kernel_shadow.py`, focused tests, minimal composition/config boundary | proposed | `off` default; unknown mode fails closed; shadow itself has no authoritative mutation; current-order expiry mismatch is fixed fail-closed rather than ignored; no second broker callable. | pending |
 | `QP-KER-030` | best-fit test owner | independent auditor | `QP-KER-020` | separate parity worktree | kernel parity tests only | proposed | L1-2, L3 direct/ticket, L4 blocked/success, L5 dry/blocked/success, professional risk reduction, and fake KIS evidence parity; all side-effect counters zero. | pending |
-| `QP-KER-040` | GPT-5 Codex lead | Claude Code/read-only audit | `QP-KER-030` | separate Level 3 worktree | Level 3 adapters and tests | proposed | Direct and ticket paths use common typed handoff; human evidence retained; no behavior/API expansion. | pending |
+| `QP-KER-040` | GPT-5 Codex lead | Claude Code/read-only audit | `QP-KER-030` | separate Level 3 worktree | Level 3 adapters and tests | proposed | Direct and ticket paths use the common handoff; direct approval gains explicit persisted actor evidence or remains mock-only `unverified_local`; ticket actor binding is retained; no broker expansion. | pending |
 | `QP-KER-050` | GPT-5 Codex lead | independent audit | `QP-KER-040` | separate Level 4 worktree | Level 4 adapter and tests | proposed | Existing `authorize_level4()` evidence is adapted once; default disabled and kill behavior unchanged. | pending |
 | `QP-KER-060A` | GPT-5 Codex lead | independent audit | `QP-KER-050` | separate Level 5 worktree | ordinary operator adapter and tests | proposed | Existing Level 5 fallback/reporting preserved; no LLM/RL authority; common handoff used. | pending |
 | `QP-KER-060B` | GPT-5 Codex lead | independent audit | `QP-KER-060A` | separate professional worktree | professional protective/retirement adapter and tests | proposed | Position-binding and reduce-only evidence preserved; no exposure-increasing regression. | pending |
@@ -189,6 +189,19 @@ Required invariant evidence:
   left the Claude worktree clean.
 - `2026-07-12 KST` — Codex drafted the decision-complete contract and this
   workboard as `d3023a2`. No runtime implementation started.
+- `2026-07-12 KST` — Read-only feasibility review corrected two draft
+  assumptions before counterpart review: mutable `OrderIntent` cannot be
+  embedded in a mechanically frozen input, and the shadow hook can precede the
+  first submission-phase mutation but not planning/approval/professional writes
+  that already occurred before `submit_order_plan()`.
+- `2026-07-12 KST` — Submit-time source inspection found that the current
+  order's `OrderPlan.expires_at` is not explicitly rejected by
+  `submit_order_plan()`. The contract records this as a required fail-closed
+  hardening delta; parity may not conceal it.
+- `2026-07-12 KST` — Direct Level 3 approval inspection found no approver input
+  or persisted `approved_by`. The contract now records the baseline as
+  `unverified_local`, mock-only evidence and requires real actor binding before
+  Level 3 external-paper cutover.
 
 ## Handoff record
 

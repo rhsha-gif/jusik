@@ -9,6 +9,7 @@ from math import isclose, isfinite
 from typing import Protocol
 from zoneinfo import ZoneInfo
 
+from quantpilot.packages.core.execution.events import PaperMutationOrigin
 from quantpilot.packages.core.kis_paper import (
     KisBuyingPower,
     KisCashOrderResult,
@@ -108,6 +109,8 @@ class PaperDispatchStore(Protocol):
     def update_paper_order_dispatch(
         self,
         dispatch: PaperOrderDispatch,
+        *,
+        mutation_origin: PaperMutationOrigin,
     ) -> PaperOrderDispatch: ...
 
 
@@ -569,6 +572,7 @@ class DurablePaperSubmissionCoordinator:
             rejected = self._definitive_rejection(
                 claimed,
                 error_code="paper_kill_engaged_after_claim",
+                mutation_origin="local_submission_guard",
             )
             raise PaperSubmissionRejected(
                 rejected,
@@ -590,6 +594,7 @@ class DurablePaperSubmissionCoordinator:
             rejected = self._definitive_rejection(
                 claimed,
                 error_code="paper_session_closed_after_claim",
+                mutation_origin="local_submission_guard",
             )
             raise PaperSubmissionRejected(
                 rejected,
@@ -607,6 +612,7 @@ class DurablePaperSubmissionCoordinator:
             rejected = self._definitive_rejection(
                 claimed,
                 error_code="local_configuration_error",
+                mutation_origin="local_submission_guard",
             )
             raise PaperSubmissionRejected(
                 rejected,
@@ -616,6 +622,7 @@ class DurablePaperSubmissionCoordinator:
             rejected = self._definitive_rejection(
                 claimed,
                 error_code="broker_business_rejected",
+                mutation_origin="broker_post_result",
             )
             raise PaperSubmissionRejected(
                 rejected,
@@ -685,13 +692,17 @@ class DurablePaperSubmissionCoordinator:
                 }
             ).model_dump()
         )
-        return self._store.update_paper_order_dispatch(accepted)
+        return self._store.update_paper_order_dispatch(
+            accepted,
+            mutation_origin="broker_post_result",
+        )
 
     def _definitive_rejection(
         self,
         dispatch: PaperOrderDispatch,
         *,
         error_code: str,
+        mutation_origin: PaperMutationOrigin,
     ) -> PaperOrderDispatch:
         updated_at = self._strictly_later(self._now(), dispatch.updated_at)
         rejected = PaperOrderDispatch.model_validate(
@@ -706,7 +717,10 @@ class DurablePaperSubmissionCoordinator:
                 }
             ).model_dump()
         )
-        return self._store.update_paper_order_dispatch(rejected)
+        return self._store.update_paper_order_dispatch(
+            rejected,
+            mutation_origin=mutation_origin,
+        )
 
     def _outcome_unknown(
         self,
@@ -724,7 +738,10 @@ class DurablePaperSubmissionCoordinator:
                 }
             ).model_dump()
         )
-        return self._store.update_paper_order_dispatch(unknown)
+        return self._store.update_paper_order_dispatch(
+            unknown,
+            mutation_origin="broker_post_result",
+        )
 
     def _terminal_pre_dispatch(
         self,
@@ -747,7 +764,10 @@ class DurablePaperSubmissionCoordinator:
                 }
             ).model_dump()
         )
-        return self._store.update_paper_order_dispatch(terminal)
+        return self._store.update_paper_order_dispatch(
+            terminal,
+            mutation_origin="local_submission_guard",
+        )
 
     def _replay_without_post(
         self,

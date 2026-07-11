@@ -26,6 +26,8 @@ from quantpilot.packages.core.execution.events import (
     PaperExecutionEvent,
     PaperExecutionEventProvenance,
     PaperExecutionSource,
+    PaperMutationOrigin,
+    PAPER_MUTATION_ORIGIN_SOURCES,
     PaperOrderDispatchEventPayload,
     PaperRiskReservationEventPayload,
     build_paper_execution_event,
@@ -42,6 +44,7 @@ from quantpilot.packages.core.execution.reducer import (
     replay_paper_execution_events,
 )
 from quantpilot.packages.core.execution.transitions import (
+    CANCEL_STATUS_EVENT_TYPES,
     IMPORT_EVENT_TYPES,
     PAPER_CANCEL_TRANSITIONS,
     PAPER_DISPATCH_RECONCILIATION_TRANSITIONS,
@@ -49,6 +52,9 @@ from quantpilot.packages.core.execution.transitions import (
     PAPER_EXECUTION_EVENT_TYPES,
     PAPER_RESERVATION_RELEASE_BY_DISPATCH,
     PAPER_RESERVATION_TERMINALS,
+    classify_dispatch_event_type,
+    validate_cancel_event_transition,
+    validate_reservation_event_transition,
 )
 from quantpilot.packages.core.operator.position_ledger import (
     ManagedPositionState,
@@ -1756,6 +1762,76 @@ class PaperStateStore:
                 "authoritative row cannot form a canonical runtime event"
             ) from exc
 
+    def _prepare_runtime_paper_execution_event(
+        self,
+        *,
+        before: PaperExecutionAfter | None,
+        after: PaperExecutionAfter,
+        event_type: str,
+        source: PaperExecutionSource,
+        causation_id: str | None = None,
+        use_stream_causation: bool = True,
+    ) -> tuple[_PaperAggregateKey, PaperExecutionEvent, int]:
+        """Bind one runtime fact to the exact pre-mutation stream projection."""
+
+        key = _paper_aggregate_key(after)
+        projection = self._load_paper_execution_projection(
+            key=key,
+            expected_provenance=_paper_event_provenance(self._require_paper_store()),
+        )
+        if before is None:
+            if projection is not None:
+                raise PaperStateCorruptionError(
+                    "new paper aggregate already has an execution event stream"
+                )
+            expected_previous_version = 0
+            stream_causation = None
+        else:
+            if (
+                projection is None
+                or canonical_json_bytes(projection.after)
+                != canonical_json_bytes(before)
+            ):
+                raise PaperStateCorruptionError(
+                    "paper execution stream does not match its authoritative before-state"
+                )
+            expected_previous_version = projection.aggregate_version
+            stream_causation = projection.last_event_id
+        event = self._new_runtime_paper_execution_event(
+            aggregate_version=expected_previous_version + 1,
+            event_type=event_type,
+            source=source,
+            after=after,
+            causation_id=(stream_causation if use_stream_causation else causation_id),
+            before=before if isinstance(before, PaperOrderDispatch) else None,
+        )
+        return key, event, expected_previous_version
+
+    def _append_runtime_paper_execution_events(
+        self,
+        guard: _PaperEventMutationGuard,
+        candidates: Sequence[
+            tuple[_PaperAggregateKey, PaperExecutionEvent, int]
+        ],
+    ) -> None:
+        if not candidates:
+            return
+        events = [event for _key, event, _version in candidates]
+        expected_previous_versions = {
+            key: version for key, _event, version in candidates
+        }
+        if len(expected_previous_versions) != len(candidates):
+            raise PaperStateConflictError(
+                "runtime event batch cannot advance one aggregate twice"
+            )
+        for _key, event, _version in candidates:
+            guard.register_candidate(event)
+        self._append_paper_execution_events(
+            events,
+            expected_previous_versions=expected_previous_versions,
+            guard=guard,
+        )
+
     def _load_paper_execution_event_by_id(
         self,
         event_id: str,
@@ -2944,7 +3020,7 @@ class PaperStateStore:
                 raise PaperStateConflictError(
                     "paper sell reservation does not match dispatch quantity"
                 )
-        with self._transaction():
+        with self._event_transaction() as guard:
             if self._connection.execute(
                 """
                 SELECT 1 FROM paper_kill_operations
@@ -3080,8 +3156,12 @@ class PaperStateStore:
                     raise PaperRiskReservationRejected(
                         "paper sell exceeds durable quantity availability"
                     )
+            dispatch_key = _paper_aggregate_key(dispatch)
+            reservation_key = _paper_aggregate_key(reservation)
+            guard.capture_before(reservation_key)
+            guard.capture_before(dispatch_key)
             try:
-                self._connection.execute(
+                reservation_cursor = self._connection.execute(
                     """
                     INSERT INTO paper_risk_reservations (
                         reservation_id, order_plan_id, idempotency_key, store_id,
@@ -3104,7 +3184,7 @@ class PaperStateStore:
                         reservation.updated_at.isoformat(),
                     ),
                 )
-                self._connection.execute(
+                dispatch_cursor = self._connection.execute(
                     """
                     INSERT INTO paper_order_dispatches (
                         order_plan_id, broker_order_id, idempotency_key, store_id, session_id,
@@ -3128,6 +3208,38 @@ class PaperStateStore:
                 raise PaperStateConflictError(
                     "paper dispatch or reservation identity already exists"
                 ) from exc
+            reservation_state_json = self._serialize(reservation)
+            dispatch_state_json = self._serialize(dispatch)
+            guard.register_change(
+                after=reservation,
+                state_json=reservation_state_json,
+                rowcount=reservation_cursor.rowcount,
+            )
+            guard.register_change(
+                after=dispatch,
+                state_json=dispatch_state_json,
+                rowcount=dispatch_cursor.rowcount,
+            )
+            reservation_candidate = self._prepare_runtime_paper_execution_event(
+                before=None,
+                after=reservation,
+                event_type="RiskReserved",
+                source="local_prepare",
+                causation_id=None,
+                use_stream_causation=False,
+            )
+            dispatch_candidate = self._prepare_runtime_paper_execution_event(
+                before=None,
+                after=dispatch,
+                event_type="OrderPrepared",
+                source="local_prepare",
+                causation_id=reservation_candidate[1].event_id,
+                use_stream_causation=False,
+            )
+            self._append_runtime_paper_execution_events(
+                guard,
+                [reservation_candidate, dispatch_candidate],
+            )
         return dispatch, reservation
 
     def claim_dispatch_attempt(
@@ -3141,7 +3253,7 @@ class PaperStateStore:
 
         _require_aware_timestamp(claimed_at, field_name="claimed_at")
         session = PaperExecutionSession.model_validate(session.model_dump())
-        with self._transaction():
+        with self._event_transaction() as guard:
             current_session = self._require_exact_active_session(
                 session,
                 checked_at=claimed_at,
@@ -3229,6 +3341,9 @@ class PaperStateStore:
                     }
                 ).model_dump()
             )
+            key = _paper_aggregate_key(claimed)
+            guard.capture_before(key)
+            state_json = self._serialize(claimed)
             cursor = self._connection.execute(
                 """
                 UPDATE paper_order_dispatches
@@ -3239,7 +3354,7 @@ class PaperStateStore:
                 (
                     claimed.status,
                     claimed.revision,
-                    self._serialize(claimed),
+                    state_json,
                     claimed.updated_at.isoformat(),
                     current.order_plan_id,
                     current.revision,
@@ -3249,6 +3364,18 @@ class PaperStateStore:
                 raise PaperStateConflictError(
                     "paper dispatch claim lost its compare-and-swap race"
                 )
+            guard.register_change(
+                after=claimed,
+                state_json=state_json,
+                rowcount=cursor.rowcount,
+            )
+            candidate = self._prepare_runtime_paper_execution_event(
+                before=current,
+                after=claimed,
+                event_type="DispatchClaimed",
+                source="local_dispatch_claim",
+            )
+            self._append_runtime_paper_execution_events(guard, [candidate])
         return claimed
 
     def takeover_prepared_paper_order_dispatch(
@@ -3262,7 +3389,7 @@ class PaperStateStore:
 
         _require_aware_timestamp(taken_over_at, field_name="taken_over_at")
         session = PaperExecutionSession.model_validate(session.model_dump())
-        with self._transaction():
+        with self._event_transaction() as guard:
             successor = self._require_exact_active_session(
                 session,
                 checked_at=taken_over_at,
@@ -3311,6 +3438,9 @@ class PaperStateStore:
                     }
                 ).model_dump()
             )
+            dispatch_key = _paper_aggregate_key(rebound)
+            guard.capture_before(dispatch_key)
+            dispatch_state_json = self._serialize(rebound)
             cursor = self._connection.execute(
                 """
                 UPDATE paper_order_dispatches
@@ -3324,7 +3454,7 @@ class PaperStateStore:
                     rebound.session_id,
                     rebound.fencing_token,
                     rebound.revision,
-                    self._serialize(rebound),
+                    dispatch_state_json,
                     rebound.updated_at.isoformat(),
                     current.order_plan_id,
                     current.session_id,
@@ -3336,6 +3466,11 @@ class PaperStateStore:
                 raise PaperStateConflictError(
                     "prepared paper dispatch changed during fenced takeover"
                 )
+            guard.register_change(
+                after=rebound,
+                state_json=dispatch_state_json,
+                rowcount=cursor.rowcount,
+            )
             reservation_row = self._load_reservation_row(current.order_plan_id)
             if reservation_row is None:
                 raise PaperStateCorruptionError(
@@ -3361,6 +3496,9 @@ class PaperStateStore:
                     }
                 ).model_dump()
             )
+            reservation_key = _paper_aggregate_key(rebound_reservation)
+            guard.capture_before(reservation_key)
+            reservation_state_json = self._serialize(rebound_reservation)
             reservation_cursor = self._connection.execute(
                 """
                 UPDATE paper_risk_reservations
@@ -3373,7 +3511,7 @@ class PaperStateStore:
                     rebound_reservation.session_id,
                     rebound_reservation.fencing_token,
                     rebound_reservation.revision,
-                    self._serialize(rebound_reservation),
+                    reservation_state_json,
                     rebound_reservation.updated_at.isoformat(),
                     reservation.reservation_id,
                     reservation.session_id,
@@ -3385,6 +3523,29 @@ class PaperStateStore:
                 raise PaperStateConflictError(
                     "prepared reservation changed during fenced takeover"
                 )
+            guard.register_change(
+                after=rebound_reservation,
+                state_json=reservation_state_json,
+                rowcount=reservation_cursor.rowcount,
+            )
+            dispatch_candidate = self._prepare_runtime_paper_execution_event(
+                before=current,
+                after=rebound,
+                event_type="DispatchFenceRebound",
+                source="local_session_takeover",
+            )
+            reservation_candidate = self._prepare_runtime_paper_execution_event(
+                before=reservation,
+                after=rebound_reservation,
+                event_type="RiskReservationFenceRebound",
+                source="local_session_takeover",
+                causation_id=dispatch_candidate[1].event_id,
+                use_stream_causation=False,
+            )
+            self._append_runtime_paper_execution_events(
+                guard,
+                [dispatch_candidate, reservation_candidate],
+            )
         return rebound
 
     @staticmethod
@@ -3438,7 +3599,9 @@ class PaperStateStore:
     def _release_reservation_for_terminal_dispatch(
         self,
         dispatch: PaperOrderDispatch,
-    ) -> PaperRiskReservation | None:
+        *,
+        guard: _PaperEventMutationGuard,
+    ) -> tuple[PaperRiskReservation, PaperRiskReservation] | None:
         release = PAPER_RESERVATION_RELEASE_BY_DISPATCH.get(dispatch.status)
         if release is None:
             return None
@@ -3451,7 +3614,7 @@ class PaperStateStore:
         self._validate_reservation_provenance(current)
         target_status, reason = release
         if current.status == target_status:
-            return current
+            return None
         if current.status != "held":
             raise PaperStateConflictError(
                 "paper reservation cannot change between terminal release reasons"
@@ -3472,8 +3635,11 @@ class PaperStateStore:
                     "updated_at": dispatch.updated_at,
                     "revision": current.revision + 1,
                 }
-            ).model_dump()
-        )
+                ).model_dump()
+            )
+        key = _paper_aggregate_key(released)
+        guard.capture_before(key)
+        state_json = self._serialize(released)
         cursor = self._connection.execute(
             """
             UPDATE paper_risk_reservations
@@ -3483,7 +3649,7 @@ class PaperStateStore:
             (
                 released.status,
                 released.revision,
-                self._serialize(released),
+                state_json,
                 released.updated_at.isoformat(),
                 current.reservation_id,
                 current.revision,
@@ -3493,17 +3659,30 @@ class PaperStateStore:
             raise PaperStateConflictError(
                 "paper reservation changed before terminal release"
             )
-        return released
+        guard.register_change(
+            after=released,
+            state_json=state_json,
+            rowcount=cursor.rowcount,
+        )
+        return current, released
 
     def update_paper_order_dispatch(
         self,
         dispatch: PaperOrderDispatch,
+        *,
+        mutation_origin: PaperMutationOrigin,
     ) -> PaperOrderDispatch:
         """Persist monotonic broker evidence; this method never grants a retry."""
 
         dispatch = PaperOrderDispatch.model_validate(dispatch.model_dump())
         self._validate_dispatch_provenance(dispatch)
-        with self._transaction():
+        try:
+            source = PAPER_MUTATION_ORIGIN_SOURCES[mutation_origin]
+        except (KeyError, TypeError) as exc:
+            raise PaperStateConflictError(
+                "paper dispatch update requires an explicit mutation origin"
+            ) from exc
+        with self._event_transaction() as guard:
             row = self._load_dispatch_row(dispatch.order_plan_id)
             if row is None:
                 raise PaperStateNotFoundError(
@@ -3603,6 +3782,15 @@ class PaperStateStore:
                 raise PaperStateConflictError(
                     "paper dispatch reconciliation cannot move backward"
                 )
+            try:
+                event_type = classify_dispatch_event_type(existing, dispatch)
+            except ValueError as exc:
+                raise PaperStateConflictError(
+                    "paper dispatch delta has no canonical runtime event"
+                ) from exc
+            key = _paper_aggregate_key(dispatch)
+            guard.capture_before(key)
+            state_json = self._serialize(dispatch)
             cursor = self._connection.execute(
                 """
                 UPDATE paper_order_dispatches
@@ -3612,7 +3800,7 @@ class PaperStateStore:
                 (
                     dispatch.status,
                     dispatch.revision,
-                    self._serialize(dispatch),
+                    state_json,
                     dispatch.updated_at.isoformat(),
                     dispatch.order_plan_id,
                     existing.status,
@@ -3623,7 +3811,45 @@ class PaperStateStore:
                 raise PaperStateConflictError(
                     "paper dispatch changed before monotonic evidence update"
                 )
-            self._release_reservation_for_terminal_dispatch(dispatch)
+            guard.register_change(
+                after=dispatch,
+                state_json=state_json,
+                rowcount=cursor.rowcount,
+            )
+            released_pair = self._release_reservation_for_terminal_dispatch(
+                dispatch,
+                guard=guard,
+            )
+            dispatch_candidate = self._prepare_runtime_paper_execution_event(
+                before=existing,
+                after=dispatch,
+                event_type=event_type,
+                source=source,
+            )
+            candidates = [dispatch_candidate]
+            if released_pair is not None:
+                before_reservation, released_reservation = released_pair
+                try:
+                    validate_reservation_event_transition(
+                        before_reservation,
+                        released_reservation,
+                        "RiskReservationReleased",
+                    )
+                except ValueError as exc:
+                    raise PaperStateCorruptionError(
+                        "terminal dispatch produced an invalid reservation release"
+                    ) from exc
+                candidates.append(
+                    self._prepare_runtime_paper_execution_event(
+                        before=before_reservation,
+                        after=released_reservation,
+                        event_type="RiskReservationReleased",
+                        source=source,
+                        causation_id=dispatch_candidate[1].event_id,
+                        use_stream_causation=False,
+                    )
+                )
+            self._append_runtime_paper_execution_events(guard, candidates)
         return dispatch
 
     def recover_interrupted_dispatches(
@@ -3637,7 +3863,10 @@ class PaperStateStore:
         _require_aware_timestamp(recovered_at, field_name="recovered_at")
         session = PaperExecutionSession.model_validate(session.model_dump())
         recovered: list[PaperOrderDispatch] = []
-        with self._transaction():
+        candidates: list[
+            tuple[_PaperAggregateKey, PaperExecutionEvent, int]
+        ] = []
+        with self._event_transaction() as guard:
             current_session = self._require_exact_active_session(
                 session,
                 checked_at=recovered_at,
@@ -3680,6 +3909,9 @@ class PaperStateStore:
                         }
                     ).model_dump()
                 )
+                key = _paper_aggregate_key(unknown)
+                guard.capture_before(key)
+                state_json = self._serialize(unknown)
                 cursor = self._connection.execute(
                     """
                     UPDATE paper_order_dispatches
@@ -3690,7 +3922,7 @@ class PaperStateStore:
                     (
                         unknown.status,
                         unknown.revision,
-                        self._serialize(unknown),
+                        state_json,
                         unknown.updated_at.isoformat(),
                         unknown.order_plan_id,
                         existing.revision,
@@ -3700,7 +3932,21 @@ class PaperStateStore:
                     raise PaperStateConflictError(
                         "paper dispatch changed during interrupted recovery"
                     )
+                guard.register_change(
+                    after=unknown,
+                    state_json=state_json,
+                    rowcount=cursor.rowcount,
+                )
+                candidates.append(
+                    self._prepare_runtime_paper_execution_event(
+                        before=existing,
+                        after=unknown,
+                        event_type="OutcomeUnknown",
+                        source="process_recovery",
+                    )
+                )
                 recovered.append(unknown)
+            self._append_runtime_paper_execution_events(guard, candidates)
         return recovered
 
     def load_paper_order_dispatch(
@@ -4008,7 +4254,13 @@ class PaperStateStore:
     ) -> PaperCancelRequest:
         request = PaperCancelRequest.model_validate(request.model_dump())
         self._validate_cancel_provenance(request)
-        with self._transaction():
+        try:
+            validate_cancel_event_transition(None, request, "CancelPrepared")
+        except ValueError as exc:
+            raise PaperStateConflictError(
+                "new paper cancel request has no canonical create event"
+            ) from exc
+        with self._event_transaction() as guard:
             self._require_exact_active_session(session, checked_at=request.created_at)
             kill_row = self._load_kill_row(request.kill_id)
             if kill_row is None:
@@ -4057,7 +4309,10 @@ class PaperStateStore:
                         "paper cancel target already exists with different evidence"
                     )
                 return existing
-            self._connection.execute(
+            key = _paper_aggregate_key(request)
+            guard.capture_before(key)
+            state_json = self._serialize(request)
+            cursor = self._connection.execute(
                 """
                 INSERT INTO paper_cancel_requests (
                     cancel_id, kill_id, order_plan_id, broker_order_reference,
@@ -4072,10 +4327,24 @@ class PaperStateStore:
                     request.store_id,
                     request.status,
                     request.revision,
-                    self._serialize(request),
+                    state_json,
                     request.updated_at.isoformat(),
                 ),
             )
+            guard.register_change(
+                after=request,
+                state_json=state_json,
+                rowcount=cursor.rowcount,
+            )
+            candidate = self._prepare_runtime_paper_execution_event(
+                before=None,
+                after=request,
+                event_type="CancelPrepared",
+                source="kill_cancel",
+                causation_id=None,
+                use_stream_causation=False,
+            )
+            self._append_runtime_paper_execution_events(guard, [candidate])
         return request
 
     def _load_cancel_row(self, cancel_id: str) -> sqlite3.Row | None:
@@ -4097,7 +4366,7 @@ class PaperStateStore:
         claimed_at: datetime,
     ) -> PaperCancelRequest:
         _require_aware_timestamp(claimed_at, field_name="claimed_at")
-        with self._transaction():
+        with self._event_transaction() as guard:
             self._require_exact_active_session(session, checked_at=claimed_at)
             row = self._load_cancel_row(cancel_id)
             if row is None:
@@ -4125,6 +4394,9 @@ class PaperStateStore:
                     }
                 ).model_dump()
             )
+            key = _paper_aggregate_key(claimed)
+            guard.capture_before(key)
+            state_json = self._serialize(claimed)
             cursor = self._connection.execute(
                 """
                 UPDATE paper_cancel_requests
@@ -4134,7 +4406,7 @@ class PaperStateStore:
                 (
                     claimed.status,
                     claimed.revision,
-                    self._serialize(claimed),
+                    state_json,
                     claimed.updated_at.isoformat(),
                     claimed.cancel_id,
                     existing.revision,
@@ -4144,6 +4416,18 @@ class PaperStateStore:
                 raise PaperStateConflictError(
                     "paper cancel claim lost its compare-and-swap race"
                 )
+            guard.register_change(
+                after=claimed,
+                state_json=state_json,
+                rowcount=cursor.rowcount,
+            )
+            candidate = self._prepare_runtime_paper_execution_event(
+                before=existing,
+                after=claimed,
+                event_type="CancelClaimed",
+                source="kill_cancel",
+            )
+            self._append_runtime_paper_execution_events(guard, [candidate])
         return claimed
 
     def update_paper_cancel_request(
@@ -4151,10 +4435,15 @@ class PaperStateStore:
         request: PaperCancelRequest,
         *,
         session: PaperExecutionSession,
+        mutation_origin: PaperMutationOrigin,
     ) -> PaperCancelRequest:
         request = PaperCancelRequest.model_validate(request.model_dump())
         self._validate_cancel_provenance(request)
-        with self._transaction():
+        if mutation_origin != "kill_cancel_journal":
+            raise PaperStateConflictError(
+                "paper cancel update requires kill-cancel journal authority"
+            )
+        with self._event_transaction() as guard:
             self._require_exact_active_session(session, checked_at=request.updated_at)
             row = self._load_cancel_row(request.cancel_id)
             if row is None:
@@ -4182,6 +4471,16 @@ class PaperStateStore:
                 raise PaperStateConflictError(
                     f"invalid paper-cancel transition: {existing.status} -> {request.status}"
                 )
+            try:
+                event_type = CANCEL_STATUS_EVENT_TYPES[request.status]
+                validate_cancel_event_transition(existing, request, event_type)
+            except (KeyError, ValueError) as exc:
+                raise PaperStateConflictError(
+                    "paper cancel delta has no canonical runtime event"
+                ) from exc
+            key = _paper_aggregate_key(request)
+            guard.capture_before(key)
+            state_json = self._serialize(request)
             cursor = self._connection.execute(
                 """
                 UPDATE paper_cancel_requests
@@ -4191,7 +4490,7 @@ class PaperStateStore:
                 (
                     request.status,
                     request.revision,
-                    self._serialize(request),
+                    state_json,
                     request.updated_at.isoformat(),
                     request.cancel_id,
                     existing.status,
@@ -4202,6 +4501,18 @@ class PaperStateStore:
                 raise PaperStateConflictError(
                     "paper cancel state changed before update"
                 )
+            guard.register_change(
+                after=request,
+                state_json=state_json,
+                rowcount=cursor.rowcount,
+            )
+            candidate = self._prepare_runtime_paper_execution_event(
+                before=existing,
+                after=request,
+                event_type=event_type,
+                source="kill_cancel",
+            )
+            self._append_runtime_paper_execution_events(guard, [candidate])
         return request
 
     def load_paper_cancel_request(self, cancel_id: str) -> PaperCancelRequest | None:

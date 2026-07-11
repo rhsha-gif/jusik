@@ -8,6 +8,7 @@ from math import isclose
 from typing import Protocol
 from zoneinfo import ZoneInfo
 
+from quantpilot.packages.core.execution.events import PaperMutationOrigin
 from quantpilot.packages.core.kis_paper import (
     KisBalanceResult,
     KisDailyOrderFill,
@@ -38,6 +39,8 @@ class PaperReconciliationStore(Protocol):
     def update_paper_order_dispatch(
         self,
         dispatch: PaperOrderDispatch,
+        *,
+        mutation_origin: PaperMutationOrigin,
     ) -> PaperOrderDispatch: ...
 
 
@@ -254,7 +257,10 @@ class PaperBrokerReconciler:
         )
         if updated == dispatch:
             return dispatch
-        return self._store.update_paper_order_dispatch(updated)
+        return self._store.update_paper_order_dispatch(
+            updated,
+            mutation_origin="broker_reconciliation",
+        )
 
     def _matches(
         self,
@@ -323,7 +329,10 @@ class PaperBrokerReconciler:
                 }
             ).model_dump()
         )
-        return self._store.update_paper_order_dispatch(blocked)
+        return self._store.update_paper_order_dispatch(
+            blocked,
+            mutation_origin="broker_reconciliation",
+        )
 
     def _now(self) -> datetime:
         value = self._clock()

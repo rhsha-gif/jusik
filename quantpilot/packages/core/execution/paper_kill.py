@@ -436,6 +436,7 @@ class PaperKillService:
         return self._store.update_paper_cancel_request(
             updated,
             session=self._session,
+            mutation_origin="kill_cancel_journal",
         )
 
     def _collect_unresolved_reasons(self, reasons: set[str]) -> None:

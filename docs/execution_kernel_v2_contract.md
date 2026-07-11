@@ -265,9 +265,10 @@ Level adapters bind current evidence as follows:
 
 The kernel does not perform authentication or call `authorize_level4()` /
 `authorize_level5()`. It verifies internal consistency of supplied evidence.
-`unverified_local` is accepted only for fixture/mock shadow evidence. It cannot
-qualify external paper, a later live candidate, or a Level 3 cutover without a
-separately reviewed identity-binding change.
+`unverified_local` is accepted only for fixture shadow evidence using the mock
+or in-process simulated-paper adapter. It cannot qualify external KIS paper, a
+later live candidate, or an external-paper Level 3 cutover without a separately
+reviewed identity-binding change.
 
 #### `RiskEvidenceV1`
 

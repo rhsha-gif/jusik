@@ -68,7 +68,7 @@ Statuses: `proposed`, `ready`, `in_progress`, `review`, `integrated`, `done`,
 | `QP-KER-010` | GPT-5 Codex lead | Claude Code + independent read-only audit | accepted `QP-KER-000B` | new `주식트레이더-kernel-v2-pure` / `codex/qp-kernel-v2-pure` | `quantpilot/packages/core/execution/kernel.py`, `quantpilot/tests/unit/test_execution_kernel_v2.py` | proposed | Frozen pure input/output, closed decision order, deterministic fingerprint, forbidden-import and zero-side-effect tests. | pending |
 | `QP-KER-020` | GPT-5 Codex lead | independent audit | `QP-KER-010` | new isolated worktree / `codex/qp-kernel-v2-shadow` | `quantpilot/packages/core/execution/kernel_shadow.py`, focused tests, minimal composition/config boundary | proposed | `off` default; unknown mode fails closed; shadow itself has no authoritative mutation; current-order expiry mismatch is fixed fail-closed rather than ignored; no second broker callable. | pending |
 | `QP-KER-030` | best-fit test owner | independent auditor | `QP-KER-020` | separate parity worktree | kernel parity tests only | proposed | L1-2, L3 direct/ticket, L4 blocked/success, L5 dry/blocked/success, professional risk reduction, and fake KIS evidence parity; all side-effect counters zero. | pending |
-| `QP-KER-040` | GPT-5 Codex lead | Claude Code/read-only audit | `QP-KER-030` | separate Level 3 worktree | Level 3 adapters and tests | proposed | Direct and ticket paths use the common handoff; direct approval gains explicit persisted actor evidence or remains mock-only `unverified_local`; ticket actor binding is retained; no broker expansion. | pending |
+| `QP-KER-040` | GPT-5 Codex lead | Claude Code/read-only audit | `QP-KER-030` | separate Level 3 worktree | Level 3 adapters and tests | proposed | Direct and ticket paths use the common handoff; direct approval gains explicit persisted actor evidence or remains fixture mock/simulated-paper `unverified_local`; ticket actor binding is retained; no broker expansion. | pending |
 | `QP-KER-050` | GPT-5 Codex lead | independent audit | `QP-KER-040` | separate Level 4 worktree | Level 4 adapter and tests | proposed | Existing `authorize_level4()` evidence is adapted once; default disabled and kill behavior unchanged. | pending |
 | `QP-KER-060A` | GPT-5 Codex lead | independent audit | `QP-KER-050` | separate Level 5 worktree | ordinary operator adapter and tests | proposed | Existing Level 5 fallback/reporting preserved; no LLM/RL authority; common handoff used. | pending |
 | `QP-KER-060B` | GPT-5 Codex lead | independent audit | `QP-KER-060A` | separate professional worktree | professional protective/retirement adapter and tests | proposed | Position-binding and reduce-only evidence preserved; no exposure-increasing regression. | pending |
@@ -200,8 +200,13 @@ Required invariant evidence:
   hardening delta; parity may not conceal it.
 - `2026-07-12 KST` — Direct Level 3 approval inspection found no approver input
   or persisted `approved_by`. The contract now records the baseline as
-  `unverified_local`, mock-only evidence and requires real actor binding before
-  Level 3 external-paper cutover.
+  `unverified_local`, non-external fixture evidence and requires real actor
+  binding before Level 3 external-paper cutover.
+- `2026-07-12 KST` — Contract-branch baseline verification after the read-only
+  review passed: backend `1003 passed, 2 skipped in 22.09s`; smoke remained
+  `broker=mock`, live=false, Level 5 blocked with zero submitted operator
+  orders. The temporary pytest tree was removed and only the two contract docs
+  remained modified.
 
 ## Handoff record
 
@@ -213,7 +218,7 @@ owned_paths:
   - docs/execution_kernel_v2_contract.md
   - docs/execution_kernel_v2_workboard.md
 acceptance_met: repository-grounded draft complete; counterpart acceptance pending
-exact_checks: two-file allowlist passed; git show --check exposed one blank EOF line, fixed in the follow-up evidence commit
+exact_checks: two-file allowlist and final diff check passed; backend 1003 passed, 2 skipped; smoke mock/live=false/operator blocked
 known_limits: Claude Code review unavailable until 12:20 KST; no runtime work authorized
 integration_requests: Claude must revise/accept the binding contract before QP-KER-010
 ```

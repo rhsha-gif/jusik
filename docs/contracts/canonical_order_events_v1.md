@@ -69,9 +69,23 @@ and makes the atomic boundary explicit.
 can write multiple aggregates, and an imported row may begin at any legacy
 revision while its event stream begins at version 1.
 
-`correlation_id` is the stable `order_plan_id`. `causation_id` identifies the
-command or immediately preceding event when one exists. It does not authorize a
-broker call.
+`correlation_id` is the stable `order_plan_id`. `causation_id` is store-derived
+and never caller-supplied, by this closed rule:
+
+- Import events: null.
+- `RiskReserved` and `CancelPrepared`: null. No durable command journal exists
+  in v1, and inventing a command ID would be untruthful provenance.
+- `OrderPrepared`: the `event_id` of the `RiskReserved` event committed in the
+  same transaction.
+- `RiskReservationFenceRebound`: the `event_id` of the same transaction's
+  `DispatchFenceRebound`.
+- `RiskReservationReleased`: the `event_id` of the same transaction's terminal
+  dispatch event (the correlated terminal batch).
+- Every other event: the `event_id` of the same aggregate's immediately
+  preceding event, i.e. the event currently holding the last
+  `aggregate_version`.
+
+`causation_id` never authorizes a broker call.
 
 ## 2. Canonical envelope
 
@@ -80,7 +94,7 @@ Add a secret-free `PaperExecutionEvent` model under
 
 | Field | Constraint | Meaning |
 |---|---|---|
-| `event_id` | nonblank string | Globally unique event identity. |
+| `event_id` | nonblank string | Globally unique event identity; store-generated per Section 8, deterministic for imports per Section 10, never caller-supplied. |
 | `event_schema_version` | literal `1` | Payload/envelope contract version, not DB schema. |
 | `aggregate_type` | one of the three types in Section 1 | Stream family. |
 | `aggregate_id` | nonblank string | ID in the aggregate table above. |
@@ -91,8 +105,8 @@ Add a secret-free `PaperExecutionEvent` model under
 | `data_mode` | literal `paper_trading` | Fixed. |
 | `broker_environment` | literal `kis_paper` | Fixed. |
 | `source` | Section 3 allowlist | Fact origin. |
-| `occurred_at` | aware datetime | Best evidenced source time. |
-| `received_at` | aware datetime | Local durable-observation time. |
+| `occurred_at` | aware datetime | Best evidenced source time; derived by the closed Section 3 rule, never caller-selected. |
+| `received_at` | aware datetime | Local durable-observation time; derived by the closed Section 3 rule. |
 | `correlation_id` | nonblank string | `order_plan_id`. |
 | `causation_id` | optional nonblank string | Command/event that caused this append. |
 | `idempotency_key` | optional nonblank string | Paired request key when known. |
@@ -125,7 +139,7 @@ broker_fill_reference/kisagg-*     -> identity key `broker_cumulative_delta`
 true broker execution reference    -> identity key `venue_execution`
 ```
 
-## 3. Source and time semantics
+## 3. Source, mutation origin, and time semantics
 
 Allowed sources are:
 
@@ -133,6 +147,7 @@ Allowed sources are:
 local_prepare
 local_dispatch_claim
 local_session_takeover
+local_submission_result
 broker_acceptance
 broker_reconciliation
 process_recovery
@@ -140,20 +155,63 @@ kill_cancel
 schema_migration
 ```
 
+`local_submission_result` is a review correction: pre-dispatch expiry/failure
+and post-claim local guard rejections never touched the broker, and the draft's
+original allowlist gave them no truthful source.
+
+`source` is never inferred from a before/after row diff and never caller
+free-form. The generic mutators cannot distinguish acceptance, reconciliation,
+and guard/kill/recovery writes from state alone — `dispatch_claimed ->
+rejected` is produced both by the submission coordinator
+(`_definitive_rejection`) and, for an unresolved claim, by broker
+reconciliation — so `update_paper_order_dispatch` and
+`update_paper_cancel_request` gain one required keyword-only
+`mutation_origin` argument typed as a closed literal. Each production call
+site passes exactly one token; the store maps the token to `source` and
+validates it against that token's allowlisted delta shape before append. Any
+mismatch fails closed with no row or event write. Callers never choose event
+types or envelopes; the specialized store methods carry an implicit origin.
+
+| Mutation origin | Exact production call sites | `source` | Allowed delta |
+|---|---|---|---|
+| implicit: `reserve_and_insert_paper_order_dispatch` | `prepare_order` (`paper_submission.py`) | `local_prepare` | create pair, both revision 0 |
+| implicit: `claim_dispatch_attempt` | submission claim path | `local_dispatch_claim` | `prepared/attempt 0 -> dispatch_claimed/attempt 1` |
+| implicit: `takeover_prepared_paper_order_dispatch` | `expire_stale_prepared_dispatches`, `terminalize_prepared_dispatches_for_kill`, submission replay takeover | `local_session_takeover` | fence rebind only (dispatch + paired reservation) |
+| implicit: `recover_interrupted_dispatches` | session recovery | `process_recovery` | `dispatch_claimed -> outcome_unknown` with `last_error_code="process_interrupted"` |
+| `broker_post_result` | `_record_acceptance`; `_definitive_rejection` with `broker_business_rejected`; `_outcome_unknown` for POST-attempt ambiguity (`broker_response_ambiguous`, `broker_exception_after_claim`, `broker_acceptance_mismatch`, `broker_business_date_unverified`, `acceptance_persistence_failed`) | `broker_acceptance` | `dispatch_claimed -> accepted \| rejected \| outcome_unknown` |
+| `local_submission_guard` | `_terminal_pre_dispatch` (expiry, kill terminalization of prepared rows, pre/post-claim session-closed failures); `_definitive_rejection` with a local guard code (`paper_kill_engaged_after_claim`, `paper_session_closed_after_claim`, `local_configuration_error`) | `local_submission_result` | `prepared -> expired_pre_dispatch \| failed_pre_dispatch`; `dispatch_claimed -> rejected` with a local guard error code |
+| `broker_reconciliation` | `reconcile_dispatch` and `_blocked` (`paper_reconciliation.py`) | `broker_reconciliation` | the Section 6 reconciliation surface, including `-> blocked` writes |
+| `kill_cancel_journal` | every cancel write in `paper_kill.py` (`create`/`claim`/`_persist_cancel_state`/`_synchronize_cancel_requests`) | `kill_cancel` | cancel-stream transitions only |
+| implicit: migration importer | `_initialize_schema` | `schema_migration` | version-1 import anchors only |
+
+A terminal `RiskReservationReleased` event inherits the `source` of the same
+transaction's terminal dispatch event; kill terminalization of a prepared
+dispatch is `local_submission_result` (no broker call occurred; the payload's
+`last_error_code="paper_kill_engaged"` preserves the kill context truthfully).
+
 Replay order is **only** `(aggregate_type, aggregate_id, aggregate_version)`.
 Neither timestamp is an ordering key. Broker clocks, daily queries, and process
 restarts can make `occurred_at` appear earlier than a previously received fact.
 
-- Local prepare/claim/takeover: `occurred_at` is the authoritative row update
-  time; `received_at` is the same transaction's observation time.
-- Broker acceptance: `occurred_at` uses the verified KIS business date and order
-  time when available; `received_at` is the local durable update time.
-- KIS cumulative fill/daily-order evidence has no execution timestamp in the
-  current adapter. Its `occurred_at` is the first observation time and payload
-  preserves the existing
-  `time_basis="broker_daily_aggregate_first_observed"` literal.
-- Import anchors use the legacy row's `updated_at` as effective `occurred_at` and
-  the migration clock as `received_at`.
+`occurred_at` and `received_at` are derived by the store from the validated
+after-state; callers cannot select event times:
+
+- `received_at` for every non-import event is `payload.after.updated_at`, the
+  same transaction's durable write time.
+- `occurred_at` for `OrderAccepted` is the KST datetime combined from the
+  verified `after.broker_business_date` and `after.broker_order_time` when both
+  are present; otherwise `after.updated_at`.
+- `occurred_at` for every other non-import event — rejection, ambiguity,
+  pre-dispatch expiry/failure, interrupted recovery, fence rebinds,
+  reconciliation outcomes, reservation release, and every cancel mutation — is
+  `after.updated_at`. KIS cumulative daily-order evidence has no execution
+  timestamp in the current adapter; its first-observed times stay on the
+  per-fill `fill_evidence[*].evidence_at` items with their per-fill
+  `time_basis="broker_daily_aggregate_first_observed"` literal and are never
+  promoted to an aggregate event value.
+- Import anchors use the legacy row's `updated_at` as `occurred_at` and one
+  migration clock reading captured once per migration transaction as
+  `received_at`.
 
 No code may invent a `broker_sequence`, `execution_id`, or execution timestamp.
 
@@ -188,6 +246,36 @@ authority for the shadow stream. `DispatchReconciled` is used only when a legal
 same-status update advances reconciliation from pending/blocked to reconciled;
 if lifecycle status also advances, the matching lifecycle event is used instead.
 
+Event-type selection is a total deterministic function of the validated
+before/after pair. When one authoritative revision changes lifecycle status,
+fill evidence, and/or reconciliation status together (as
+`reconcile_dispatch` legally does in a single revision), exactly one event type
+is chosen by this precedence:
+
+1. `after.reconciliation_status == "blocked"` -> `ReconciliationBlocked`. This
+   covers `pending -> blocked`, a changed-error `blocked -> blocked` rewrite,
+   and the combined `dispatch_claimed -> outcome_unknown` plus blocked write
+   from `_blocked`.
+2. Else, lifecycle status changed -> the after-status lifecycle event:
+   `accepted -> OrderAccepted`, `outcome_unknown -> OutcomeUnknown`,
+   `partially_filled -> OrderPartiallyFilled`, `filled -> OrderFilled`,
+   `rejected -> OrderRejected`, `cancelled -> OrderCancelled`,
+   `expired_pre_dispatch -> OrderExpiredPreDispatch`,
+   `failed_pre_dispatch -> OrderFailedPreDispatch`. Newly introduced fill
+   identities ride this event as child keys and a simultaneous reconciliation
+   advance rides the after-state; neither spawns a second dispatch event.
+3. Else, reconciliation advanced pending/blocked -> reconciled ->
+   `DispatchReconciled`.
+4. Else, new fill evidence was introduced -> `OrderPartiallyFilled`, which
+   additionally requires `after.status == "partially_filled"`; any other
+   same-status fill growth is corruption, because `_status_from_row` cannot
+   produce it.
+5. Else -> `DispatchEvidenceObserved` (legal same-status enrichment, such as
+   accepted-to-accepted branch/time evidence).
+
+Both the store append helper and the pure reducer recompute this function and
+reject any event whose type disagrees with it.
+
 ### `risk_reservation`
 
 ```text
@@ -218,15 +306,37 @@ Cancel acknowledgment is not order cancellation. Only broker reconciliation may
 produce `OrderCancelled`/`CancelReconciledCancelled`; a fill may win the race and
 produce `OrderFilled`/`CancelReconciledFilled` without another broker POST.
 
+Cancel event types are the closed per-status map of the after-state:
+`prepared -> CancelPrepared` (creation only), `cancel_claimed -> CancelClaimed`,
+`cancel_accepted -> CancelAccepted`,
+`cancel_outcome_unknown -> CancelOutcomeUnknown`, `rejected -> CancelRejected`,
+`reconciled_cancelled -> CancelReconciledCancelled`, and
+`reconciled_filled -> CancelReconciledFilled`. A same-status cancel write that
+changes other fields has **no** v1 event type and fails closed before commit.
+`PAPER_CANCEL_TRANSITIONS` permits such self-loops, but every production cancel
+writer (`create_paper_cancel_request`, `claim_paper_cancel_attempt`, and the
+`paper_kill.py` `_persist_cancel_state`/`_synchronize_cancel_requests` paths)
+either replays a state exactly — which returns before any write — or advances
+the status. V1 deliberately excludes an invented cancel-enrichment event rather
+than journal an unreachable mutation class; if a future writer needs it, that is
+an event-schema revision, not a silent widening.
+
 ## 5. Typed payload and canonical hash
 
 Every v1 event contains a validated full after-state snapshot for its aggregate:
 
 ```text
-order_dispatch   -> { "after": <PaperOrderDispatch JSON>, "time_basis": ... }
+order_dispatch   -> { "after": <PaperOrderDispatch JSON> }
 risk_reservation -> { "after": <PaperRiskReservation JSON> }
 cancel_request   -> { "after": <PaperCancelRequest JSON> }
 ```
+
+The draft's payload-level `time_basis` field is removed by review decision: one
+dispatch snapshot may contain multiple `fill_evidence` rows with different
+per-fill `time_basis` values, so no truthful aggregate value exists and none may
+be guessed. Time basis exists only on each `PaperDispatchFillEvidence` item
+inside `after.fill_evidence` and, through `evidence_payload_hash`, on each
+identity key.
 
 Import events add `legacy_snapshot=true`. Full after-state payloads are an
 intentional v1 safety choice: they let the reducer re-run the existing model and
@@ -246,7 +356,7 @@ JSON-mode model encoding. `payload_hash` is SHA-256 over those exact bytes with 
 | `kind` | `venue_execution` or `broker_cumulative_delta` | Truthful identity class. |
 | `external_id` | nonblank string | True execution reference or current `kisagg-*` observation reference. |
 | `scope_hash` | `sha256:<64 lowercase hex>` | Canonical broker/account/order scope. |
-| `evidence_payload_hash` | `sha256:<64 lowercase hex>` | Hash of the exact newly introduced `PaperDispatchFillEvidence`. |
+| `evidence_payload_hash` | `sha256:<64 lowercase hex>` | SHA-256 over the canonical JSON bytes (this section's canonical-bytes rule) of the exact newly introduced `PaperDispatchFillEvidence`. |
 
 The list is canonically sorted by `(kind, scope_hash)` and contains no duplicate
 scope. It is **exactly** the set difference between `after.fill_evidence` and the
@@ -259,14 +369,24 @@ where one authoritative revision adds multiple fill-evidence rows.
 - `time_basis="broker_daily_aggregate_first_observed"` maps to
   `kind=broker_cumulative_delta`; its `external_id` is the current `kisagg-*`
   reference and MUST NOT be called an execution ID.
-- A venue scope hash covers broker environment, account fingerprint, identity
-  kind, and true external execution ID.
-- A cumulative scope hash covers broker environment, account fingerprint, KIS
-  business date, actual broker order number, broker branch/organization identity,
-  identity kind, and external evidence ID. It deliberately excludes local
-  `order_plan_id`/`correlation_id`, so the same broker fact cannot be attached to
-  two local orders under different hashes. Required broker identity must be
-  present for cumulative evidence; it may not fall back to a local ID.
+- A venue scope hash covers exactly, in canonical field order:
+  `broker_environment`, `account_scope_fingerprint`, identity kind, and the true
+  external execution ID.
+- A cumulative scope hash covers exactly, in canonical field order:
+  `broker_environment`, `account_scope_fingerprint`, identity kind,
+  `after.broker_business_date` (ISO date), `after.broker_order_reference` (the
+  actual KIS order number), `after.broker_order_branch_number`, and the external
+  evidence ID (`kisagg-*`). Every component MUST be non-null when the key is
+  constructed; `reconcile_dispatch` durably writes each of them in the same
+  revision that merges cumulative fill evidence, and a missing component fails
+  closed instead of falling back to any local ID.
+  `broker_forwarding_order_org_number` is deliberately **excluded**: it is
+  acceptance-path evidence only (`_record_acceptance`) and is legally absent on
+  a reconciliation-only lifecycle (`outcome_unknown -> accepted` via daily
+  orders never sets it), so requiring it would block truthful legacy state and
+  making it optional would fork the hash. The scope deliberately excludes local
+  `order_plan_id`/`correlation_id`, so the same broker fact cannot be attached
+  to two local orders under different hashes.
 - Any second distinct event that reuses a scope is a conflict, never a no-op or
   overwrite, even when its payload matches. Later full after-state snapshots do
   not repeat old keys.
@@ -311,7 +431,11 @@ For each independent stream it applies these rules in caller-supplied order:
    require `source_revision` to advance the prior authoritative revision by
    exactly one. The three create events `RiskReserved`, `OrderPrepared`, and
    `CancelPrepared` are constrained to `aggregate_version=1` and
-   `source_revision=0` with no prior projection.
+   `source_revision=0` with no prior projection. For `CancelPrepared` this is a
+   deliberate fail-closed tightening: `create_paper_cancel_request` does not
+   itself assert `revision=0`, but its only production caller constructs
+   revision-0 `prepared` requests, so the event layer rejects — and rolls
+   back — any nonzero-revision create instead of inventing an event for it.
 6. Event type must match the after-state and the before-to-after transition.
 7. For order streams, transition and reconciliation surfaces MUST be subsets of
    the union of `PAPER_DISPATCH_TRANSITIONS`, the current reconciliation map, and
@@ -350,6 +474,26 @@ enforced by the store's scoped unique indexes before commit. The existing
 store methods remain responsible for live lease expiry, exact active-session,
 kill-state, and external-attempt authority checks; events do not duplicate or
 widen that authority.
+
+The reducer raises a pure exception family defined beside it with no database
+import, and the SQLite store translates it exactly at its boundary with
+`raise ... from exc`:
+
+```text
+PaperEventStreamConflict    -> PaperStateConflictError
+    expected-version mismatch, source-revision mismatch, illegal transition,
+    identity-scope reuse (identical or divergent payload)
+PaperEventStreamCorruption  -> PaperStateCorruptionError
+    payload-hash mismatch, divergent event_id reuse, same-version divergent
+    event, sequence gap, envelope/provenance/after-state binding mismatch
+PaperEventSchemaUnsupported -> PaperStateMigrationRequired
+    unknown event_type or event_schema_version
+```
+
+Any failure raised inside the migration importer surfaces as
+`PaperStateMigrationRequired`, matching the Gate 1 backfill error contract
+(QP-RES-A1). The reducer never raises a store error type, and the store never
+downgrades a reducer error to a warning or partial apply.
 
 The reducer returns a typed `PaperExecutionProjection` for one stream containing
 the after-state, aggregate version, source revision, and identity sets needed for
@@ -444,9 +588,28 @@ API, UI, LLM, RL output, or broker adapter receives general event-append
 authority.
 
 `PaperStateStore` constructs candidate events from the validated before/after
-models; callers do not supply arbitrary envelopes. For each normal runtime
-transaction the set of changed authoritative aggregate rows and the set of
-advancing events must be one-to-one. A terminal dispatch plus a changed
+models plus the closed Section 3 mutation-origin token; callers do not supply
+arbitrary envelopes, event types, sources, or times. Candidate events are
+constructed only after the existing row-level idempotency paths have proven a
+row change: every legacy exact-replay early return — identical re-prepare pair,
+same-session takeover, exact-equality dispatch/cancel update, already-released
+reservation on a terminal replay, identical cancel re-create, and the
+reconciler's in-memory equality returns — exits before any candidate exists, so
+duplicate candidates are suppressed before creation. Runtime `event_id`s are
+then store-generated opaque IDs following the repository convention
+(`new_id("pevt")`); the deterministic Section 10 derivation applies only to
+import anchors. The step-1 exact-`event_id` no-op arm below is therefore
+exercised at runtime only by deterministic import IDs on reopen.
+
+For each normal runtime transaction the set of changed authoritative aggregate
+rows and the set of advancing events must be one-to-one. This invariant is
+enforced by a typed internal per-transaction mutation batch guard (e.g.
+`_PaperEventMutationGuard`), not by informal caller discipline: every store
+mutation method registers each changed aggregate row and its candidate event in
+the guard, and the guard's commit-time assertion verifies the one-to-one
+property inside the existing transaction. A registered change without an event,
+an event without a registered change, or an unknown mutation-origin token each
+fail closed and roll back the whole transaction. A terminal dispatch plus a changed
 reservation therefore has one event in each stream; multiple new fill identities
 remain child keys of the single dispatch event. Truthful schema-migration import
 anchors are the sole explicit exception because they seed unchanged legacy rows.
@@ -488,6 +651,19 @@ transaction commits:
 | reconciliation block | `ReconciliationBlocked` |
 | same-status pending/blocked to reconciled | `DispatchReconciled` |
 | cancel journal prepare/claim/ack/unknown/reject/reconcile | matching cancel event |
+
+Every row of this table binds to exactly one Section 3 mutation-origin token.
+`expire_stale_prepared_dispatches` and `terminalize_prepared_dispatches_for_kill`
+may perform two separate transactions per dispatch (fence rebind, then
+pre-dispatch terminal); each transaction carries its own one-to-one event batch.
+`recover_interrupted_dispatches` may recover multiple dispatches in one
+transaction; each recovered aggregate gets exactly one `OutcomeUnknown` event.
+
+The idempotent no-write paths emit no event and advance no stream: identical
+re-prepare pair return, same-session takeover return, exact-equality
+dispatch/cancel update return, already-released reservation on terminal replay,
+identical cancel re-create return, and the reconciler's in-memory equality
+returns.
 
 The implementation MUST cover write paths that bypass
 `update_paper_order_dispatch`: prepare, claim, prepared takeover, interrupted
@@ -585,6 +761,14 @@ All tests are deterministic, fake-only, and secret-free.
 - Stale/future expected version leaves event stream and authoritative state
   unchanged.
 - Session fence and account provenance mismatch fail before append.
+- A mutation-origin token whose allowed delta does not match the observed
+  before/after change fails closed with no row or event write.
+- Every event's `occurred_at`/`received_at` equals the closed Section 3
+  derivation; a caller-supplied time is impossible by construction.
+- A same-status cancel write with changed fields (no v1 event type) fails
+  closed and rolls back.
+- The multi-fill dispatch payload carries no aggregate `time_basis`; per-fill
+  bases survive replay byte-exactly.
 
 ### Broker ordering and cancel/fill races
 

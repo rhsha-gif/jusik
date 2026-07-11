@@ -387,7 +387,9 @@ The first slice accepts no live environment and no unknown capability value.
 schema_version = 1
 order_plan_id
 verdict: eligible_for_legacy_submit | blocked
-blocked_stage: authorization | risk | final_safety | capability | none
+blocked_stage:
+  identity | candidate | authorization | risk | final_safety |
+  paper_evidence | capability | none
 reason_codes: sorted unique tuple
 would_require_durable_prepare: bool
 would_require_atomic_reservation: bool
@@ -401,11 +403,18 @@ continue through the existing legacy handoff. It never means that an order was
 prepared, submitted, accepted, or filled. In particular, it does not predict
 the `before_broker_submit` callback or the second final-safety check that the
 legacy path performs immediately before durable preparation/broker submission.
+Every blocked decision sets both durable-requirement flags false and
+`intended_next_stage=none`. Eligible external KIS paper sets both flags true;
+eligible mock and in-process simulated paper set both false.
 
-`evidence_fingerprint` is SHA-256 over a canonical JSON projection of all input
-fields except no fields are omitted for nondeterminism: there must be no random
-or implicit current value in the input. The fingerprint is diagnostic only and
-must never become a broker idempotency key or event identity.
+`evidence_fingerprint` is SHA-256 over a canonical JSON projection of every
+input field. Canonicalization uses JSON-mode enum values, UTC timestamps with a
+fixed microsecond representation, canonical decimal strings, UTF-8,
+`sort_keys=True`, compact separators, and `allow_nan=False`. Mapping insertion
+order therefore has no effect; tuple order remains meaningful. No field is
+omitted to hide nondeterminism: there must be no random or implicit current
+value in the input. The fingerprint is diagnostic only and must never become a
+broker idempotency key or event identity.
 
 ### 4.4 Deterministic decision order
 
@@ -668,8 +677,8 @@ The minimum pure-model case matrix is binding:
 | valid operator-authorized Level 5 | eligible |
 | valid professional reduce-only evidence | eligible |
 | candidate policy/order identity disagreement | `blocked/identity` stage |
-| candidate not `user_approved` | `blocked/order_not_user_approved` |
-| current order expiry reached | `blocked/order_expired` |
+| candidate not `user_approved` | `blocked/candidate/order_not_user_approved` |
+| current order expiry reached | `blocked/candidate/order_expired` |
 | denied or internally inconsistent authorization | `blocked/authorization` stage |
 | risk ID/policy/idempotency disagreement | `blocked/risk_check_mismatch` |
 | expired fresh-risk evidence | `blocked/risk_check_expired` |
@@ -679,7 +688,7 @@ The minimum pure-model case matrix is binding:
 | current policy snapshot changed before submission | `blocked/policy_snapshot_changed` |
 | live, either kill, pause, or unhealthy broker | matching `final_safety` reason |
 | market order with disabled context/capability | `blocked/market_order_disabled` |
-| external paper without snapshot/quote/run/provenance/fence evidence | matching closed paper reason |
+| external paper without snapshot/quote/run/provenance/fence evidence | matching `paper_evidence` reason |
 | valid external-paper evidence | eligible with both durable requirement flags, zero calls |
 | same valid input evaluated twice | byte-equivalent decision/fingerprint |
 | mapping order differs but semantic input is equal | identical fingerprint |

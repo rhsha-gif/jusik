@@ -49,7 +49,7 @@ Score: `domain*0.30 + tools*0.25 + track*0.25 + continuity*0.10 + coordination*0
 | `QP-RM-00` | GPT-5 Codex lead | Claude counterpart | none | `주식트레이더-roadmap-baseline` / `codex/qp-roadmap-baseline-v9` | baseline integration, this workboard, baseline report | done | Kill v1 is fast-forwarded from clean main, full backend and smoke pass, user dirty tree unchanged. | `216ff22`; `819 passed, 2 skipped`; smoke mock/live=false; CLI disabled |
 | `QP-RM-00A` | Claude Code Opus alias + `claude-fable-5` | GPT-5 Codex lead | `QP-RM-00` baseline | sibling worktree / `claude/qp-roadmap-contracts` | acceptance matrix and reservation contract/workboard | integrated | Repository-grounded gate dependencies, invariants, and exact acceptance evidence are decision-complete after Codex correction. | Claude `215a4b9`; integrated `36d9a8a`; Codex hardening `5dff17a` |
 | `QP-RISK-RES-V1` | GPT-5 Codex lead | Claude Code `claude-fable-5` | `QP-RM-00`, `QP-RM-00A` | `주식트레이더-risk-reservation-v1` / `codex/qp-risk-reservation-v1-core` | risk reservation model/store/integration/tests/report | done | Schema v10 atomic cash/sell-quantity/gross-exposure reservation passed concurrency, crash, migration, independent audit, baseline integration, full-suite, smoke, and default-blocked kill gates. | implementation/audit `5eb70a9`; Claude audit `c021a50` + follow-up `b280bef`; QP-RES-A1 closed; residual P0=0/P1=0; `885 passed, 2 skipped`; smoke mock/live=false/blocked; kill CLI `paper_kill_disabled` |
-| `QP-EXEC-EVENTS-V1` | GPT-5 Codex lead; Claude Code `claude-fable-5` contract reviewer | independent auditors | `QP-RISK-RES-V1` acceptance | `주식트레이더-exec-events-v1` / `codex/qp-exec-events-v1-contract` | canonical events/reducer/shadow parity | implementation_in_progress | Pure event model/reducer is integrated and independently accepted; transition shim, schema-v11 dual-write/migration, and parity remain gated. | Claude contract `80e05d5`; pure domain `64cffd6` + repairs `cb10b15`, `7e9bd53`; final P0/P1/P2/P3=0; `922 passed, 2 skipped`; safe smoke |
+| `QP-EXEC-EVENTS-V1` | GPT-5 Codex lead; Claude Code `claude-fable-5` contract reviewer | independent auditors | `QP-RISK-RES-V1` acceptance | `주식트레이더-exec-events-v1` / `codex/qp-exec-events-v1-contract` | canonical events/reducer/shadow parity | implementation_in_progress | Pure event model/reducer and transition shim are accepted; schema-v11 dual-write/migration and parity remain gated. | Claude contract `80e05d5`; pure domain `64cffd6` + repairs `cb10b15`, `7e9bd53`; shim `447b843`; final audits P0/P1/P2/P3=0; `924 passed, 2 skipped`; safe smoke |
 | `QP-KERNEL-V2` | best-fit routed per scorecard | independent auditor | reservation + events | separate worktree | shadow then gated cutover | proposed | Level 3/4/5 use one kernel, no shadow side effects, and no dual broker POST path. | pending |
 | `QP-LEDGER-RUNTIME` | best-fit routed per scorecard | independent auditor | kernel cutover | separate missions/worktrees | ledger, reconciliation, continuous runtime | proposed | Projection replay, broker parity, continuous protection, and paper-readiness gates pass. | pending |
 
@@ -97,6 +97,10 @@ Score: `domain*0.30 + tools*0.25 + track*0.25 + continuity*0.10 + coordination*0
   re-audit reported P0/P1/P2/P3 zero. Verification: focused `37 passed`, full
   backend `922 passed, 2 skipped`, smoke mock/live=false/operator blocked, and
   no DB/broker imports. QP-EVT-020B is the active next slice.
+- `2026-07-11 KST` — QP-EVT-020B landed as `447b843`, replacing copied SQLite
+  transition tables with five direct pure-domain imports/re-exports. Independent
+  audit reported P0/P1/P2/P3 zero; full backend `924 passed, 2 skipped` and
+  safe smoke passed. Schema-v11 dual-write/migration (QP-EVT-030) is active.
 
 ## Handoff record
 

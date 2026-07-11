@@ -807,6 +807,88 @@ def test_dispatch_sources_reject_cross_origin_fields_and_error_codes() -> None:
         reduce_paper_execution_event(accepted_projection, blocked_local_error_event)
 
 
+def test_broker_reconciliation_cannot_rewrite_local_guard_rejection() -> None:
+    prepared = _dispatch()
+    claimed = _claimed(prepared)
+    claimed_projection = replay_paper_execution_events(
+        [
+            build_paper_execution_event(
+                event_id="pevt-local-guard-prepared",
+                aggregate_version=1,
+                event_type="OrderPrepared",
+                source="local_prepare",
+                after=prepared,
+                causation_id="pevt-local-guard-risk",
+            ),
+            build_paper_execution_event(
+                event_id="pevt-local-guard-claimed",
+                aggregate_version=2,
+                event_type="DispatchClaimed",
+                source="local_dispatch_claim",
+                after=claimed,
+                before=prepared,
+                causation_id="pevt-local-guard-prepared",
+            ),
+        ]
+    )
+    rejected_at = claimed.updated_at + timedelta(seconds=1)
+    rejected = PaperOrderDispatch.model_validate(
+        claimed.model_copy(
+            update={
+                "status": "rejected",
+                "reconciliation_status": "reconciled",
+                "last_error_code": "local_configuration_error",
+                "updated_at": rejected_at,
+                "reconciled_at": rejected_at,
+                "revision": claimed.revision + 1,
+            }
+        ).model_dump()
+    )
+    rejected_event = build_paper_execution_event(
+        event_id="pevt-local-guard-rejected",
+        aggregate_version=3,
+        event_type="OrderRejected",
+        source="local_submission_result",
+        after=rejected,
+        before=claimed,
+        causation_id="pevt-local-guard-claimed",
+    )
+    rejected_projection = reduce_paper_execution_event(
+        claimed_projection,
+        rejected_event,
+    )
+
+    observed_at = rejected.updated_at + timedelta(seconds=1)
+    forged = PaperOrderDispatch.model_validate(
+        rejected.model_copy(
+            update={
+                "broker_business_date": date(2026, 7, 10),
+                "broker_order_reference": "0000012345",
+                "broker_order_branch_number": "00123",
+                "broker_order_time": "101530",
+                "last_error_code": None,
+                "updated_at": observed_at,
+                "reconciled_at": observed_at,
+                "revision": rejected.revision + 1,
+            }
+        ).model_dump()
+    )
+    forged_event = build_paper_execution_event(
+        event_id="pevt-forged-broker-enrichment",
+        aggregate_version=4,
+        event_type="DispatchEvidenceObserved",
+        source="broker_reconciliation",
+        after=forged,
+        before=rejected,
+        causation_id="pevt-local-guard-rejected",
+    )
+    with pytest.raises(
+        PaperEventStreamCorruption,
+        match="claimed external attempt",
+    ):
+        reduce_paper_execution_event(rejected_projection, forged_event)
+
+
 def test_reservation_create_fence_and_release_are_closed() -> None:
     prepared = _dispatch()
     held = _reservation(prepared)

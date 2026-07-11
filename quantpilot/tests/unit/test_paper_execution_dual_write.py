@@ -4,11 +4,21 @@ from __future__ import annotations
 
 import sqlite3
 from datetime import timedelta
+from decimal import Decimal
 
 import pytest
 
 from quantpilot.packages.core.execution.events import PaperExecutionEvent
+from quantpilot.packages.core.execution.paper_reconciliation import (
+    PaperBrokerReconciler,
+)
 from quantpilot.packages.core.execution.reducer import replay_paper_execution_events
+from quantpilot.packages.core.kis_paper import (
+    KisBalanceResult,
+    KisBalanceSummary,
+    KisDailyOrderFill,
+    KisDailyOrdersResult,
+)
 from quantpilot.packages.core.operator.position_ledger import (
     PaperCancelRequest,
     PaperOrderDispatch,
@@ -113,6 +123,78 @@ def _broker_rejection(claimed: PaperOrderDispatch) -> PaperOrderDispatch:
 
 def _event_ids(store: PaperStateStore) -> list[str]:
     return [event.event_id for event in store.list_paper_execution_events()]
+
+
+def _reconciliation_row(
+    dispatch: PaperOrderDispatch,
+    *,
+    status: str = "accepted",
+) -> KisDailyOrderFill:
+    quantity = int(dispatch.quantity)
+    rejected_quantity = quantity if status == "rejected" else 0
+    remaining_quantity = 0 if status == "rejected" else quantity
+    return KisDailyOrderFill(
+        order_number="0000001234",
+        original_order_number="",
+        order_branch_number="00123",
+        order_date="20260710",
+        order_time="100001",
+        symbol=dispatch.symbol,
+        product_name="fixture security",
+        side=dispatch.side,
+        order_quantity=quantity,
+        order_price=Decimal(str(int(dispatch.limit_price))),
+        total_filled_quantity=0,
+        average_fill_price=Decimal("0"),
+        remaining_quantity=remaining_quantity,
+        rejected_quantity=rejected_quantity,
+        cancelled=False,
+        confirmed_cancel_quantity=0,
+        total_filled_amount=Decimal("0"),
+    )
+
+
+class _FakeReconciliationClient:
+    def __init__(
+        self,
+        account_scope_fingerprint: str,
+        *rows: KisDailyOrderFill,
+    ) -> None:
+        self.account_scope_fingerprint = account_scope_fingerprint
+        self.rows = tuple(rows)
+        self.balance_calls = 0
+        self.daily_calls = 0
+
+    def get_balance(self, *, exchange: str = "KRX") -> KisBalanceResult:
+        assert exchange == "KRX"
+        self.balance_calls += 1
+        return KisBalanceResult(
+            positions=(),
+            summary=KisBalanceSummary(
+                deposit_amount=Decimal("2000000"),
+                next_day_settlement_amount=Decimal("2000000"),
+                total_purchase_amount=Decimal("0"),
+                total_evaluation_amount=Decimal("10000000"),
+                net_asset_amount=Decimal("10000000"),
+                evaluation_profit_loss=Decimal("0"),
+            ),
+            pages_fetched=1,
+        )
+
+    def get_daily_orders_and_fills(
+        self,
+        start_date,
+        end_date,
+        *,
+        exchange: str = "KRX",
+        as_of_date=None,
+    ) -> KisDailyOrdersResult:
+        assert start_date.isoformat() == "2026-07-10"
+        assert end_date.isoformat() == "2026-07-10"
+        assert as_of_date == end_date
+        assert exchange == "KRX"
+        self.daily_calls += 1
+        return KisDailyOrdersResult(rows=self.rows, pages_fetched=1)
 
 
 def _fail_after_event(
@@ -526,25 +608,22 @@ def test_reconciliation_acceptance_source_is_pinned(tmp_path) -> None:
         prepared = make_dispatch(store, session, suffix="reconciliation-source")
         insert_reserved_dispatch(store, prepared)
         claimed = _claim(store, session, prepared)
-        reconciled_at = NOW + timedelta(seconds=3)
-        accepted = PaperOrderDispatch.model_validate(
-            claimed.model_copy(
-                update={
-                    "status": "accepted",
-                    "broker_business_date": NOW.date(),
-                    "broker_order_reference": "0000001234",
-                    "broker_order_branch_number": "00123",
-                    "broker_order_time": "100001",
-                    "last_error_code": None,
-                    "updated_at": reconciled_at,
-                    "revision": claimed.revision + 1,
-                }
-            ).model_dump()
+        client = _FakeReconciliationClient(
+            store.provenance.account_scope_fingerprint,
+            _reconciliation_row(claimed),
         )
-        accepted = store.update_paper_order_dispatch(
-            accepted,
-            mutation_origin="broker_reconciliation",
-        )
+        result = PaperBrokerReconciler(
+            store=store,
+            client=client,  # type: ignore[arg-type]
+            clock=lambda: NOW + timedelta(seconds=3),
+        ).reconcile_unresolved()
+
+        assert client.balance_calls == 1
+        assert client.daily_calls == 1
+        assert len(result.updated_dispatches) == 1
+        accepted = result.updated_dispatches[0]
+        assert accepted.status == "accepted"
+        assert store.load_paper_order_dispatch(prepared.order_plan_id) == accepted
 
         events = _events(store, "order_dispatch", prepared.order_plan_id)
         assert _signature(events)[-1] == (
@@ -554,6 +633,53 @@ def test_reconciliation_acceptance_source_is_pinned(tmp_path) -> None:
             2,
         )
         _assert_replay(events, accepted)
+
+
+def test_reconciliation_cannot_enrich_local_guard_terminal_rejection(
+    tmp_path,
+) -> None:
+    with paper_store(tmp_path / "local-guard-rejection.sqlite3") as store:
+        session = start_session(store)
+        prepared = make_dispatch(store, session, suffix="local-guard-rejection")
+        insert_reserved_dispatch(store, prepared)
+        claimed = _claim(store, session, prepared)
+        rejected_at = NOW + timedelta(seconds=3)
+        local_rejected = PaperOrderDispatch.model_validate(
+            claimed.model_copy(
+                update={
+                    "status": "rejected",
+                    "reconciliation_status": "reconciled",
+                    "last_error_code": "local_configuration_error",
+                    "updated_at": rejected_at,
+                    "reconciled_at": rejected_at,
+                    "revision": claimed.revision + 1,
+                }
+            ).model_dump()
+        )
+        local_rejected = store.update_paper_order_dispatch(
+            local_rejected,
+            mutation_origin="local_submission_guard",
+        )
+        before_ids = _event_ids(store)
+        client = _FakeReconciliationClient(
+            store.provenance.account_scope_fingerprint,
+            _reconciliation_row(local_rejected, status="rejected"),
+        )
+        reconciler = PaperBrokerReconciler(
+            store=store,
+            client=client,  # type: ignore[arg-type]
+            clock=lambda: NOW + timedelta(seconds=4),
+        )
+
+        with pytest.raises(PaperStateCorruptionError):
+            reconciler.reconcile_dispatch(
+                local_rejected,
+                client.rows,
+                reconciled_at=NOW + timedelta(seconds=4),
+            )
+
+        assert store.load_paper_order_dispatch(prepared.order_plan_id) == local_rejected
+        assert _event_ids(store) == before_ids
 
 
 def test_cancel_public_no_write_invariants_do_not_advance_stream(tmp_path) -> None:
@@ -599,12 +725,30 @@ def test_cancel_public_no_write_invariants_do_not_advance_stream(tmp_path) -> No
         ) == claimed
         assert _event_ids(store) == claimed_event_ids
 
-        same_status_change = PaperCancelRequest.model_validate(
+        accepted = PaperCancelRequest.model_validate(
             claimed.model_copy(
                 update={
-                    "last_error_code": "cancel_still_working",
+                    "status": "cancel_accepted",
+                    "response_order_reference": "0000005678",
                     "updated_at": NOW + timedelta(seconds=7),
                     "revision": claimed.revision + 1,
+                }
+            ).model_dump()
+        )
+        accepted = store.update_paper_cancel_request(
+            accepted,
+            session=session,
+            mutation_origin="kill_cancel_journal",
+        )
+        accepted_event_ids = _event_ids(store)
+
+        same_status_change = PaperCancelRequest.model_validate(
+            accepted.model_copy(
+                update={
+                    "response_order_reference": "0000009999",
+                    "last_error_code": "cancel_still_working",
+                    "updated_at": NOW + timedelta(seconds=8),
+                    "revision": accepted.revision + 1,
                 }
             ).model_dump()
         )
@@ -614,8 +758,8 @@ def test_cancel_public_no_write_invariants_do_not_advance_stream(tmp_path) -> No
                 session=session,
                 mutation_origin="kill_cancel_journal",
             )
-        assert store.load_paper_cancel_request(claimed.cancel_id) == claimed
-        assert _event_ids(store) == claimed_event_ids
+        assert store.load_paper_cancel_request(accepted.cancel_id) == accepted
+        assert _event_ids(store) == accepted_event_ids
 
 
 def test_event_failure_rolls_back_terminal_dispatch_release_and_both_events(

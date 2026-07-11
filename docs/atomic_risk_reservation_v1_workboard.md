@@ -69,7 +69,7 @@ gate of the roadmap (`docs/roadmap_execution_workboard.md`, Gate 1 of
 |---|---|---|---|---|---|---|---|---|
 | `QP-RISK-RES-V1-contract` | Claude Code Opus alias + `claude-fable-5` finalizer | GPT-5 Codex lead | `QP-RM-00`, `QP-RM-00A` | `주식트레이더-claude-roadmap-contracts` / `claude/qp-roadmap-contracts` | `docs/roadmap_acceptance_matrix.md`, `docs/contracts/atomic_risk_reservation_v1.md`, `docs/atomic_risk_reservation_v1_workboard.md` | integrated | Decision-complete v10 model/arithmetic/transaction/migration/tests; Codex review added integer gross reservation and corrected atomic store ownership. | Claude `215a4b9`, integrated `36d9a8a`; Codex hardening `5dff17a` |
 | `QP-RISK-RES-V1-impl` | GPT-5 Codex lead | Claude Code (independent audit) | `QP-RISK-RES-V1-contract` | `주식트레이더-risk-reservation-v1` / `codex/qp-risk-reservation-v1-core` | `operator/position_ledger.py` (reservation model), `db/sqlite_repositories.py` (table/migration/CAS methods), `execution/paper_submission.py` (reserve boundary), `harness_service.py` (durable guardrail projection), reservation tests | review | Contract §10 tests green in full suite; smoke safe-default; migration preserves v9; internal adversarial audit P0/P1 zero. | `ce075bf`; `884 passed, 2 skipped`; smoke mock/live=false |
-| `QP-RISK-RES-V1-audit` | Claude Code `claude-fable-5` | GPT-5 Codex lead | `QP-RISK-RES-V1-impl` | read-only over impl branch | audit report only (no code) | in_progress | Adversarial review of atomicity, conservative release, fencing, gross exposure, and migration; blocks integration on any P0/P1. | Claude request reached `claude-fable-5` but returned account `429 rate_limit_error` at 2026-07-11 11:53 KST; retry pending |
+| `QP-RISK-RES-V1-audit` | Claude Code `claude-fable-5` | GPT-5 Codex lead | `QP-RISK-RES-V1-impl` | read-only over impl branch | audit report only (no code) | review | Adversarial review of atomicity, conservative release, fencing, gross exposure, and migration; blocks integration on any P0/P1. | Historical: `429 rate_limit_error` at 2026-07-11 11:53 KST. Retry succeeded 2026-07-11 KST on `claude-fable-5`: `docs/atomic_risk_reservation_v1_claude_audit.md`; residual P0=0, P1=0 (2×P2, 1×P3 non-blocking); recommendation ACCEPT; `884 passed, 2 skipped`; smoke mock/live=false/blocked; kill CLI `paper_kill_disabled`; `git diff --check` clean |
 
 Owned-path disjointness: the contract task owns only the three docs; the impl task
 owns the runtime paths; the audit task writes no code. No two active tasks share a
@@ -119,6 +119,19 @@ writable path.
   resolved model `claude-fable-5`; request failed with account
   `429 rate_limit_error`. Contract/acceptance authorship remains the substantive
   Claude deliverable; implementation integration waits for audit retry.
+- `2026-07-11 KST` — Claude Code `claude-fable-5` — audit retry succeeded;
+  independent read-only final audit of `5dff17a..58715bd` completed and recorded
+  in `docs/atomic_risk_reservation_v1_claude_audit.md`. Verified one-transaction
+  reserve+prepare with fault-injected rollback both ways, exact integer
+  admission, two-connection concurrency, capacity-evidence binding, conservative
+  `outcome_unknown`/partial hold, same-transaction terminal release, takeover
+  re-fencing, v9→v10 backfill/rollback, kill blocking, and durable sell
+  guardrail projection. Residual P0=0, P1=0; two P2 (fail-closed sell-backfill
+  error type; conservative non-policy-scoped guardrail projection) and one P3
+  reported as non-blocking follow-ups. Recommendation: ACCEPT. Evidence:
+  `884 passed, 2 skipped`; smoke `broker=mock`/`live_trading_enabled=false`/
+  operator blocked; kill CLI `paper_kill_disabled`; `git diff --check` clean;
+  no network or authority change.
 
 ## Handoff record
 
@@ -162,6 +175,35 @@ known_limits: real KIS calls remain manual; Claude final audit returned account 
 integration_requests:
   - retry Claude read-only audit after account reset
   - preserve reservation aggregate identity for QP-EXEC-EVENTS-V1
+```
+
+```text
+task_id: QP-RISK-RES-V1-audit
+agent_and_model: Claude Code / claude-fable-5 (CLI alias fable)
+commit: audit performed read-only at 58715bd; report committed on
+  claude/qp-risk-reservation-v1-audit
+owned_paths:
+  - docs/atomic_risk_reservation_v1_claude_audit.md
+  - docs/atomic_risk_reservation_v1_workboard.md (Claude-audit fields only)
+acceptance_met: independent adversarial audit complete; residual P0=0, P1=0;
+  recommendation ACCEPT for Gate 1 development readiness (2×P2 + 1×P3
+  non-blocking follow-ups reported in the audit document)
+exact_checks: pytest JUnit tests=886 failures=0 errors=0 skipped=2
+  (884 passed, 2 skipped); smoke broker=mock, live_trading_enabled=false,
+  operator.status=blocked, operator.fallback=level5_flag_disabled; kill CLI
+  {"status":"blocked","reason_code":"paper_kill_disabled"}; git diff --check
+  clean; QP-RES-A1 reproduced offline in a temp-directory script
+known_limits: real KIS TR semantics (VTTC0084R, buying-power fields, session
+  calendar) remain manual Gate P evidence; offline concurrency evidence uses
+  two SQLite connections and fault injection, not multi-process crash timing
+integration_requests:
+  - fix QP-RES-A1 (sell-backfill reserve clamp/re-raise as
+    PaperStateMigrationRequired) and QP-RES-A2 (policy-scope or document the
+    guardrail reservation projection) as non-blocking follow-ups
+  - lead re-runs backend+smoke on the clean integration commit and fills the
+    Gate 1 acceptance ledger with verbatim evidence
+  - preserve reservation aggregate identity before QP-EXEC-EVENTS-V1
+  - lead appends the scorecard evidence row for this audit at mission close
 ```
 
 ## Mission retrospective

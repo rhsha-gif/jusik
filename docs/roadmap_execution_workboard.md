@@ -23,10 +23,10 @@
 
 ## Counterpart plan review
 
-- Reviewer/model: Codex sub-agent (same runtime; cross-vendor reviewer unavailable in this harness)
-- Review status: `in_progress`
-- Decomposition findings: `pending`
-- Required substantive counterpart role: independently author the roadmap acceptance matrix and audit the Mission 0/1 gate boundaries from repository evidence.
+- Reviewer/model: Claude Code Opus alias (exact resolved ID not exposed), with `claude-fable-5` finalization
+- Review status: `completed and integrated`; Codex review corrected gross-exposure scope, integer arithmetic, and atomic store ownership before implementation
+- Decomposition findings: existing KIS dispatch journal must be extended rather than duplicated; reserve+prepare and terminal dispatch+release are paired SQLite transactions; schema v10 backfills every open v9 dispatch conservatively
+- Required substantive counterpart role: delivered the roadmap acceptance matrix, binding risk-reservation contract, and Mission 1 workboard in commit `215a4b9`.
 
 ## Routing assessment
 
@@ -42,9 +42,9 @@ Score: `domain*0.30 + tools*0.25 + track*0.25 + continuity*0.10 + coordination*0
 
 | Task ID | Owner/model | Reviewer/model | Depends on | Worktree/branch | Owned paths | Status | Acceptance | Evidence/commit |
 |---|---|---|---|---|---|---|---|---|
-| `QP-RM-00` | GPT-5 Codex lead | counterpart | none | `주식트레이더-roadmap-baseline` / `codex/qp-roadmap-baseline-v9` | baseline integration, this workboard, baseline report | review | Kill v1 is fast-forwarded from clean main, full backend and smoke pass, user dirty tree unchanged. | `216ff22`; `819 passed, 2 skipped`; smoke mock/live=false; CLI disabled |
-| `QP-RM-00A` | Codex sub-agent | GPT-5 Codex lead | `QP-RM-00` baseline | separate sibling worktree / `codex/qp-roadmap-acceptance-audit` | `docs/roadmap_acceptance_matrix.md` | proposed | Repository-grounded gate dependencies, invariants, and exact acceptance evidence are decision-complete. | pending |
-| `QP-RISK-RES-V1` | GPT-5 Codex lead | independent auditor | `QP-RM-00`, `QP-RM-00A` | new sibling worktree / `codex/qp-risk-reservation-v1-core` | risk reservation contract/model/store/integration/tests/report | proposed | Schema v10 atomic cash/sell-quantity/gross-exposure reservation passes concurrency, crash, migration, full-suite, and smoke gates. | pending |
+| `QP-RM-00` | GPT-5 Codex lead | Claude counterpart | none | `주식트레이더-roadmap-baseline` / `codex/qp-roadmap-baseline-v9` | baseline integration, this workboard, baseline report | done | Kill v1 is fast-forwarded from clean main, full backend and smoke pass, user dirty tree unchanged. | `216ff22`; `819 passed, 2 skipped`; smoke mock/live=false; CLI disabled |
+| `QP-RM-00A` | Claude Code Opus alias + `claude-fable-5` | GPT-5 Codex lead | `QP-RM-00` baseline | sibling worktree / `claude/qp-roadmap-contracts` | acceptance matrix and reservation contract/workboard | integrated | Repository-grounded gate dependencies, invariants, and exact acceptance evidence are decision-complete after Codex correction. | Claude `215a4b9`; integrated `36d9a8a`; Codex review follow-up pending |
+| `QP-RISK-RES-V1` | GPT-5 Codex lead | Claude Code independent audit | `QP-RM-00`, `QP-RM-00A` | new sibling worktree / `codex/qp-risk-reservation-v1-core` | risk reservation model/store/integration/tests/report | ready | Schema v10 atomic cash/sell-quantity/gross-exposure reservation passes concurrency, crash, migration, full-suite, and smoke gates. | contract integrated; implementation pending |
 | `QP-EXEC-EVENTS-V1` | best-fit routed per scorecard | independent auditor | `QP-RISK-RES-V1` contract stability | separate worktree | canonical events/reducer/shadow parity | proposed | Replay is deterministic; duplicates/out-of-order events cannot corrupt projections. | pending |
 | `QP-KERNEL-V2` | best-fit routed per scorecard | independent auditor | reservation + events | separate worktree | shadow then gated cutover | proposed | Level 3/4/5 use one kernel, no shadow side effects, and no dual broker POST path. | pending |
 | `QP-LEDGER-RUNTIME` | best-fit routed per scorecard | independent auditor | kernel cutover | separate missions/worktrees | ledger, reconciliation, continuous runtime | proposed | Projection replay, broker parity, continuous protection, and paper-readiness gates pass. | pending |
@@ -63,6 +63,8 @@ Score: `domain*0.30 + tools*0.25 + track*0.25 + continuity*0.10 + coordination*0
 
 - `2026-07-11 KST` — GPT-5 Codex lead — created clean sibling worktree from `main` and fast-forwarded verified kill v1 through `216ff22`; original dirty worktree untouched.
 - `2026-07-11 KST` — GPT-5 Codex lead — baseline verification passed: backend `819 passed, 2 skipped`; smoke `broker=mock`, `live=false`, Level 5 blocked; kill CLI default `paper_kill_disabled`.
+- `2026-07-11 KST` — Claude Code — delivered acceptance matrix, schema v10 reservation contract, and Mission 1 workboard as `215a4b9`; no runtime or network changes.
+- `2026-07-11 KST` — GPT-5 Codex lead — integrated Claude artifact as `36d9a8a`; review found a P1 omission/atomicity issue (gross exposure missing, float persistence, release assigned to in-memory applier) and corrected the contract before implementation. Claude follow-up was unavailable due session limit until 15:40 KST; deviation recorded.
 
 ## Handoff record
 

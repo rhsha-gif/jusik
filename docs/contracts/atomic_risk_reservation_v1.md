@@ -1,7 +1,7 @@
 # Atomic Risk Reservation v1 Contract (schema v10)
 
 Decision-complete contract for `QP-RISK-RES-V1`. It binds a durable, atomic
-capacity reservation that closes the gap between the in-memory
+cash, sell-quantity, and gross-exposure reservation that closes the gap between the in-memory
 `GuardrailState.reserved_sell_quantities` (`core/schemas.py:504`) and the durable
 `PaperOrderDispatch` journal (`operator/position_ledger.py:460`). `MUST` and
 `MUST NOT` are safety requirements.
@@ -70,14 +70,17 @@ opaque `sha256:` account fingerprint.
 | `reservation_id` | `str` default `new_id("presv")` | Surrogate identity. |
 | `order_plan_id` | `str` | 1:1 with the prepared `PaperOrderDispatch`. |
 | `idempotency_key` | `str` | Equals the dispatch/order-plan idempotency key. |
-| `kind` | `Literal["cash_buy","sell_quantity"]` | Reservation dimension. |
+| `kind` | `Literal["cash_buy","sell_quantity"]` | Primary capacity dimension. |
 | `symbol` | `str` `^[A-Z0-9]{6}$` | KRX six-digit symbol. |
 | `side` | `Literal["buy","sell"]` | Must agree with `kind`. |
-| `reserved_cash` | `float \| None` `ge=0` | KRW held; set iff `kind=cash_buy`. |
-| `reserved_quantity` | `float \| None` `gt=0` | Whole shares held; set iff `kind=sell_quantity`. |
-| `broker_orderable_cash_basis` | `float \| None` `ge=0` | The `broker_cash` evidence the buy was admitted against. |
-| `broker_orderable_quantity_basis` | `float \| None` `ge=0` | The `no_receivable_buy_quantity` basis for buys. |
-| `snapshot_orderable_quantity_basis` | `float \| None` `ge=0` | The snapshot orderable qty basis for sells. |
+| `reserved_cash_krw` | `int \| None` `ge=0` | KRW held; set iff `kind=cash_buy`. |
+| `reserved_sell_quantity` | `int \| None` `gt=0` | Whole shares held; set iff `kind=sell_quantity`. |
+| `reserved_gross_exposure_krw` | `int` `ge=0` | Incremental long gross held; equals buy notional for buys and zero for sells. |
+| `broker_orderable_cash_basis_krw` | `int \| None` `ge=0` | Floored no-receivable broker cash after the cash reserve; set for buys. |
+| `broker_orderable_buy_quantity_basis` | `int \| None` `ge=0` | The integer `no_receivable_buy_quantity` basis for buys. |
+| `snapshot_orderable_quantity_basis` | `int \| None` `ge=0` | The whole-share snapshot orderable basis for sells. |
+| `snapshot_gross_exposure_basis_krw` | `int` `ge=0` | Conservatively rounded-up `max(0, snapshot_equity - snapshot_cash)`. |
+| `gross_exposure_limit_krw` | `int` `ge=0` | Floored `max(0, snapshot_equity - minimum_cash_reserve)`. |
 | `store_id` | `str` | Provenance store. |
 | `session_id` | `str` | Owning session (fencing). |
 | `fencing_token` | `int` `ge=1` | Session fence. |
@@ -93,54 +96,78 @@ opaque `sha256:` account fingerprint.
 Model invariants (`@model_validator(mode="after")`), enforced exactly like
 `PaperOrderDispatch` (`operator/position_ledger.py:636`):
 
-- `kind=cash_buy` ⇒ `side=buy`, `reserved_cash` set (`> 0`),
-  `reserved_quantity is None`, `broker_orderable_cash_basis` and
-  `broker_orderable_quantity_basis` set, `snapshot_orderable_quantity_basis is
-  None`, and `reserved_cash ≤ broker_orderable_cash_basis + 0.01`.
-- `kind=sell_quantity` ⇒ `side=sell`, `reserved_quantity` set and a positive
-  whole number, `reserved_cash is None`, `snapshot_orderable_quantity_basis` set,
-  buy bases `None`, and `reserved_quantity ≤ snapshot_orderable_quantity_basis +
-  1e-6`.
+- `kind=cash_buy` ⇒ `side=buy`, `reserved_cash_krw > 0`,
+  `reserved_sell_quantity is None`, both broker buy bases are set,
+  `snapshot_orderable_quantity_basis is None`, and
+  `reserved_gross_exposure_krw == reserved_cash_krw`.
+- `kind=sell_quantity` ⇒ `side=sell`, `reserved_sell_quantity` is a positive
+  integer, `reserved_cash_krw is None`, `snapshot_orderable_quantity_basis` is
+  set, both broker buy bases are `None`, and
+  `reserved_gross_exposure_krw == 0`.
+- All persisted monetary values are integer KRW and all persisted quantities are
+  integer shares. Existing float/Decimal inputs are accepted only after the
+  current whole-number validators prove exact integrality; no tolerance is used
+  in the SQLite admission arithmetic.
+- `snapshot_gross_exposure_basis_krw <= gross_exposure_limit_krw` is not required
+  for a sell, but a buy is rejected whenever its projected gross exceeds the
+  limit.
 - Terminal `status` ⇒ `released_at` set and `≥ updated_at`-consistent and
   `release_reason` set; non-terminal ⇒ both `None`.
 - All timestamps aware (`_require_aware_timestamp`).
 
 ## 4. Availability arithmetic (exact)
 
-Tolerances match the codebase: cash `abs_tol = 0.01`, quantity `abs_tol = 1e-6`
-(`execution/paper_submission.py:315-318`, `risk/gatekeeper.py:146`).
+The coordinator first proves that order quantity and limit price are positive
+whole numbers. At that boundary it converts them to integer shares and integer
+KRW. Decimal broker cash is floored after subtracting a conservatively rounded-up
+integer minimum-cash reserve. Snapshot gross exposure is rounded up and the gross
+limit is rounded down. SQLite then uses exact integer arithmetic only.
 
-Let `H_cash` = Σ `reserved_cash` over reservations for the store with
-`status="held"` and `kind="cash_buy"`; let `H_qty(sym)` = Σ `reserved_quantity`
-over `status="held"`, `kind="sell_quantity"`, `symbol=sym`.
+Let `H_cash` be the sum of `reserved_cash_krw` over held buy reservations for the
+store; let `H_qty(sym)` be the sum of `reserved_sell_quantity` over held sell
+reservations for the symbol; and let `H_gross` be the sum of
+`reserved_gross_exposure_krw` over all held reservations.
 
 **Buy admission** (computed inside the reservation transaction, §5):
 
 ```
-broker_cash = max(0.0, min(orderable_cash, no_receivable_buy_amount)
-                        - minimum_cash_reserve)          # unchanged basis
-request_cash = quantity * limit_price                    # whole shares * whole KRW
-ADMIT buy iff  request_cash + H_cash <= broker_cash + 0.01
-          AND  quantity <= no_receivable_buy_quantity + 1e-6
+minimum_cash_reserve_krw = ceil(minimum_cash_reserve)
+broker_cash_krw = floor(max(0, min(orderable_cash,
+                                   no_receivable_buy_amount)
+                              - minimum_cash_reserve_krw))
+request_cash_krw = quantity_shares * limit_price_krw
+current_gross_krw = ceil(max(0, snapshot_equity - snapshot_cash))
+gross_limit_krw = floor(max(0, snapshot_equity - minimum_cash_reserve_krw))
+
+ADMIT buy iff request_cash_krw + H_cash <= broker_cash_krw
+          AND quantity_shares <= no_receivable_buy_quantity
+          AND current_gross_krw + H_gross + request_cash_krw
+                <= gross_limit_krw
 ```
 
-The second clause reuses the existing per-order broker-quantity check; the first
-adds the durable cross-order cash sum `H_cash`. Both `quantity` and `limit_price`
-are positive whole numbers (`execution/paper_submission.py:280-284`,
-`_whole_positive_number`).
+The first clause closes concurrent cash oversubscription; the second preserves
+the broker whole-share cap; the third atomically reserves incremental long gross
+exposure. A sell receives no projected-gross credit before it fills, so a paired
+sell cannot admit a risk-increasing buy prematurely.
 
 **Sell admission:**
 
 ```
-orderable = snapshot orderable quantity for symbol      # existing basis
-ADMIT sell iff  quantity + H_qty(symbol) <= orderable + 1e-6
+orderable_shares = integer snapshot orderable quantity for symbol
+ADMIT sell iff quantity_shares + H_qty(symbol) <= orderable_shares
 ```
 
 This is the durable equivalent of the batch gate's aggregate check
 (`risk/batch.py:309-313`) and the gatekeeper's `available = max(0, orderable −
 reserved)` (`risk/gatekeeper.py:144-146`). On admission a `sell_quantity`
-reservation for `quantity` is created; the risk gate MUST read `H_qty` from these
-durable reservations rather than an in-memory dict when a paper store is present.
+reservation for `quantity_shares` is created with zero incremental gross. The
+risk gate MUST read `H_qty` from these durable reservations rather than an
+in-memory dict when a paper store is present.
+
+All held reservations are subtracted even when a fresh broker query may already
+reflect a working managed order. This can under-utilize capacity, but it cannot
+over-allocate it; v1 deliberately chooses conservative double counting until
+reconciliation proves a definitive terminal.
 
 Any failed admission MUST fail closed (raise, no reservation, no dispatch) and
 MUST NOT partially reserve.
@@ -157,7 +184,7 @@ Inside the one transaction, in order:
 1. Load and require the exact active session (existing
    `_require_exact_active_session`, `db/sqlite_repositories.py:1395`).
 2. Verify dispatch↔session provenance and fencing (existing lines 1399-1407).
-3. Recompute `H_cash` / `H_qty(symbol)` from `status="held"` reservation rows
+3. Recompute `H_cash`, `H_qty(symbol)`, and `H_gross` from `status="held"` reservation rows
    (`SELECT ... WHERE store_id=? AND status='held'`).
 4. Evaluate §4 admission. If it fails, raise `PaperRiskReservationRejected`
    (subclass of the existing `PaperStateConflictError` family) — the transaction
@@ -197,6 +224,12 @@ transaction (`... WHERE reservation_id=? AND status=? AND revision=?`, then asse
 (`db/sqlite_repositories.py:1691-1712`, the `revision != existing.revision + 1`
 guard) and `_write_paper_cancel_request` (`:2310`, `:2329-2330`).
 
+`PaperStateStore.update_paper_order_dispatch` owns the paired lifecycle update:
+whenever it writes a definitive terminal dispatch, it validates and releases the
+paired held reservation in that same `BEGIN IMMEDIATE` transaction before commit.
+Callers such as submission and broker reconciliation request a dispatch update;
+they never perform a second, separately committed reservation release.
+
 ## 6. Conservative double-count behavior (the core safety rule)
 
 A reservation MUST be released **only** on definitive terminal dispatch evidence.
@@ -230,14 +263,13 @@ still working and could still consume the remaining reserved cash/quantity. This
 matches "A row with positive remaining quantity is unresolved regardless of cancel
 acknowledgment" (`kis_paper_kill_contract.md`).
 
-Release is performed in the **same** transaction that writes the terminalizing
-dispatch update, so capacity is freed atomically with the terminal evidence and a
-crash cannot free capacity without a durable terminal. Concretely, the release CAS
-is added to the existing terminalizing methods:
-`_terminal_pre_dispatch`/`_definitive_rejection`
-(`execution/paper_submission.py:583-643`) and the reconciliation applier
-(`execution/paper_reconciliation_apply.py`) that moves a dispatch to
-`filled`/`cancelled`.
+Release is performed by `PaperStateStore.update_paper_order_dispatch` in the
+**same** transaction that writes the terminalizing durable dispatch, so a crash
+cannot free capacity without a durable terminal. Coordinator helpers such as
+`_terminal_pre_dispatch`/`_definitive_rejection` and broker reconciliation feed
+that store method. `PaperReconciliationApplier` only projects already durable
+evidence into in-memory repositories and MUST NOT own or separately commit a
+reservation release.
 
 ## 7. Idempotency, provenance, revision, fencing
 
@@ -300,14 +332,25 @@ migration branch (`db/sqlite_repositories.py:511-536`):
    synthesize exactly one `held` reservation from that dispatch's own durable
    evidence:
    - buy dispatch ⇒ `kind=cash_buy`,
-     `reserved_cash = quantity*limit_price`,
-     `broker_orderable_cash_basis = broker_orderable_cash`,
-     `broker_orderable_quantity_basis = broker_orderable_buy_quantity`
+     integer `reserved_cash_krw = quantity*limit_price`,
+     `reserved_gross_exposure_krw = reserved_cash_krw`,
+     `broker_orderable_cash_basis_krw = floor(broker_orderable_cash)`, and
+     integer `broker_orderable_buy_quantity_basis = broker_orderable_buy_quantity`
      (`operator/position_ledger.py:496-505`).
    - sell dispatch ⇒ `kind=sell_quantity`,
-     `reserved_quantity = quantity`,
+     integer `reserved_sell_quantity = quantity`,
+     `reserved_gross_exposure_krw = 0`, and integer
      `snapshot_orderable_quantity_basis = snapshot_symbol_orderable_quantity`
      (`operator/position_ledger.py:493`).
+   - all rows set `snapshot_gross_exposure_basis_krw` to rounded-up
+     `max(0, snapshot_equity-snapshot_cash)`; because legacy dispatches do not
+     persist their original minimum-cash reserve, the backfilled audit limit is
+     set to the smallest non-contradictory value: current gross plus the row's
+     reserved gross. Future admission always uses the fresh snapshot and current
+     minimum-cash reserve from Section 4, never this legacy audit value.
+   If a non-terminal legacy dispatch lacks required whole-number or buy-capacity
+   evidence, migration MUST raise `PaperStateMigrationRequired` and leave schema
+   metadata at v9; it MUST NOT silently create a weaker reservation.
    Terminal dispatches (`filled`/`rejected`/`cancelled`/`expired_pre_dispatch`/
    `failed_pre_dispatch`) get **no** reservation row.
 4. The migration MUST preserve all existing v9 rows unchanged (dispatch, fill,
@@ -318,10 +361,11 @@ migration branch (`db/sqlite_repositories.py:511-536`):
 5. A database created by schema > 10 MUST still raise
    `PaperStateMigrationRequired` (`db/sqlite_repositories.py:213-216`).
 
-Backfill correctness note: because it is derived from each dispatch's own admitted
-evidence, the reconstructed `H_cash`/`H_qty` never exceeds the capacity those
-dispatches were originally admitted against, so post-migration admission stays
-conservative.
+Backfill correctness note: every open legacy dispatch contributes its full
+original notional or sell quantity. The reconstructed `H_cash`/`H_qty`/`H_gross`
+therefore cannot understate managed outstanding work; even if a broker query
+already reflects some orders, post-migration admission remains conservatively
+under-utilized rather than over-allocated.
 
 ## 10. Adversarial executable test matrix
 
@@ -336,7 +380,9 @@ POST count. Add under `quantpilot/tests/unit/` alongside
 | `test_reservation_and_dispatch_commit_atomically` | Prepare one buy | One `held` reservation and one `prepared` dispatch; both at `revision=0`. |
 | `test_reservation_rollback_leaves_no_dispatch` | Force admission failure at §5 step 4 | Neither reservation nor dispatch persisted. |
 | `test_concurrent_buys_cannot_exceed_broker_cash` | Two buys whose sum > `broker_cash` | First admits; second fails closed; `H_cash` never exceeds basis. |
+| `test_concurrent_buys_cannot_exceed_gross_limit` | Cash is sufficient but current gross + two buys exceeds `equity-minimum_cash_reserve` | Second fails closed; `H_gross` remains within the exact integer limit. |
 | `test_concurrent_sells_cannot_exceed_orderable` | Two sells summing over orderable qty | Second fails closed; `H_qty(symbol)` bounded by orderable. |
+| `test_reservation_persists_integer_krw_and_shares` | Decimal broker cash and validated whole-number float order boundary | Persisted cash, gross, price-derived notional, and quantity fields are integers with conservative floor/ceil conversion. |
 | `test_outcome_unknown_keeps_reservation_held` | Buy claimed then `outcome_unknown` | Reservation stays `held`; a second same-size buy is refused. |
 | `test_reconciled_fill_releases_reservation` | `outcome_unknown` → daily-order proves filled | Reservation `released_filled`; capacity freed once. |
 | `test_partial_fill_keeps_full_reservation_held` | Partial fill, residual working | Whole reservation stays `held` until terminal. |

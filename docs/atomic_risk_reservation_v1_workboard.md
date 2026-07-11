@@ -23,16 +23,17 @@ gate of the roadmap (`docs/roadmap_execution_workboard.md`, Gate 1 of
 | Received by | Codex (roadmap mission lead) |
 | Mission lead | GPT-5 Codex (desktop) |
 | Lead model/version | GPT-5 Codex (exact point release not exposed by harness) |
-| Goal | Durable, atomic KIS-paper cash + sell-quantity reservation (schema v10) that admits concurrent long-only KRW whole-share limit orders up to — never beyond — evidenced capacity, and survives crash conservatively. |
-| In scope | `PaperRiskReservation` model + table, one-transaction reserve+prepare, conservative release on definitive terminals, idempotency/provenance/revision/fencing, v9→v10 migration/backfill, concurrency/crash/migration tests. |
+| Goal | Durable, atomic KIS-paper cash + sell-quantity + incremental long-gross reservation (schema v10) that admits concurrent long-only KRW whole-share limit orders up to — never beyond — evidenced capacity, and survives crash conservatively. |
+| In scope | Integer-KRW/whole-share `PaperRiskReservation` model + table, one-transaction reserve+prepare, conservative release on definitive terminals, idempotency/provenance/revision/fencing, v9→v10 migration/backfill, concurrency/crash/migration tests. |
 | Out of scope | Live trading, market orders, margin/short/derivatives, multi-currency, position flatten/cancel-all, Postgres/Kafka, any second broker POST path. |
 | Safety constraints | `LIVE_TRADING_ENABLED=false`, `GUARDED_AUTOPILOT_ENABLED=false`, `FULLY_AUTOMATED_OPERATOR_ENABLED=false`, `MARKET_ORDERS_ENABLED=false`, `BROKER_MODE=mock`; fake-client automatic tests only; no ambiguous-outcome capacity release; `DurablePaperSubmissionCoordinator` stays the sole POST authority. |
 | Completion criteria | `docs/contracts/atomic_risk_reservation_v1.md` §10 tests present and green within `python -m pytest quantpilot/tests`; `python -m quantpilot.jobs.run_smoke` prints `broker=mock`/`live_trading_enabled=false`/operator blocked; migration preserves v9 state; independent audit reports zero P0/P1; `git diff --check` clean. |
 
 ## Counterpart plan review
 
-- Reviewer/model: Claude Code (`claude-opus-4-8`, this session) authored the
-  binding contract and acceptance matrix; independent audit reviewer to be an
+- Reviewer/model: Claude Code using the Opus alias (exact resolved model not
+  exposed) drafted the binding contract and acceptance matrix; `claude-fable-5`
+  finalized the committed artifact. Independent audit reviewer will be an
   instance distinct from the implementer (implementer MUST NOT self-approve this
   safety-critical change — protocol §6).
 - Review status: `contract-complete` (design bound); implementation review
@@ -56,9 +57,9 @@ gate of the roadmap (`docs/roadmap_execution_workboard.md`, Gate 1 of
 | Task | Candidate | Domain | Tools | Track | Continuity | Coordination | Total | Decision rationale |
 |---|---|---:|---:|---:|---:|---:|---:|---|
 | `QP-RISK-RES-V1` impl | Codex GPT-5 lead | 5 | 5 | 5 | 5 | 4 | 4.90 | Stateful SQLite/broker integration is `codex-gpt5x`'s best-sampled class (scorecard §6, n=5, ratings 4–5). |
-| `QP-RISK-RES-V1` impl | Claude `claude-opus-4-8` | 4 | 4 | 3 | 3 | 3 | 3.55 | Strong on contracts/audit; less-sampled on this store-integration class; owns the binding design instead. |
-| `QP-RISK-RES-V1-contract` | Claude `claude-opus-4-8` | 5 | 5 | 4 | 5 | 5 | 4.85 | Long-form safety contract + acceptance authoring is the Claude priority class; done on this branch. |
-| `QP-RISK-RES-V1-audit` | Claude `claude-opus-4-8` | 5 | 5 | 4 | 4 | 5 | 4.75 | Independent adversarial audit is a Claude priority class and must be a non-implementer (protocol §6). |
+| `QP-RISK-RES-V1` impl | Claude Code Opus alias | 4 | 4 | 3 | 3 | 3 | 3.55 | Strong on contracts/audit; less-sampled on this store-integration class; owns the binding design instead. |
+| `QP-RISK-RES-V1-contract` | Claude Code Opus alias + `claude-fable-5` finalizer | 5 | 5 | 4 | 5 | 5 | 4.85 | Long-form safety contract + acceptance authoring is the Claude priority class; delivered and Codex-reviewed. |
+| `QP-RISK-RES-V1-audit` | Claude Code (exact model recorded at audit) | 5 | 5 | 4 | 4 | 5 | 4.75 | Independent adversarial audit is a Claude priority class and must be a non-implementer (protocol §6). |
 
 ## Work queue
 
@@ -66,9 +67,9 @@ gate of the roadmap (`docs/roadmap_execution_workboard.md`, Gate 1 of
 
 | Task ID | Owner/model | Reviewer/model | Depends on | Worktree/branch | Owned paths | Status | Acceptance | Evidence/commit |
 |---|---|---|---|---|---|---|---|---|
-| `QP-RISK-RES-V1-contract` | Claude `claude-opus-4-8` | GPT-5 Codex lead | `QP-RM-00`, `QP-RM-00A` | `주식트레이더-claude-roadmap-contracts` / `claude/qp-roadmap-contracts` | `docs/roadmap_acceptance_matrix.md`, `docs/contracts/atomic_risk_reservation_v1.md`, `docs/atomic_risk_reservation_v1_workboard.md` | review | Decision-complete v10 model/arithmetic/transaction/migration/tests; internally consistent with current code; `git diff --check` clean. | this branch commit (see handoff) |
-| `QP-RISK-RES-V1-impl` | GPT-5 Codex lead | Claude `claude-opus-4-8` (independent audit) | `QP-RISK-RES-V1-contract` | new sibling worktree / `codex/qp-risk-reservation-v1-core` | `operator/position_ledger.py` (reservation model), `db/sqlite_repositories.py` (table/migration/CAS methods), `execution/paper_submission.py` + `execution/paper_reconciliation_apply.py` (reserve/release hooks), `risk/*` (durable `H_qty` read), reservation tests | proposed | Contract §10 tests green in full suite; smoke safe-default; migration preserves v9; zero P0/P1. | pending |
-| `QP-RISK-RES-V1-audit` | Claude `claude-opus-4-8` | GPT-5 Codex lead | `QP-RISK-RES-V1-impl` | read-only over impl branch | audit report only (no code) | proposed | Adversarial review of atomicity, conservative release, fencing, and migration; blocks merge on any P0/P1. | pending |
+| `QP-RISK-RES-V1-contract` | Claude Code Opus alias + `claude-fable-5` finalizer | GPT-5 Codex lead | `QP-RM-00`, `QP-RM-00A` | `주식트레이더-claude-roadmap-contracts` / `claude/qp-roadmap-contracts` | `docs/roadmap_acceptance_matrix.md`, `docs/contracts/atomic_risk_reservation_v1.md`, `docs/atomic_risk_reservation_v1_workboard.md` | integrated | Decision-complete v10 model/arithmetic/transaction/migration/tests; Codex review added integer gross reservation and corrected atomic store ownership. | Claude `215a4b9`, integrated `36d9a8a`; Codex review follow-up pending |
+| `QP-RISK-RES-V1-impl` | GPT-5 Codex lead | Claude Code (independent audit) | `QP-RISK-RES-V1-contract` | new sibling worktree / `codex/qp-risk-reservation-v1-core` | `operator/position_ledger.py` (reservation model), `db/sqlite_repositories.py` (table/migration/CAS methods), `execution/paper_submission.py` (reserve boundary), `harness_service.py` (durable guardrail projection), reservation tests | ready | Contract §10 tests green in full suite; smoke safe-default; migration preserves v9; zero P0/P1. | pending |
+| `QP-RISK-RES-V1-audit` | Claude Code (exact model recorded at audit) | GPT-5 Codex lead | `QP-RISK-RES-V1-impl` | read-only over impl branch | audit report only (no code) | proposed | Adversarial review of atomicity, conservative release, fencing, gross exposure, and migration; blocks merge on any P0/P1. | pending |
 
 Owned-path disjointness: the contract task owns only the three docs; the impl task
 owns the runtime paths; the audit task writes no code. No two active tasks share a
@@ -97,7 +98,8 @@ writable path.
 
 ## Checkpoint log
 
-- `2026-07-11 KST` — Claude Code `claude-opus-4-8` — authored `QP-RM-00A` acceptance
+- `2026-07-11 KST` — Claude Code Opus alias (exact resolved ID not exposed),
+  finalized by `claude-fable-5` — authored `QP-RM-00A` acceptance
   matrix, the v10 reservation contract, and this workboard from repository evidence
   (`operator/position_ledger.py`, `db/sqlite_repositories.py`,
   `execution/paper_submission.py`, `risk/gatekeeper.py`, `risk/batch.py`,
@@ -108,8 +110,8 @@ writable path.
 
 ```text
 task_id: QP-RISK-RES-V1-contract
-agent_and_model: Claude Code / claude-opus-4-8
-commit: <filled at commit time on claude/qp-roadmap-contracts>
+agent_and_model: Claude Code / Opus alias draft (exact ID unexposed), claude-fable-5 finalizer
+commit: 215a4b9 on claude/qp-roadmap-contracts; cherry-picked as 36d9a8a
 owned_paths:
   - docs/roadmap_acceptance_matrix.md
   - docs/contracts/atomic_risk_reservation_v1.md
@@ -129,9 +131,9 @@ integration_requests:
 
 | Task ID | Task class | Agent/model | First-pass | P0 | P1 | P2 | Rework cycles | Required checks | Elapsed | Rating |
 |---|---|---|---|---:|---:|---:|---:|---|---|---:|
-| `QP-RISK-RES-V1-contract` | safety contract + acceptance authoring | Claude `claude-opus-4-8` | pending | 0 | 0 | 0 | 0 | `git diff --check` clean; docs-only | pending | pending |
+| `QP-RISK-RES-V1-contract` | safety contract + acceptance authoring | Claude Code Opus alias + `claude-fable-5` | no | 0 | 1 | 0 | 1 | `git diff --check` clean; docs-only | recorded in Claude runs | 2 |
 
-- Routing decision quality: `pending` (recorded at integration).
+- Routing decision quality: correct for independent contract authorship; Codex review found and repaired one P1 scope/atomicity defect before runtime implementation.
 - Capability scorecard update: append one record for the contract/acceptance class
   on completion; preference unchanged pending ≥3 comparable samples (scorecard §7).
 - User-owned changes preserved: original `main` worktree untouched; only the three

@@ -130,7 +130,8 @@ authoritative evidence, and its fake-vs-manual split.
 ### Gate 1 — `QP-RISK-RES-V1` atomic risk reservation (schema v10)
 
 - **Depends on:** Gate 0 baseline and this matrix (`QP-RM-00A`).
-- **Scope:** durable, atomic cash + sell-quantity reservation for KIS paper,
+- **Scope:** durable, atomic cash + sell-quantity + incremental long-gross
+  reservation for KIS paper,
   long-only, KRW, whole-share limit orders. Full contract:
   `docs/contracts/atomic_risk_reservation_v1.md`.
 - **Additional invariants (bound to the contract):**
@@ -140,16 +141,20 @@ authoritative evidence, and its fake-vs-manual split.
   2. Availability is computed **conservatively**: `Σ held reservations` is
      subtracted from broker-evidenced capacity before a new reservation is
      admitted; ties fail closed (contract §4).
-  3. `outcome_unknown` and any post-claim ambiguity keep the reservation `held`;
+  3. KRW and whole-share reservation arithmetic is persisted as integers;
+     current long gross plus held buy gross plus the new buy must not exceed
+     `snapshot_equity - minimum_cash_reserve`. Sells receive no pre-fill gross
+     credit.
+  4. `outcome_unknown` and any post-claim ambiguity keep the reservation `held`;
      reservations are released only on definitive terminal evidence
      (`filled`/`cancelled`/`rejected`/`expired_pre_dispatch`/`failed_pre_dispatch`)
      — mirroring the kill contract's query-only recovery
      (`kis_paper_kill_contract.md` "Crash and replay contract"; contract §6, §8).
-  4. Reservation carries idempotency, provenance (`data_mode=paper_trading`,
+  5. Reservation carries idempotency, provenance (`data_mode=paper_trading`,
      `broker_environment=kis_paper`, opaque account fingerprint), `revision`
      CAS, and `session_id`/`fencing_token` fencing identical in discipline to
      `PaperOrderDispatch` (`operator/position_ledger.py:460-534`; contract §3).
-  5. Migration v9→v10 adds the reservation table empty and backfills a `held`
+  6. Migration v9→v10 adds the reservation table empty and backfills a `held`
      reservation for every open (non-terminal) dispatch from that dispatch's own
      durable evidence; terminal dispatches need none (contract §9).
 - **Authoritative evidence:** §2 backend suite green with new reservation

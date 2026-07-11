@@ -23,21 +23,22 @@
 ## Counterpart plan review
 
 - Reviewer/model: Claude Code, exact model `claude-fable-5` (CLI alias `fable`).
-- Review status: `review_complete_pending_lead_integration` — the initial
-  decomposition review is committed as
+- Review status: `accepted_and_integrated` — the initial decomposition review
+  is committed as
   `docs/canonical_order_events_v1_claude_review.md` plus a corrected contract
   with residual P0=0/P1=0 (nine P1 and three P2 findings resolved, including
-  decisions A-H). Historical `fable`/`sonnet` attempts were rate-limited without
-  an artifact; no runtime implementation starts before the mission lead inspects
-  and integrates this review commit.
+  decisions A-H), and the mission lead integrated and cross-checked it with two
+  read-only audits. Historical `fable`/`sonnet` attempts were rate-limited
+  without an artifact.
 - Requested substantive counterpart artifact: review and correct
   `docs/contracts/canonical_order_events_v1.md`, including aggregate boundaries,
   event identity, migration truthfulness, duplicate/order semantics, and the
   adversarial acceptance matrix.
-- Mission lead acceptance duty: inspect the Claude commit, correct any widening
-  of legacy transitions, run contract consistency checks, then authorize code.
+- Mission lead acceptance duty: completed; no legacy-transition widening was
+  accepted, six P2 precision corrections were added, and QP-EVT-020A is
+  authorized on isolated pure-domain paths.
 
-## Repository-grounded decisions awaiting counterpart review
+## Accepted repository-grounded decisions
 
 1. Gate 2 is a same-transaction shadow journal; schema-v10 rows remain source of
    truth and no cutover occurs.
@@ -59,7 +60,7 @@ Score formula: `domain*0.30 + tools*0.25 + track*0.25 + continuity*0.10 + coordi
 |---|---|---:|---:|---:|---:|---:|---:|---|
 | Repository inventory and first contract draft | GPT-5 Codex lead | 5 | 5 | 5 | 5 | 5 | 5.00 | Owns roadmap integration and schema-v10 context. |
 | Initial decomposition and contract challenge | Claude Code | 5 | 4 | 5 | 4 | 5 | 4.65 | Required independent counterpart; produces a reviewable contract commit, not broker code. |
-| Pure model/reducer | route after Claude review | 5 | 5 | 4 | 4 | 4 | 4.55 | Assignment waits for corrected contract and capability evidence. |
+| Pure model/reducer | Claude Code `claude-fable-5` | 5 | 5 | 4 | 5 | 5 | 4.65 | Authored the accepted decision-complete review and has continuity on the pure contract; receives only new pure-domain paths. |
 | SQLite dual-write/migration | GPT-5 Codex lead | 5 | 5 | 5 | 5 | 4 | 4.90 | Existing store transaction/fencing work has verified continuity. |
 | Independent final audit | separate read-only reviewer | 5 | 5 | 4 | 2 | 4 | 4.35 | Must not own the paths it audits. |
 
@@ -67,10 +68,11 @@ Score formula: `domain*0.30 + tools*0.25 + track*0.25 + continuity*0.10 + coordi
 
 | Task ID | Owner/model | Reviewer/model | Depends on | Worktree/branch | Owned paths | Status | Acceptance | Evidence/commit |
 |---|---|---|---|---|---|---|---|---|
-| `QP-EVT-000` | GPT-5 Codex lead + read-only inventory/test/audit agents | Claude Code | Gate 1 accepted | `주식트레이더-exec-events-v1` / `codex/qp-exec-events-v1-contract` | repository inventory, contract draft, workboard | review_ready | Every mutation path, identifier meaning, and migration risk is grounded in code. | inventory + test design; two corrected re-audits P0/P1=0; Gate 1 merged; draft pending Claude review |
-| `QP-EVT-010` | Claude Code `claude-fable-5` | GPT-5 Codex lead | `QP-EVT-000` | `주식트레이더-claude-exec-events-review` / `claude/qp-exec-events-v1-review` | contract corrections + adversarial acceptance artifact | review | Initial decomposition review is substantive, decision-complete, committed, and contains no runtime/network changes. | corrected contract + review report with residual P0=0/P1=0 (findings R1-R12; decisions A-H closed); commit SHA supplied in final handoff; runtime remains blocked until the lead integrates the review commit |
-| `QP-EVT-020` | routed after review | counterpart reviewer | `QP-EVT-010`, Gate 1 accepted | separate implementation branch | event model, canonical hash, pure reducer, focused tests | proposed | Deterministic replay; strict duplicate/gap/hash/provenance behavior; no side effects. | pending |
-| `QP-EVT-030` | GPT-5 Codex lead | independent auditor | `QP-EVT-020` | implementation worktree | schema v11, append helpers, exhaustive dual-write, migration | proposed | Authoritative row/event batch commits or rolls back together at every mutation site. | pending |
+| `QP-EVT-000` | GPT-5 Codex lead + read-only inventory/test/audit agents | Claude Code | Gate 1 accepted | `주식트레이더-exec-events-v1` / `codex/qp-exec-events-v1-contract` | repository inventory, contract draft, workboard | done | Every mutation path, identifier meaning, and migration risk is grounded in code and incorporated into the accepted contract. | inventory + test design; internal re-audits P0/P1=0; Gate 1 merged; Claude review integrated |
+| `QP-EVT-010` | Claude Code `claude-fable-5` | GPT-5 Codex lead | `QP-EVT-000` | `주식트레이더-claude-exec-events-review` / `claude/qp-exec-events-v1-review` | contract corrections + adversarial acceptance artifact | integrated | Initial decomposition review is substantive, decision-complete, committed, and contains no runtime/network changes. | `80e05d5`; findings R1-R12/decisions A-H closed; lead cross-check P0=0/P1=0; P2 precision corrections integrated |
+| `QP-EVT-020A` | Claude Code `claude-fable-5` | GPT-5 Codex lead | `QP-EVT-010`, Gate 1 accepted | separate Claude implementation worktree | new `transitions.py`, `events.py`, `reducer.py`; new event-model/reducer tests | ready | Deterministic pure replay; strict duplicate/gap/hash/provenance/precedence behavior; no DB or broker imports. | accepted contract `80e05d5` + lead precision corrections |
+| `QP-EVT-020B` | GPT-5 Codex lead | independent read-only reviewer | `QP-EVT-020A` merged | event integration worktree | narrow SQLite transition import/re-export shim + equality regression only | proposed | SQLite and pure transition definitions are identical without concurrent ownership overlap. | pending |
+| `QP-EVT-030` | GPT-5 Codex lead | independent auditor | `QP-EVT-020B` | implementation worktree | schema v11, append helpers, exhaustive dual-write, migration, mutation-origin call sites | proposed | Authoritative row/event batch commits or rolls back together at every mutation site. | pending |
 | `QP-EVT-040` | GPT-5 Codex lead | Claude/internally independent reviewer | `QP-EVT-030` | integration worktree | parity corpus, race/fault/restart tests, report | proposed | Replay equals all authoritative observable fields; no broker side effects; full suite/smoke green. | pending |
 | `QP-EVT-050` | independent read-only auditor | GPT-5 Codex lead | `QP-EVT-040` | no-write audit | complete diff and safety invariants | proposed | P0/P1 zero; no missing dual-write path or widened broker authority. | pending |
 
@@ -79,9 +81,10 @@ Score formula: `domain*0.30 + tools*0.25 + track*0.25 + continuity*0.10 + coordi
 | Path | Owner after routing | Rule |
 |---|---|---|
 | `docs/contracts/canonical_order_events_v1.md` | Claude review branch, then mission lead integration | Counterpart proposes corrections; lead resolves and integrates. |
-| `quantpilot/packages/core/execution/events.py` | `QP-EVT-020` owner | Pure domain only; no DB/client imports. |
-| `quantpilot/packages/core/execution/reducer.py` | `QP-EVT-020` owner | Pure deterministic reducer only. |
-| `quantpilot/packages/db/sqlite_repositories.py` | GPT-5 Codex lead | Schema, migration, and same-transaction append integration. |
+| `quantpilot/packages/core/execution/transitions.py` | `QP-EVT-020A` Claude owner | New pure transition/classifier definitions; no DB/client imports. |
+| `quantpilot/packages/core/execution/events.py` | `QP-EVT-020A` Claude owner | Pure domain only; no DB/client imports. |
+| `quantpilot/packages/core/execution/reducer.py` | `QP-EVT-020A` Claude owner | Pure deterministic reducer only. |
+| `quantpilot/packages/db/sqlite_repositories.py` | GPT-5 Codex lead | 020B owns only transition imports/re-exports after 020A merges; 030 then owns schema/migration/dual-write. Never concurrent with 020A. |
 | execution submission/reconciliation/kill modules | GPT-5 Codex lead only if store API requires a narrow call-site change | Broker authority and no-rePOST behavior cannot change. |
 | event-focused tests/fixtures | split by task with explicit non-overlap | No network or secrets. |
 | original main worktree | user | Never edit, stage, clean, or overwrite. |
@@ -107,14 +110,18 @@ No later gate can be waived because an earlier test count is high.
 - v6-v10 truthful import, deterministic reopen, and migration rollback.
 - Cross-account/provenance/fence rejection.
 - Replay/restart performs zero broker calls and zero authoritative writes.
+- Closed causation chains, mutation-origin/source mapping, store-derived event
+  times, all five generic precedence branches, and the special-transition-first
+  classifier each have executable vectors.
+- Nonzero-revision cancel create, same-status cancel mutation, raw unknown
+  schema/type, canonical preimage hashes, and all idempotent no-write paths fail
+  or return without a partial row/event write.
 
 ## Blockers and authority requests
 
 - Gate 1 is accepted and no longer blocks Gate 2.
-- Claude's Gate 2 initial contract/decomposition review artifact is now
-  committed on `claude/qp-exec-events-v1-review`; mission-lead inspection and
-  integration of that commit is the remaining implementation gate before
-  QP-EVT-020 starts.
+- The contract/decomposition review and mission-lead precision corrections are
+  accepted; QP-EVT-020A may start in its isolated pure-domain worktree.
 - Real KIS paper validation remains manual and is not needed for this fake-only
   development gate.
 - No request for live, secrets, network access, or user-owned dirty-tree changes
@@ -156,14 +163,24 @@ No later gate can be waived because an earlier test count is high.
   exactly the three owned docs; no runtime, network, or safety-flag change.
   Mission-lead inspection/integration remains the implementation gate.
   Document lease released (free).
+- `2026-07-11 KST` — GPT-5 Codex mission lead fast-forwarded `80e05d5`,
+  verified its exact three-document scope, and ran two independent read-only
+  cross-checks. Residual P0=0/P1=0. The lead corrected six nonblocking P2
+  precision points: existing `broker_execution` evidence is supported in v1;
+  special transitions precede generic classification; ordinary reopen does not
+  retry imports; canonical hash preimages are typed JSON; raw unknown
+  schema/type maps before strict parsing; explicit causation/origin/time/
+  precedence/no-write tests are required. QP-EVT-020 was split into 020A pure
+  new paths and 020B lead-owned SQLite re-export integration to eliminate the
+  ownership overlap. Runtime remains unchanged at this checkpoint.
 
 ## Handoff record
 
 ```text
 task_id: QP-EVT-010
 agent_and_model: Claude Code / claude-fable-5 (CLI alias fable)
-commit: commit SHA supplied in final handoff (single docs-only commit on
-  claude/qp-exec-events-v1-review from reviewed HEAD e08ef98)
+commit: 80e05d5da5d36e545d8dabb2f196956651985022 on
+  claude/qp-exec-events-v1-review, fast-forwarded and lead-reviewed
 owned_paths:
   - docs/contracts/canonical_order_events_v1.md
   - docs/canonical_order_events_v1_claude_review.md
@@ -173,17 +190,19 @@ acceptance_met: yes — decision-complete corrected contract (decisions A-H
 exact_checks: git diff --check clean; git diff --name-only limited to the three
   owned docs; docs-only task, no backend/smoke run per acceptance-matrix
   documentation-gate rule (lead re-runs on the clean integration commit)
-known_limits: real KIS TR semantics remain Gate P manual evidence; the
-  venue_execution identity kind has no current producer and activates only via
-  a future event-schema revision
+known_limits: real KIS TR semantics remain Gate P manual evidence; existing
+  schema-v10 broker_execution evidence maps to v1 venue_execution, while the
+  current KIS production adapter has no known producer of that evidence shape
 integration_requests:
-  - lead inspects/integrates this commit before QP-EVT-020 starts
+  - QP-EVT-020A may start on new pure-domain paths only
   - land mutation_origin store-signature and call-site changes in one commit
-  - sequence the 020 transition-map relocation slice before 030 begins
+  - merge 020A before lead-owned 020B transition re-export shim; start 030 only
+    after 020B
 ```
 
 ## Mission retrospective
 
 | Task ID | Task class | Agent/model | First-pass | P0 | P1 | P2 | Rework cycles | Required checks | Elapsed | Rating |
 |---|---|---|---|---:|---:|---:|---:|---|---|---:|
-| `QP-EVT-000` | inventory/contract | GPT-5 Codex + read-only subagents | pending Claude review | 0 | 0 | pending | 2 contract correction cycles | docs/diff check | pending | pending |
+| `QP-EVT-000` | inventory/contract | GPT-5 Codex + read-only subagents | rework-required | 0 | 9 | 3 | 3 contract correction cycles | docs allowlist/diff checks + Claude/lead cross-check | completed 2026-07-11 KST | 2 |
+| `QP-EVT-010` | independent decomposition/contract review | Claude Code `claude-fable-5` | yes | 0 | 0 | 0 | 0 | three-doc allowlist + `git diff --check`; lead cross-check P0/P1 zero | ~18.5m | 5 |

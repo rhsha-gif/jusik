@@ -202,9 +202,35 @@ No blocker. Requests:
    against an origin-less mutator.
 3. Sequence the QP-EVT-020 transition-map relocation slice as the first merged
    artifact of 020 so 030 never overlaps `sqlite_repositories.py` concurrently.
-4. If real KIS evidence ever exposes a per-execution reference or timestamp,
-   treat it as a new event-schema revision (`venue_execution` activation), not
-   a reinterpretation of `kisagg-*` observations.
+4. Existing schema-v10 `PaperDispatchFillEvidence` rows with
+   `time_basis="broker_execution"` already map to v1 `venue_execution` keys and
+   must be imported/replayed now. If the current KIS production adapter later
+   begins producing a new per-execution reference or timestamp shape, treat that
+   new shape as an event-schema revision rather than reinterpreting `kisagg-*`.
 5. Claude-owned capability-scorecard evidence for this task class is recorded
    separately at mission close (the scorecard is lead/owner-managed; not
    modified here).
+
+## 10. Mission-lead integration review
+
+The mission lead inspected commit `80e05d5` with two independent read-only
+cross-checks. Residual P0=0/P1=0; QP-EVT-020 is authorized after the following
+nonblocking P2 clarifications were incorporated into the binding contract and
+workboard:
+
+- special create/claim/fence shapes are classified before generic dispatch
+  precedence;
+- ordinary schema-v11 reopen does not retry migration imports, while exact
+  duplicate handling remains a reducer/fault-retry defense;
+- import-ID and identity-scope preimages use typed canonical JSON with pinned
+  digest vectors, never delimiter concatenation;
+- unknown schema/type at the raw decode boundary maps to
+  `PaperEventSchemaUnsupported` before strict typed parsing;
+- existing `broker_execution` evidence is a v1 `venue_execution` import/replay
+  case even though the current KIS production adapter has no known producer;
+- causation, origin/source, event-time, cancel-tightening, no-write, and all five
+  generic precedence branches receive explicit executable tests.
+
+These are contract/test precision corrections only. They add no runtime,
+broker, network, or authority change and do not alter the review's ACCEPT
+conclusion.

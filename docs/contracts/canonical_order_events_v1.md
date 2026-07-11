@@ -179,7 +179,7 @@ types or envelopes; the specialized store methods carry an implicit origin.
 | implicit: `takeover_prepared_paper_order_dispatch` | `expire_stale_prepared_dispatches`, `terminalize_prepared_dispatches_for_kill`, submission replay takeover | `local_session_takeover` | fence rebind only (dispatch + paired reservation) |
 | implicit: `recover_interrupted_dispatches` | session recovery | `process_recovery` | `dispatch_claimed -> outcome_unknown` with `last_error_code="process_interrupted"` |
 | `broker_post_result` | `_record_acceptance`; `_definitive_rejection` with `broker_business_rejected`; `_outcome_unknown` for POST-attempt ambiguity (`broker_response_ambiguous`, `broker_exception_after_claim`, `broker_acceptance_mismatch`, `broker_business_date_unverified`, `acceptance_persistence_failed`) | `broker_acceptance` | `dispatch_claimed -> accepted \| rejected \| outcome_unknown` |
-| `local_submission_guard` | `_terminal_pre_dispatch` (expiry, kill terminalization of prepared rows, pre/post-claim session-closed failures); `_definitive_rejection` with a local guard code (`paper_kill_engaged_after_claim`, `paper_session_closed_after_claim`, `local_configuration_error`) | `local_submission_result` | `prepared -> expired_pre_dispatch \| failed_pre_dispatch`; `dispatch_claimed -> rejected` with a local guard error code |
+| `local_submission_guard` | `_terminal_pre_dispatch` (expiry, kill terminalization of prepared rows, pre-claim session-closed failure); `_definitive_rejection` for post-claim local guards (`paper_kill_engaged_after_claim`, `paper_session_closed_after_claim`, `local_configuration_error`) | `local_submission_result` | `prepared -> expired_pre_dispatch \| failed_pre_dispatch`; `dispatch_claimed -> rejected` with a local guard error code |
 | `broker_reconciliation` | `reconcile_dispatch` and `_blocked` (`paper_reconciliation.py`) | `broker_reconciliation` | the Section 6 reconciliation surface, including `-> blocked` writes |
 | `kill_cancel_journal` | every cancel write in `paper_kill.py` (`create`/`claim`/`_persist_cancel_state`/`_synchronize_cancel_requests`) | `kill_cancel` | cancel-stream transitions only |
 | implicit: migration importer | `_initialize_schema` | `schema_migration` | version-1 import anchors only |
@@ -246,9 +246,13 @@ authority for the shadow stream. `DispatchReconciled` is used only when a legal
 same-status update advances reconciliation from pending/blocked to reconciled;
 if lifecycle status also advances, the matching lifecycle event is used instead.
 
-Event-type selection is a total deterministic function of the validated
-before/after pair. When one authoritative revision changes lifecycle status,
-fill evidence, and/or reconciliation status together (as
+Event-type selection first recognizes the Section 6 special create, claim, and
+fence-rebind shapes (`OrderPrepared`, `DispatchClaimed`,
+`DispatchFenceRebound`, and the paired reservation/cancel special events).
+Those shapes MUST NOT fall through to generic enrichment classification. For a
+generic `update_paper_order_dispatch` before/after pair, selection is then a
+total deterministic function. When one authoritative revision changes
+lifecycle status, fill evidence, and/or reconciliation status together (as
 `reconcile_dispatch` legally does in a single revision), exactly one event type
 is chosen by this precedence:
 
@@ -391,6 +395,11 @@ where one authoritative revision adds multiple fill-evidence rows.
   overwrite, even when its payload matches. Later full after-state snapshots do
   not repeat old keys.
 
+Every venue/cumulative scope-hash preimage is a typed object containing the
+listed named fields and is encoded with this section's sorted-key, compact,
+UTF-8 canonical JSON rule before hashing. Delimiter-concatenated strings are
+forbidden. Tests pin exact preimage objects, canonical bytes, and digest vectors.
+
 Envelope/payload binding is mandatory and is rechecked by both reducer and store:
 
 - `source_revision == payload.after.revision`.
@@ -494,6 +503,12 @@ Any failure raised inside the migration importer surfaces as
 `PaperStateMigrationRequired`, matching the Gate 1 backfill error contract
 (QP-RES-A1). The reducer never raises a store error type, and the store never
 downgrades a reducer error to a warning or partial apply.
+
+Raw event decoding performs a minimal envelope discriminator check before typed
+Pydantic construction. An unknown `event_schema_version` or `event_type` is
+classified as `PaperEventSchemaUnsupported` even if strict typed parsing would
+otherwise fail first; malformed data for a known schema/type remains
+`PaperEventStreamCorruption`.
 
 The reducer returns a typed `PaperExecutionProjection` for one stream containing
 the after-state, aggregate version, source revision, and identity sets needed for
@@ -599,7 +614,10 @@ duplicate candidates are suppressed before creation. Runtime `event_id`s are
 then store-generated opaque IDs following the repository convention
 (`new_id("pevt")`); the deterministic Section 10 derivation applies only to
 import anchors. The step-1 exact-`event_id` no-op arm below is therefore
-exercised at runtime only by deterministic import IDs on reopen.
+defensive reducer/append semantics, not a normal reopen path: reopening a
+schema-v11 database runs no importer and creates no candidate. Tests exercise
+exact duplicates directly and through fault/retry harnesses without claiming
+that ordinary reopen appends an import event.
 
 For each normal runtime transaction the set of changed authoritative aggregate
 rows and the set of advancing events must be one-to-one. This invariant is
@@ -692,8 +710,11 @@ PaperRiskReservation -> LegacyRiskReservationImported
 PaperCancelRequest    -> LegacyCancelRequestImported
 ```
 
-The deterministic import `event_id` is derived from event schema, store ID,
-aggregate type/ID, source revision, and payload hash. It contains the full
+The deterministic import `event_id` is derived from a typed preimage object with
+the named fields `event_schema_version`, `store_id`, `aggregate_type`,
+`aggregate_id`, `source_revision`, and `payload_hash`, encoded with the Section
+5 sorted-key compact UTF-8 canonical JSON rule before hashing. Positional or
+delimiter-concatenated preimages are forbidden. The event contains the full
 current after-state with `legacy_snapshot=true`. A terminal legacy order may
 truthfully have no reservation aggregate. Each imported order event also inserts
 one normalized identity-key row for every imported fill-evidence item.
@@ -744,6 +765,10 @@ All tests are deterministic, fake-only, and secret-free.
 - Exact duplicate event ID/hash is a no-op; divergent reuse is blocked.
 - Reducer transition surface is a subset of the legacy generic maps plus the
   explicit special store-method allowlist in Section 6.
+- Special create/claim/fence classifiers run before the generic five-step
+  dispatch precedence, whose five branches each have an executable vector.
+- Pure exceptions distinguish conflict, corruption, and unsupported schema/type,
+  including the pre-Pydantic raw-decode boundary.
 - Fill evidence remains canonically ordered, additive, and non-regressing.
 
 ### Store atomicity and concurrency
@@ -769,6 +794,14 @@ All tests are deterministic, fake-only, and secret-free.
   closed and rolls back.
 - The multi-fill dispatch payload carries no aggregate `time_basis`; per-fill
   bases survive replay byte-exactly.
+- Store-derived causation is tested for null import/create roots, paired
+  prepare/takeover/terminal batches, and normal same-stream predecessor chains.
+- All import events in one migration share the single transaction-level
+  `received_at` clock reading; import-ID and identity-scope canonical preimages
+  have pinned digest vectors.
+- Nonzero-revision cancel creation, same-status changed-field cancel writes,
+  and every enumerated idempotent no-write path fail/return without consuming a
+  runtime event ID or advancing a stream.
 
 ### Broker ordering and cancel/fill races
 

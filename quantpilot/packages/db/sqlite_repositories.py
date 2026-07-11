@@ -14,7 +14,7 @@ import json
 from math import isfinite
 from pathlib import Path
 import sqlite3
-from typing import Iterator, Mapping, Sequence
+from typing import Callable, Iterator, Mapping, Sequence
 
 from quantpilot.packages.core.execution.events import (
     PaperCancelRequestEventPayload,
@@ -108,6 +108,12 @@ class _PaperAggregateKey:
 
 @dataclass
 class _PaperEventMutationGuard:
+    load_authoritative: Callable[
+        [_PaperAggregateKey], PaperExecutionAfter | None
+    ] = field(repr=False)
+    before_images: dict[
+        _PaperAggregateKey, PaperExecutionAfter | None
+    ] = field(default_factory=dict)
     changes: dict[_PaperAggregateKey, tuple[PaperExecutionAfter, str]] = field(
         default_factory=dict
     )
@@ -116,16 +122,64 @@ class _PaperEventMutationGuard:
     )
     append_results: dict[_PaperAggregateKey, bool] = field(default_factory=dict)
 
+    def capture_before(self, key: _PaperAggregateKey) -> None:
+        if key in self.before_images or key in self.changes:
+            raise PaperStateConflictError(
+                "paper event mutation captured one aggregate more than once"
+            )
+        before = self.load_authoritative(key)
+        self.before_images[key] = (
+            None if before is None else before.model_copy(deep=True)
+        )
+
     def register_change(
         self,
         *,
         after: PaperExecutionAfter,
         state_json: str,
+        rowcount: int,
     ) -> None:
         key = _paper_aggregate_key(after)
+        if key not in self.before_images:
+            raise PaperStateConflictError(
+                "paper event mutation requires a transaction-local before image"
+            )
         if key in self.changes:
             raise PaperStateConflictError(
                 "paper event mutation changed one aggregate more than once"
+            )
+        if isinstance(rowcount, bool) or rowcount != 1:
+            raise PaperStateConflictError(
+                "paper event mutation requires one authoritative SQL row change"
+            )
+        before = self.before_images[key]
+        if before is None:
+            if after.revision != 0:
+                raise PaperStateConflictError(
+                    "new paper event aggregate must start at source revision zero"
+                )
+        else:
+            if type(before) is not type(after):
+                raise PaperStateCorruptionError(
+                    "paper event mutation changed aggregate model type"
+                )
+            if canonical_json_bytes(before) == canonical_json_bytes(after):
+                raise PaperStateConflictError(
+                    "paper event mutation did not change its authoritative row"
+                )
+            if after.revision != before.revision + 1:
+                raise PaperStateConflictError(
+                    "paper event mutation source revision must advance by one"
+                )
+        canonical_state = canonical_json_bytes(after).decode("utf-8")
+        if state_json != canonical_state:
+            raise PaperStateCorruptionError(
+                "paper event mutation state JSON is not canonical"
+            )
+        current = self.load_authoritative(key)
+        if current is None or canonical_json_bytes(current) != canonical_json_bytes(after):
+            raise PaperStateCorruptionError(
+                "paper event mutation did not persist its registered after-state"
             )
         self.changes[key] = (after.model_copy(deep=True), state_json)
 
@@ -149,6 +203,10 @@ class _PaperEventMutationGuard:
         self.append_results[key] = advanced
 
     def assert_complete(self) -> None:
+        if set(self.before_images) != set(self.changes):
+            raise PaperStateConflictError(
+                "paper event mutation before-images and row changes are not one-to-one"
+            )
         if set(self.candidates) != set(self.append_results):
             raise PaperStateConflictError("paper event mutation has an incomplete append batch")
         advanced = {key for key, value in self.append_results.items() if value}
@@ -158,10 +216,13 @@ class _PaperEventMutationGuard:
             )
         for key, (after, state_json) in self.changes.items():
             event = self.candidates[key]
+            current = self.load_authoritative(key)
             if (
                 payload_after(event.payload) != after
                 or event.source_revision != after.revision
                 or canonical_json_bytes(after).decode("utf-8") != state_json
+                or current is None
+                or canonical_json_bytes(current) != canonical_json_bytes(after)
             ):
                 raise PaperStateCorruptionError(
                     "paper event mutation payload does not equal its authoritative row"
@@ -795,8 +856,10 @@ class PaperStateStore:
 
     @contextmanager
     def _event_transaction(self) -> Iterator[_PaperEventMutationGuard]:
-        guard = _PaperEventMutationGuard()
         with self._transaction():
+            guard = _PaperEventMutationGuard(
+                load_authoritative=self._load_paper_execution_authoritative_after
+            )
             yield guard
             guard.assert_complete()
 

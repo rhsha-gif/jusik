@@ -80,6 +80,7 @@ opaque `sha256:` account fingerprint.
 | `broker_orderable_buy_quantity_basis` | `int \| None` `ge=0` | The integer `no_receivable_buy_quantity` basis for buys. |
 | `snapshot_orderable_quantity_basis` | `int \| None` `ge=0` | The whole-share snapshot orderable basis for sells. |
 | `snapshot_gross_exposure_basis_krw` | `int` `ge=0` | Conservatively rounded-up `max(0, snapshot_equity - snapshot_cash)`. |
+| `minimum_cash_reserve_krw` | `int` `ge=0` | Rounded-up minimum cash reserve, bound to the paired dispatch. |
 | `gross_exposure_limit_krw` | `int` `ge=0` | Floored `max(0, snapshot_equity - minimum_cash_reserve)`. |
 | `store_id` | `str` | Provenance store. |
 | `session_id` | `str` | Owning session (fencing). |
@@ -108,6 +109,11 @@ Model invariants (`@model_validator(mode="after")`), enforced exactly like
   integer shares. Existing float/Decimal inputs are accepted only after the
   current whole-number validators prove exact integrality; no tolerance is used
   in the SQLite admission arithmetic.
+- Schema-v10 dispatches persist the same integer
+  `minimum_cash_reserve_krw`. The store requires the dispatch, reservation, and
+  derived gross limit to agree, preventing a caller from forging both reserve
+  evidence and gross capacity. Legacy v9 dispatch JSON may decode this dispatch
+  field as `None` only for migration/reconciliation compatibility.
 - `snapshot_gross_exposure_basis_krw <= gross_exposure_limit_krw` is not required
   for a sell, but a buy is rejected whenever its projected gross exceeds the
   limit.
@@ -184,15 +190,18 @@ Inside the one transaction, in order:
 1. Load and require the exact active session (existing
    `_require_exact_active_session`, `db/sqlite_repositories.py:1395`).
 2. Verify dispatch↔session provenance and fencing (existing lines 1399-1407).
-3. Recompute `H_cash`, `H_qty(symbol)`, and `H_gross` from `status="held"` reservation rows
+3. Recompute request notional and exactly bind broker cash/quantity,
+   snapshot orderable quantity, current gross, minimum cash reserve, and gross
+   limit to the paired dispatch evidence. Any mismatch fails before a write.
+4. Recompute `H_cash`, `H_qty(symbol)`, and `H_gross` from `status="held"` reservation rows
    (`SELECT ... WHERE store_id=? AND status='held'`).
-4. Evaluate §4 admission. If it fails, raise `PaperRiskReservationRejected`
+5. Evaluate §4 admission. If it fails, raise `PaperRiskReservationRejected`
    (subclass of the existing `PaperStateConflictError` family) — the transaction
    rolls back, nothing is written.
-5. Insert the `PaperRiskReservation` row (`status="held"`, `revision=0`).
-6. Insert the `PaperOrderDispatch` row (`status="prepared"`, `revision=0`) exactly
+6. Insert the `PaperRiskReservation` row (`status="held"`, `revision=0`).
+7. Insert the `PaperOrderDispatch` row (`status="prepared"`, `revision=0`) exactly
    as today.
-7. Commit. The `contextmanager` `_transaction` (`db/sqlite_repositories.py:574`)
+8. Commit. The `contextmanager` `_transaction` (`db/sqlite_repositories.py:574`)
    already rolls back on any exception.
 
 Idempotency: if a reservation/dispatch already exists for the `order_plan_id` or
@@ -276,6 +285,11 @@ reservation release.
 - **Idempotency:** reservation is keyed 1:1 to `order_plan_id`; `idempotency_key`
   carries a `UNIQUE` constraint. Re-preparing the same key returns the existing
   reservation+dispatch pair (§5), never a second reservation.
+- **Capacity-evidence binding:** `request_fingerprint`, dispatch immutable
+  identity, and the reservation include the rounded integer minimum cash
+  reserve. Re-preparing an idempotency key with a different reserve fails
+  closed. For a migrated v9 open row whose dispatch field is absent, the
+  synthesized paired reservation is the comparison authority.
 - **Provenance:** every reservation carries `data_mode=paper_trading`,
   `broker_environment=kis_paper`, and the opaque account fingerprint; a
   `_validate_reservation_provenance` MUST reject any mismatch against the store
@@ -346,7 +360,8 @@ migration branch (`db/sqlite_repositories.py:511-536`):
      `max(0, snapshot_equity-snapshot_cash)`; because legacy dispatches do not
      persist their original minimum-cash reserve, the backfilled audit limit is
      set to the smallest non-contradictory value: current gross plus the row's
-     reserved gross. Future admission always uses the fresh snapshot and current
+     reserved gross. `minimum_cash_reserve_krw` is reconstructed as floored
+     snapshot equity minus that audit limit. Future admission always uses the fresh snapshot and current
      minimum-cash reserve from Section 4, never this legacy audit value.
    If a non-terminal legacy dispatch lacks required whole-number or buy-capacity
    evidence, migration MUST raise `PaperStateMigrationRequired` and leave schema
@@ -378,6 +393,8 @@ POST count. Add under `quantpilot/tests/unit/` alongside
 | Test | Setup / action | Required assertion |
 |---|---|---|
 | `test_reservation_and_dispatch_commit_atomically` | Prepare one buy | One `held` reservation and one `prepared` dispatch; both at `revision=0`. |
+| `test_reservation_capacity_evidence_must_match_dispatch` | Forge reservation cash/quantity/gross evidence | Conflict before write; no pair persisted. |
+| `test_cash_reserve_and_gross_limit_cannot_be_forged_together` | Raise reserve evidence and gross limit together | Paired dispatch binding rejects the pair. |
 | `test_reservation_rollback_leaves_no_dispatch` | Force admission failure at §5 step 4 | Neither reservation nor dispatch persisted. |
 | `test_concurrent_buys_cannot_exceed_broker_cash` | Two buys whose sum > `broker_cash` | First admits; second fails closed; `H_cash` never exceeds basis. |
 | `test_concurrent_buys_cannot_exceed_gross_limit` | Cash is sufficient but current gross + two buys exceeds `equity-minimum_cash_reserve` | Second fails closed; `H_gross` remains within the exact integer limit. |
@@ -396,6 +413,7 @@ POST count. Add under `quantpilot/tests/unit/` alongside
 | `test_idempotent_reprepare_returns_same_reservation` | Re-prepare same idempotency key | Same reservation/dispatch pair; no second row. |
 | `test_migration_v9_to_v10_backfills_open_dispatches` | Open a representative v9 DB with open + terminal dispatches | Open dispatches get `held` reservations from their own evidence; terminal ones get none; all v9 rows preserved. |
 | `test_migration_v9_to_v10_preserves_state` | Representative v9 DB | Dispatch, fill, provenance, lease/fence preserved; reservation table valid. |
+| `test_migrated_open_dispatch_reprepare_uses_backfilled_cash_reserve` | Reprepare a migrated v9 open row | Synthesized reserve is authoritative; mismatch fails and exact replay is idempotent. |
 
 Full acceptance run: `python -m pytest quantpilot/tests` then
 `python -m quantpilot.jobs.run_smoke` (both must stay green;

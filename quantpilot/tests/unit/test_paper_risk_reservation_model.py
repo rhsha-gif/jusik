@@ -28,6 +28,7 @@ def _buy(**updates: object) -> PaperRiskReservation:
         "broker_orderable_buy_quantity_basis": 4,
         "snapshot_orderable_quantity_basis": None,
         "snapshot_gross_exposure_basis_krw": 200_000,
+        "minimum_cash_reserve_krw": 100_000,
         "gross_exposure_limit_krw": 900_000,
         "store_id": "store-paper-001",
         "session_id": "session-paper-001",
@@ -55,6 +56,7 @@ def _sell(**updates: object) -> PaperRiskReservation:
         "broker_orderable_buy_quantity_basis": None,
         "snapshot_orderable_quantity_basis": 10,
         "snapshot_gross_exposure_basis_krw": 900_000,
+        "minimum_cash_reserve_krw": 500_000,
         "gross_exposure_limit_krw": 500_000,
         "store_id": "store-paper-001",
         "session_id": "session-paper-001",
@@ -75,6 +77,7 @@ def test_buy_reservation_normalizes_exact_whole_numeric_inputs() -> None:
         broker_orderable_cash_basis_krw=Decimal("300000"),
         broker_orderable_buy_quantity_basis=4.0,
         snapshot_gross_exposure_basis_krw=Decimal("200000"),
+        minimum_cash_reserve_krw=Decimal("100000"),
         gross_exposure_limit_krw=900_000.0,
     )
 
@@ -88,6 +91,7 @@ def test_buy_reservation_normalizes_exact_whole_numeric_inputs() -> None:
         "broker_orderable_cash_basis_krw",
         "broker_orderable_buy_quantity_basis",
         "snapshot_gross_exposure_basis_krw",
+        "minimum_cash_reserve_krw",
         "gross_exposure_limit_krw",
     ):
         assert type(getattr(reservation, field)) is int
@@ -113,6 +117,7 @@ def test_sell_reservation_keeps_zero_incremental_gross_even_above_buy_limit() ->
         ("broker_orderable_cash_basis_krw", True),
         ("broker_orderable_buy_quantity_basis", 4.5),
         ("snapshot_gross_exposure_basis_krw", float("inf")),
+        ("minimum_cash_reserve_krw", 1.5),
         ("gross_exposure_limit_krw", Decimal("NaN")),
     ],
 )

@@ -4,8 +4,8 @@ import hashlib
 import json
 from collections.abc import Callable
 from datetime import date, datetime, timedelta
-from decimal import Decimal
-from math import isclose
+from decimal import Decimal, ROUND_CEILING, ROUND_FLOOR
+from math import isclose, isfinite
 from typing import Protocol
 from zoneinfo import ZoneInfo
 
@@ -24,6 +24,7 @@ from quantpilot.packages.core.marketdata.types import Quote
 from quantpilot.packages.core.operator.position_ledger import (
     PaperExecutionSession,
     PaperOrderDispatch,
+    PaperRiskReservation,
 )
 from quantpilot.packages.core.schemas import (
     BrokerMode,
@@ -63,10 +64,16 @@ class PaperDispatchStore(Protocol):
     @property
     def provenance(self): ...
 
-    def insert_paper_order_dispatch(
+    def reserve_and_insert_paper_order_dispatch(
         self,
         dispatch: PaperOrderDispatch,
-    ) -> PaperOrderDispatch: ...
+        reservation: PaperRiskReservation,
+    ) -> tuple[PaperOrderDispatch, PaperRiskReservation]: ...
+
+    def load_paper_risk_reservation(
+        self,
+        order_plan_id: str,
+    ) -> PaperRiskReservation | None: ...
 
     def load_paper_order_dispatch(
         self,
@@ -247,11 +254,49 @@ class DurablePaperSubmissionCoordinator:
     ) -> PaperOrderDispatch:
         if self._store.paper_kill_blocks_submission():
             raise RuntimeError("paper_kill_blocks_submission")
+        if (
+            not isfinite(minimum_cash_reserve)
+            or minimum_cash_reserve < 0
+            or minimum_cash_reserve > snapshot.equity
+        ):
+            raise ValueError("paper dispatch cash reserve is outside the portfolio")
+        minimum_cash_reserve_krw = int(
+            Decimal(str(minimum_cash_reserve)).to_integral_value(
+                rounding=ROUND_CEILING
+            )
+        )
         existing = self._store.find_paper_order_dispatch_by_idempotency_key(
             order_plan.idempotency_key
         )
         if existing is not None:
             self._require_order_matches_dispatch(order_plan, existing)
+            existing_reservation = None
+            if existing.status in {
+                "prepared",
+                "dispatch_claimed",
+                "outcome_unknown",
+                "accepted",
+                "partially_filled",
+            }:
+                existing_reservation = self._store.load_paper_risk_reservation(
+                    existing.order_plan_id
+                )
+                if existing_reservation is None:
+                    raise RuntimeError(
+                        "open paper dispatch is missing its risk reservation"
+                    )
+            durable_cash_reserve = existing.minimum_cash_reserve_krw
+            if durable_cash_reserve is None and existing_reservation is not None:
+                durable_cash_reserve = (
+                    existing_reservation.minimum_cash_reserve_krw
+                )
+            if (
+                durable_cash_reserve is not None
+                and durable_cash_reserve != minimum_cash_reserve_krw
+            ):
+                raise ValueError(
+                    "paper order cash-reserve evidence changed for its idempotency key"
+                )
             return existing
 
         prepared_at = self._now()
@@ -265,8 +310,6 @@ class DurablePaperSubmissionCoordinator:
         )
         if snapshot.user_id != user_id:
             raise ValueError("paper dispatch user does not match the broker snapshot")
-        if minimum_cash_reserve < 0 or minimum_cash_reserve > snapshot.equity:
-            raise ValueError("paper dispatch cash reserve is outside the portfolio")
         explanation = order_plan.explanation
         if explanation is None:
             raise ValueError("external paper orders require strategy explanation evidence")
@@ -277,19 +320,27 @@ class DurablePaperSubmissionCoordinator:
         ):
             raise ValueError("paper order explanation does not match the order identity")
 
-        quantity = _whole_positive_number(order_plan.intent.quantity, "quantity")
-        limit_price = _whole_positive_number(
+        quantity = int(_whole_positive_number(order_plan.intent.quantity, "quantity"))
+        limit_price = int(_whole_positive_number(
             order_plan.intent.limit_price,
             "limit price",
-        )
+        ))
         symbol = order_plan.intent.symbol.strip().upper()
-        held_quantity, orderable_quantity = _snapshot_symbol_quantities(
+        held_quantity_raw, orderable_quantity_raw = _snapshot_symbol_quantities(
             snapshot,
             symbol,
         )
+        held_quantity = _whole_nonnegative_number(
+            held_quantity_raw,
+            "snapshot held quantity",
+        )
+        orderable_quantity = _whole_nonnegative_number(
+            orderable_quantity_raw,
+            "snapshot orderable quantity",
+        )
         if (
             order_plan.intent.side == "sell"
-            and quantity > orderable_quantity + 0.000001
+            and quantity > orderable_quantity
         ):
             raise ValueError("paper sell exceeds snapshot orderable quantity")
         buying_power: KisBuyingPower | None = None
@@ -304,19 +355,23 @@ class DurablePaperSubmissionCoordinator:
                 raise RuntimeError(
                     "KIS paper buying-power evidence is unavailable"
                 ) from None
-            raw_no_receivable_cash = float(
-                min(
-                    buying_power.orderable_cash,
-                    buying_power.no_receivable_buy_amount,
+            raw_broker_cash = min(
+                buying_power.orderable_cash,
+                buying_power.no_receivable_buy_amount,
+            ) - Decimal(minimum_cash_reserve_krw)
+            broker_cash_krw = int(
+                max(Decimal("0"), raw_broker_cash).to_integral_value(
+                    rounding=ROUND_FLOOR
                 )
             )
-            broker_cash = max(0.0, raw_no_receivable_cash - minimum_cash_reserve)
-            broker_quantity = float(buying_power.no_receivable_buy_quantity)
-            if quantity > broker_quantity + 0.000001:
+            broker_quantity = int(buying_power.no_receivable_buy_quantity)
+            if quantity > broker_quantity:
                 raise ValueError("paper buy exceeds no-receivable broker quantity")
-            if quantity * limit_price > broker_cash + 0.01:
+            if quantity * limit_price > broker_cash_krw:
                 raise ValueError("paper buy exceeds no-receivable broker cash")
+            broker_cash: float | None = float(broker_cash_krw)
         else:
+            broker_cash_krw = None
             broker_cash = None
             broker_quantity = None
 
@@ -331,6 +386,7 @@ class DurablePaperSubmissionCoordinator:
             entry_atr14=entry_atr14,
             broker_orderable_cash=broker_cash,
             broker_orderable_buy_quantity=broker_quantity,
+            minimum_cash_reserve_krw=minimum_cash_reserve_krw,
         )
         provenance = self._store.provenance
         submission_evidence_expires_at = min(
@@ -372,6 +428,7 @@ class DurablePaperSubmissionCoordinator:
             snapshot_monthly_loss_ratio=snapshot.monthly_loss_ratio,
             broker_orderable_cash=broker_cash,
             broker_orderable_buy_quantity=broker_quantity,
+            minimum_cash_reserve_krw=minimum_cash_reserve_krw,
             entry_atr14=entry_atr14,
             store_id=provenance.store_id,
             session_id=self._session.session_id,
@@ -380,7 +437,57 @@ class DurablePaperSubmissionCoordinator:
             prepared_at=prepared_at,
             updated_at=prepared_at,
         )
-        return self._store.insert_paper_order_dispatch(dispatch)
+        snapshot_gross_exposure_krw = int(
+            max(
+                Decimal("0"),
+                Decimal(str(snapshot.equity)) - Decimal(str(snapshot.cash)),
+            ).to_integral_value(rounding=ROUND_CEILING)
+        )
+        gross_exposure_limit_krw = int(
+            max(
+                Decimal("0"),
+                Decimal(str(snapshot.equity))
+                - Decimal(minimum_cash_reserve_krw),
+            ).to_integral_value(rounding=ROUND_FLOOR)
+        )
+        request_notional_krw = quantity * limit_price
+        reservation = PaperRiskReservation(
+            order_plan_id=dispatch.order_plan_id,
+            idempotency_key=dispatch.idempotency_key,
+            kind=("cash_buy" if dispatch.side == "buy" else "sell_quantity"),
+            symbol=dispatch.symbol,
+            side=dispatch.side,
+            reserved_cash_krw=(
+                request_notional_krw if dispatch.side == "buy" else None
+            ),
+            reserved_sell_quantity=(quantity if dispatch.side == "sell" else None),
+            reserved_gross_exposure_krw=(
+                request_notional_krw if dispatch.side == "buy" else 0
+            ),
+            broker_orderable_cash_basis_krw=(
+                broker_cash_krw if dispatch.side == "buy" else None
+            ),
+            broker_orderable_buy_quantity_basis=(
+                broker_quantity if dispatch.side == "buy" else None
+            ),
+            snapshot_orderable_quantity_basis=(
+                orderable_quantity if dispatch.side == "sell" else None
+            ),
+            snapshot_gross_exposure_basis_krw=snapshot_gross_exposure_krw,
+            minimum_cash_reserve_krw=minimum_cash_reserve_krw,
+            gross_exposure_limit_krw=gross_exposure_limit_krw,
+            store_id=dispatch.store_id,
+            session_id=dispatch.session_id,
+            fencing_token=dispatch.fencing_token,
+            account_scope_fingerprint=dispatch.account_scope_fingerprint,
+            created_at=prepared_at,
+            updated_at=prepared_at,
+        )
+        prepared, _ = self._store.reserve_and_insert_paper_order_dispatch(
+            dispatch,
+            reservation,
+        )
+        return prepared
 
     def submit_prepared_order(
         self,
@@ -777,6 +884,12 @@ def _whole_positive_number(value: float | None, label: str) -> float:
     return float(value)
 
 
+def _whole_nonnegative_number(value: float, label: str) -> int:
+    if value < 0 or not float(value).is_integer():
+        raise ValueError(f"KIS paper {label} must be a nonnegative whole number")
+    return int(value)
+
+
 def _snapshot_symbol_quantities(
     snapshot: PortfolioSnapshot,
     symbol: str,
@@ -825,6 +938,7 @@ def _request_fingerprint(
     entry_atr14: float | None,
     broker_orderable_cash: float | None,
     broker_orderable_buy_quantity: float | None,
+    minimum_cash_reserve_krw: int,
 ) -> str:
     payload = {
         "order_plan": order_plan.model_dump(mode="json"),
@@ -836,6 +950,7 @@ def _request_fingerprint(
         "entry_atr14": entry_atr14,
         "broker_orderable_cash": broker_orderable_cash,
         "broker_orderable_buy_quantity": broker_orderable_buy_quantity,
+        "minimum_cash_reserve_krw": minimum_cash_reserve_krw,
     }
     canonical = json.dumps(payload, sort_keys=True, separators=(",", ":"))
     return f"sha256:{hashlib.sha256(canonical.encode('utf-8')).hexdigest()}"

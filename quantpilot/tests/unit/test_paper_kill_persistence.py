@@ -13,6 +13,7 @@ from quantpilot.packages.core.operator.position_ledger import (
     PaperCancelRequest,
     PaperDispatchFillEvidence,
     PaperOrderDispatch,
+    PaperRiskReservation,
 )
 from quantpilot.packages.core.execution.paper_kill import PaperKillService
 from quantpilot.packages.core.kis_paper import (
@@ -90,6 +91,7 @@ def _accepted_dispatch(
         snapshot_monthly_loss_ratio=0,
         broker_orderable_cash=1_000_000,
         broker_orderable_buy_quantity=14,
+        minimum_cash_reserve_krw=0,
         entry_atr14=1_200,
         store_id=store.provenance.store_id,
         session_id=session.session_id,
@@ -98,7 +100,35 @@ def _accepted_dispatch(
         prepared_at=prepared_at,
         updated_at=prepared_at,
     )
-    store.insert_paper_order_dispatch(prepared)
+    notional = int(prepared.quantity) * int(prepared.limit_price)
+    reservation = PaperRiskReservation(
+        reservation_id=f"presv-{prepared.order_plan_id}",
+        order_plan_id=prepared.order_plan_id,
+        idempotency_key=prepared.idempotency_key,
+        kind="cash_buy",
+        symbol=prepared.symbol,
+        side="buy",
+        reserved_cash_krw=notional,
+        reserved_gross_exposure_krw=notional,
+        broker_orderable_cash_basis_krw=int(
+            prepared.broker_orderable_cash or 0
+        ),
+        broker_orderable_buy_quantity_basis=int(
+            prepared.broker_orderable_buy_quantity or 0
+        ),
+        snapshot_gross_exposure_basis_krw=int(
+            prepared.snapshot_equity - prepared.snapshot_cash
+        ),
+        minimum_cash_reserve_krw=0,
+        gross_exposure_limit_krw=int(prepared.snapshot_equity),
+        store_id=prepared.store_id,
+        session_id=prepared.session_id,
+        fencing_token=prepared.fencing_token,
+        account_scope_fingerprint=prepared.account_scope_fingerprint,
+        created_at=prepared.prepared_at,
+        updated_at=prepared.prepared_at,
+    )
+    store.reserve_and_insert_paper_order_dispatch(prepared, reservation)
     if prepared_only:
         return prepared
     claimed = store.claim_dispatch_attempt(
@@ -254,7 +284,7 @@ def test_unattempted_cancel_can_terminalize_when_fill_wins_race(tmp_path) -> Non
         assert persisted.attempt_count == 0
 
 
-def test_schema_v8_migrates_to_v9_with_existing_provenance(tmp_path) -> None:
+def test_schema_v9_migrates_to_v10_and_backfills_open_dispatch(tmp_path) -> None:
     path = tmp_path / "migration.sqlite3"
     with _store(path) as store:
         original_store_id = store.provenance.store_id
@@ -296,25 +326,29 @@ def test_schema_v8_migrates_to_v9_with_existing_provenance(tmp_path) -> None:
             "SELECT state_json FROM state_store_metadata WHERE singleton_id = 1"
         ).fetchone()
         state = json.loads(row[0])
-        state["schema_version"] = 8
-        connection.execute("DROP TABLE paper_cancel_requests")
-        connection.execute("DROP TABLE paper_kill_operations")
+        state["schema_version"] = 9
+        connection.execute("DROP TABLE paper_risk_reservations")
         connection.execute(
-            "UPDATE state_store_metadata SET schema_version = 8, state_json = ?",
+            "UPDATE state_store_metadata SET schema_version = 9, state_json = ?",
             (json.dumps(state, separators=(",", ":"), sort_keys=True),),
         )
-        connection.execute("PRAGMA user_version = 8")
+        connection.execute("PRAGMA user_version = 9")
         connection.commit()
     finally:
         connection.close()
 
     with _store(path) as migrated:
         assert migrated.provenance.store_id == original_store_id
-        assert migrated.provenance.schema_version == PAPER_STATE_SCHEMA_VERSION == 9
+        assert migrated.provenance.schema_version == PAPER_STATE_SCHEMA_VERSION == 10
         assert migrated.list_paper_cancel_requests() == []
         restored = migrated.load_paper_order_dispatch("oplan-kill-001")
         assert restored.status == "partially_filled"
         assert restored.fill_evidence[0].broker_fill_reference == "fill-migration-001"
+        reservation = migrated.load_paper_risk_reservation("oplan-kill-001")
+        assert reservation is not None
+        assert reservation.status == "held"
+        assert reservation.reserved_cash_krw == 700_000
+        assert reservation.reserved_gross_exposure_krw == 700_000
         restored_session = migrated.load_paper_execution_session(original_session_id)
         assert restored_session.fencing_token == original_fencing_token
 
@@ -470,14 +504,20 @@ def test_kill_service_with_no_working_orders_reaches_killed(tmp_path) -> None:
 def test_kill_service_cancels_managed_order_exactly_once(tmp_path) -> None:
     with _store(tmp_path / "managed-kill.sqlite3") as store:
         session = _session(store)
-        _accepted_dispatch(store, session)
+        dispatch = _accepted_dispatch(store, session)
         client = _Client(rows=(_cancelable_row(),))
         service = _kill_service(store, session, client)
         result = service.engage(reason="operator_requested")
+        released = store.load_paper_risk_reservation(dispatch.order_plan_id)
         replay = service.engage(reason="operator_requested")
+        replayed = store.load_paper_risk_reservation(dispatch.order_plan_id)
 
         assert result.status == "killed"
         assert result.reconciled_cancelled_count == 1
+        assert released is not None
+        assert released.status == "released_cancelled"
+        assert released.revision == 1
+        assert replayed == released
         assert replay.status == "killed"
         assert client.cancel_calls == 1
 
@@ -692,14 +732,14 @@ def test_release_rechecks_and_detects_new_external_order(tmp_path) -> None:
         assert store.paper_kill_blocks_submission() is True
 
 
-def test_release_rejects_stray_prepared_dispatch(tmp_path) -> None:
+def test_killed_store_rejects_new_reserved_dispatch_before_release(tmp_path) -> None:
     with _store(tmp_path / "release-prepared.sqlite3") as store:
         session = _session(store)
         client = _Client()
         service = _kill_service(store, session, client)
         assert service.engage(reason="operator_requested").status == "killed"
-        _accepted_dispatch(store, session, prepared_only=True)
+        with pytest.raises(PaperStateConflictError, match="kill blocks reservation"):
+            _accepted_dispatch(store, session, prepared_only=True)
 
-        blocked = service.release()
-        assert blocked.status == "recovery_required"
-        assert "prepared_dispatch_unresolved" in blocked.unresolved_reason_codes
+        released = service.release()
+        assert released.status == "released"

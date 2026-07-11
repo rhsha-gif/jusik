@@ -8,6 +8,7 @@ from __future__ import annotations
 
 from contextlib import contextmanager
 from datetime import date, datetime, timedelta, timezone
+from decimal import Decimal, ROUND_CEILING, ROUND_FLOOR
 import json
 from math import isfinite
 from pathlib import Path
@@ -23,6 +24,7 @@ from quantpilot.packages.core.operator.position_ledger import (
     PaperKillOperation,
     PaperOrderDispatch,
     PaperPortfolioLossBaseline,
+    PaperRiskReservation,
     PaperRunCheckpoint,
     PendingLiquidationCheckpoint,
     StateStoreProvenance,
@@ -55,9 +57,13 @@ class PaperStateProvenanceError(PaperStateError):
     pass
 
 
-PAPER_STATE_SCHEMA_VERSION = 9
-PAPER_STATE_PREVIOUS_SCHEMA_VERSION = 8
-PAPER_STATE_MIGRATABLE_SCHEMA_VERSIONS = frozenset({6, 7, 8})
+class PaperRiskReservationRejected(PaperStateConflictError):
+    pass
+
+
+PAPER_STATE_SCHEMA_VERSION = 10
+PAPER_STATE_PREVIOUS_SCHEMA_VERSION = 9
+PAPER_STATE_MIGRATABLE_SCHEMA_VERSIONS = frozenset({6, 7, 8, 9})
 
 PAPER_DISPATCH_TRANSITIONS: dict[str, set[str]] = {
     "prepared": {"expired_pre_dispatch", "failed_pre_dispatch"},
@@ -116,11 +122,56 @@ PAPER_CANCEL_TRANSITIONS: dict[str, set[str]] = {
     "rejected": {"rejected", "reconciled_cancelled", "reconciled_filled"},
 }
 
+PAPER_RESERVATION_TERMINALS = {
+    "released_filled",
+    "released_cancelled",
+    "released_rejected",
+    "released_expired",
+}
+
+PAPER_RESERVATION_RELEASE_BY_DISPATCH = {
+    "filled": ("released_filled", "filled"),
+    "cancelled": ("released_cancelled", "cancelled"),
+    "rejected": ("released_rejected", "rejected"),
+    "expired_pre_dispatch": ("released_expired", "expired_pre_dispatch"),
+    "failed_pre_dispatch": ("released_expired", "failed_pre_dispatch"),
+}
+
 
 def _require_aware_timestamp(value: datetime, *, field_name: str) -> datetime:
     if value.tzinfo is None or value.utcoffset() is None:
         raise ValueError(f"{field_name} must include a UTC offset")
     return value
+
+
+def _require_whole_int(
+    value: object,
+    *,
+    field_name: str,
+    positive: bool = True,
+    migration_error: bool = True,
+) -> int:
+    number = Decimal(str(value))
+    whole = number.to_integral_value()
+    if number != whole or (positive and whole <= 0) or (not positive and whole < 0):
+        qualifier = "positive " if positive else "nonnegative "
+        error_type = (
+            PaperStateMigrationRequired
+            if migration_error
+            else PaperStateConflictError
+        )
+        raise error_type(f"{field_name} must be a {qualifier}whole number")
+    return int(whole)
+
+
+def _ceil_nonnegative_krw(value: object) -> int:
+    number = max(Decimal("0"), Decimal(str(value)))
+    return int(number.to_integral_value(rounding=ROUND_CEILING))
+
+
+def _floor_nonnegative_krw(value: object) -> int:
+    number = max(Decimal("0"), Decimal(str(value)))
+    return int(number.to_integral_value(rounding=ROUND_FLOOR))
 
 
 PENDING_LIQUIDATION_TRANSITIONS: dict[str, set[str]] = {
@@ -431,6 +482,35 @@ class PaperStateStore:
                 ON paper_order_dispatches (store_id, status, updated_at)
                 """,
                 """
+                CREATE TABLE IF NOT EXISTS paper_risk_reservations (
+                    reservation_id TEXT PRIMARY KEY,
+                    order_plan_id TEXT NOT NULL UNIQUE,
+                    idempotency_key TEXT NOT NULL UNIQUE,
+                    store_id TEXT NOT NULL,
+                    session_id TEXT NOT NULL,
+                    fencing_token INTEGER NOT NULL,
+                    symbol TEXT NOT NULL,
+                    kind TEXT NOT NULL,
+                    status TEXT NOT NULL,
+                    revision INTEGER NOT NULL,
+                    state_json TEXT NOT NULL,
+                    updated_at TEXT NOT NULL,
+                    FOREIGN KEY (order_plan_id)
+                        REFERENCES paper_order_dispatches(order_plan_id)
+                        DEFERRABLE INITIALLY DEFERRED,
+                    FOREIGN KEY (store_id)
+                        REFERENCES state_store_metadata(store_id),
+                    FOREIGN KEY (session_id, store_id, fencing_token)
+                        REFERENCES paper_execution_sessions(
+                            session_id, store_id, fencing_token
+                        )
+                ) WITHOUT ROWID
+                """,
+                """
+                CREATE INDEX IF NOT EXISTS ix_paper_reservation_status
+                ON paper_risk_reservations (store_id, status, symbol)
+                """,
+                """
                 CREATE TABLE IF NOT EXISTS paper_kill_operations (
                     kill_id TEXT PRIMARY KEY,
                     store_id TEXT NOT NULL,
@@ -480,6 +560,12 @@ class PaperStateStore:
             ]
             for statement in schema_statements:
                 self._connection.execute(statement)
+
+            if (
+                persisted is not None
+                and persisted.schema_version in PAPER_STATE_MIGRATABLE_SCHEMA_VERSIONS
+            ):
+                self._backfill_open_dispatch_reservations()
 
             if persisted is None:
                 requested = self._requested_provenance
@@ -589,6 +675,7 @@ class PaperStateStore:
             | StateStoreProvenance
             | PaperExecutionSession
             | PaperOrderDispatch
+            | PaperRiskReservation
             | PaperPortfolioLossBaseline
             | PaperRunCheckpoint
             | StrategyOperatorState
@@ -699,6 +786,195 @@ class PaperStateStore:
                 "paper-order dispatch identity does not match its metadata"
             )
         return model
+
+    @staticmethod
+    def _decode_paper_risk_reservation(row: sqlite3.Row) -> PaperRiskReservation:
+        try:
+            model = PaperRiskReservation.model_validate_json(row["state_json"])
+        except ValueError as exc:
+            raise PaperStateCorruptionError(
+                "invalid paper-risk reservation JSON"
+            ) from exc
+        metadata = (
+            row["reservation_id"],
+            row["order_plan_id"],
+            row["idempotency_key"],
+            row["store_id"],
+            row["session_id"],
+            row["fencing_token"],
+            row["symbol"],
+            row["kind"],
+            row["status"],
+            row["revision"],
+            row["updated_at"],
+        )
+        expected = (
+            model.reservation_id,
+            model.order_plan_id,
+            model.idempotency_key,
+            model.store_id,
+            model.session_id,
+            model.fencing_token,
+            model.symbol,
+            model.kind,
+            model.status,
+            model.revision,
+            model.updated_at.isoformat(),
+        )
+        if metadata != expected:
+            raise PaperStateCorruptionError(
+                "paper-risk reservation identity does not match its metadata"
+            )
+        return model
+
+    def _backfill_open_dispatch_reservations(self) -> None:
+        open_statuses = {
+            "prepared",
+            "dispatch_claimed",
+            "outcome_unknown",
+            "accepted",
+            "partially_filled",
+        }
+        rows = self._connection.execute(
+            """
+            SELECT order_plan_id, broker_order_id, idempotency_key, store_id,
+                   session_id, fencing_token, status, revision, state_json,
+                   updated_at
+            FROM paper_order_dispatches
+            ORDER BY order_plan_id
+            """
+        ).fetchall()
+        for row in rows:
+            dispatch = self._decode_paper_order_dispatch(row)
+            if dispatch.status not in open_statuses:
+                continue
+            existing = self._connection.execute(
+                """
+                SELECT reservation_id, order_plan_id, idempotency_key, store_id,
+                       session_id, fencing_token, symbol, kind, status, revision,
+                       state_json, updated_at
+                FROM paper_risk_reservations
+                WHERE order_plan_id = ? OR idempotency_key = ?
+                """,
+                (dispatch.order_plan_id, dispatch.idempotency_key),
+            ).fetchone()
+            if existing is not None:
+                reservation = self._decode_paper_risk_reservation(existing)
+                if (
+                    reservation.order_plan_id != dispatch.order_plan_id
+                    or reservation.idempotency_key != dispatch.idempotency_key
+                    or reservation.status != "held"
+                ):
+                    raise PaperStateMigrationRequired(
+                        "existing reservation conflicts with open dispatch backfill"
+                    )
+                continue
+
+            quantity = _require_whole_int(
+                dispatch.quantity,
+                field_name="legacy dispatch quantity",
+            )
+            limit_price = _require_whole_int(
+                dispatch.limit_price,
+                field_name="legacy dispatch limit price",
+            )
+            current_gross = _ceil_nonnegative_krw(
+                Decimal(str(dispatch.snapshot_equity))
+                - Decimal(str(dispatch.snapshot_cash))
+            )
+            snapshot_equity = _floor_nonnegative_krw(
+                dispatch.snapshot_equity
+            )
+            values: dict[str, object] = {
+                "order_plan_id": dispatch.order_plan_id,
+                "idempotency_key": dispatch.idempotency_key,
+                "symbol": dispatch.symbol,
+                "side": dispatch.side,
+                "store_id": dispatch.store_id,
+                "session_id": dispatch.session_id,
+                "fencing_token": dispatch.fencing_token,
+                "account_scope_fingerprint": dispatch.account_scope_fingerprint,
+                "snapshot_gross_exposure_basis_krw": current_gross,
+                "status": "held",
+                "created_at": dispatch.prepared_at,
+                "updated_at": dispatch.prepared_at,
+            }
+            if dispatch.side == "buy":
+                if (
+                    dispatch.broker_orderable_cash is None
+                    or dispatch.broker_orderable_buy_quantity is None
+                ):
+                    raise PaperStateMigrationRequired(
+                        "open legacy buy dispatch lacks buying-power evidence"
+                    )
+                reserved_cash = quantity * limit_price
+                gross_limit = current_gross + reserved_cash
+                if gross_limit > snapshot_equity:
+                    raise PaperStateMigrationRequired(
+                        "open legacy buy dispatch exceeds cash-account gross capacity"
+                    )
+                values.update(
+                    {
+                        "kind": "cash_buy",
+                        "reserved_cash_krw": reserved_cash,
+                        "reserved_sell_quantity": None,
+                        "reserved_gross_exposure_krw": reserved_cash,
+                        "broker_orderable_cash_basis_krw": _floor_nonnegative_krw(
+                            dispatch.broker_orderable_cash
+                        ),
+                        "broker_orderable_buy_quantity_basis": _require_whole_int(
+                            dispatch.broker_orderable_buy_quantity,
+                            field_name="legacy broker orderable buy quantity",
+                            positive=False,
+                        ),
+                        "snapshot_orderable_quantity_basis": None,
+                        "minimum_cash_reserve_krw": snapshot_equity - gross_limit,
+                        "gross_exposure_limit_krw": gross_limit,
+                    }
+                )
+            else:
+                orderable = _require_whole_int(
+                    dispatch.snapshot_symbol_orderable_quantity,
+                    field_name="legacy snapshot orderable quantity",
+                    positive=False,
+                )
+                values.update(
+                    {
+                        "kind": "sell_quantity",
+                        "reserved_cash_krw": None,
+                        "reserved_sell_quantity": quantity,
+                        "reserved_gross_exposure_krw": 0,
+                        "broker_orderable_cash_basis_krw": None,
+                        "broker_orderable_buy_quantity_basis": None,
+                        "snapshot_orderable_quantity_basis": orderable,
+                        "minimum_cash_reserve_krw": snapshot_equity - current_gross,
+                        "gross_exposure_limit_krw": current_gross,
+                    }
+                )
+            reservation = PaperRiskReservation(**values)
+            self._connection.execute(
+                """
+                INSERT INTO paper_risk_reservations (
+                    reservation_id, order_plan_id, idempotency_key, store_id,
+                    session_id, fencing_token, symbol, kind, status, revision,
+                    state_json, updated_at
+                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                """,
+                (
+                    reservation.reservation_id,
+                    reservation.order_plan_id,
+                    reservation.idempotency_key,
+                    reservation.store_id,
+                    reservation.session_id,
+                    reservation.fencing_token,
+                    reservation.symbol,
+                    reservation.kind,
+                    reservation.status,
+                    reservation.revision,
+                    self._serialize(reservation),
+                    reservation.updated_at.isoformat(),
+                ),
+            )
 
     @staticmethod
     def _decode_paper_kill_operation(row: sqlite3.Row) -> PaperKillOperation:
@@ -1072,6 +1348,22 @@ class PaperStateStore:
                 "paper dispatch does not match its state-store provenance"
             )
 
+    def _validate_reservation_provenance(
+        self,
+        reservation: PaperRiskReservation,
+    ) -> None:
+        provenance = self._require_paper_store()
+        if (
+            reservation.store_id != provenance.store_id
+            or reservation.data_mode != provenance.data_mode
+            or reservation.broker_environment != provenance.broker_environment
+            or reservation.account_scope_fingerprint
+            != provenance.account_scope_fingerprint
+        ):
+            raise PaperStateProvenanceError(
+                "paper reservation does not match its state-store provenance"
+            )
+
     def _validate_kill_provenance(self, operation: PaperKillOperation) -> None:
         provenance = self._require_paper_store()
         if (
@@ -1369,23 +1661,148 @@ class PaperStateStore:
             (order_plan_id.strip(),),
         ).fetchone()
 
+    def _load_reservation_row(self, order_plan_id: str) -> sqlite3.Row | None:
+        return self._connection.execute(
+            """
+            SELECT reservation_id, order_plan_id, idempotency_key, store_id,
+                   session_id, fencing_token, symbol, kind, status, revision,
+                   state_json, updated_at
+            FROM paper_risk_reservations
+            WHERE order_plan_id = ?
+            """,
+            (order_plan_id.strip(),),
+        ).fetchone()
+
     def insert_paper_order_dispatch(
         self,
         dispatch: PaperOrderDispatch,
     ) -> PaperOrderDispatch:
-        """Prepare one exact journal row without granting POST authority."""
+        """Reject the pre-v10 bypass; paper dispatches require a reservation."""
+
+        raise PaperStateConflictError(
+            "paper dispatch requires atomic risk reservation"
+        )
+
+    def reserve_and_insert_paper_order_dispatch(
+        self,
+        dispatch: PaperOrderDispatch,
+        reservation: PaperRiskReservation,
+    ) -> tuple[PaperOrderDispatch, PaperRiskReservation]:
+        """Atomically reserve capacity and prepare one broker dispatch."""
 
         dispatch = PaperOrderDispatch.model_validate(dispatch.model_dump())
+        reservation = PaperRiskReservation.model_validate(reservation.model_dump())
         self._validate_dispatch_provenance(dispatch)
+        self._validate_reservation_provenance(reservation)
         if (
             dispatch.status != "prepared"
             or dispatch.revision != 0
             or dispatch.attempt_count != 0
+            or reservation.status != "held"
+            or reservation.revision != 0
         ):
             raise PaperStateConflictError(
-                "new paper dispatches must start prepared at revision zero"
+                "new paper dispatch and reservation must start prepared/held at revision zero"
             )
+        if (
+            reservation.order_plan_id != dispatch.order_plan_id
+            or reservation.idempotency_key != dispatch.idempotency_key
+            or reservation.symbol != dispatch.symbol
+            or reservation.side != dispatch.side
+            or reservation.store_id != dispatch.store_id
+            or reservation.session_id != dispatch.session_id
+            or reservation.fencing_token != dispatch.fencing_token
+            or reservation.account_scope_fingerprint
+            != dispatch.account_scope_fingerprint
+        ):
+            raise PaperStateConflictError(
+                "paper reservation identity does not match its dispatch"
+            )
+        quantity = _require_whole_int(
+            dispatch.quantity,
+            field_name="paper dispatch quantity",
+            migration_error=False,
+        )
+        limit_price = _require_whole_int(
+            dispatch.limit_price,
+            field_name="paper dispatch limit price",
+            migration_error=False,
+        )
+        request_notional = quantity * limit_price
+        expected_gross_basis = _ceil_nonnegative_krw(
+            Decimal(str(dispatch.snapshot_equity))
+            - Decimal(str(dispatch.snapshot_cash))
+        )
+        if reservation.snapshot_gross_exposure_basis_krw != expected_gross_basis:
+            raise PaperStateConflictError(
+                "paper reservation gross basis does not match its snapshot"
+            )
+        expected_gross_limit = _floor_nonnegative_krw(
+            Decimal(str(dispatch.snapshot_equity))
+            - Decimal(dispatch.minimum_cash_reserve_krw or 0)
+        )
+        if (
+            dispatch.minimum_cash_reserve_krw is None
+            or dispatch.minimum_cash_reserve_krw
+            > _ceil_nonnegative_krw(dispatch.snapshot_equity)
+            or reservation.minimum_cash_reserve_krw
+            != dispatch.minimum_cash_reserve_krw
+            or reservation.gross_exposure_limit_krw != expected_gross_limit
+        ):
+            raise PaperStateConflictError(
+                "paper reservation gross limit does not match its cash reserve evidence"
+            )
+        if dispatch.side == "buy":
+            expected_broker_cash = _floor_nonnegative_krw(
+                dispatch.broker_orderable_cash
+            )
+            expected_broker_quantity = _require_whole_int(
+                dispatch.broker_orderable_buy_quantity,
+                field_name="paper broker orderable buy quantity",
+                positive=False,
+                migration_error=False,
+            )
+            if (
+                reservation.kind != "cash_buy"
+                or reservation.reserved_cash_krw != request_notional
+                or reservation.reserved_gross_exposure_krw != request_notional
+                or reservation.reserved_sell_quantity is not None
+                or reservation.broker_orderable_cash_basis_krw
+                != expected_broker_cash
+                or reservation.broker_orderable_buy_quantity_basis
+                != expected_broker_quantity
+            ):
+                raise PaperStateConflictError(
+                    "paper buy reservation does not match dispatch notional"
+                )
+        else:
+            expected_orderable_quantity = _require_whole_int(
+                dispatch.snapshot_symbol_orderable_quantity,
+                field_name="paper snapshot orderable quantity",
+                positive=False,
+                migration_error=False,
+            )
+            if (
+                reservation.kind != "sell_quantity"
+                or reservation.reserved_sell_quantity != quantity
+                or reservation.reserved_cash_krw is not None
+                or reservation.reserved_gross_exposure_krw != 0
+                or reservation.snapshot_orderable_quantity_basis
+                != expected_orderable_quantity
+            ):
+                raise PaperStateConflictError(
+                    "paper sell reservation does not match dispatch quantity"
+                )
         with self._transaction():
+            if self._connection.execute(
+                """
+                SELECT 1 FROM paper_kill_operations
+                WHERE store_id = ? AND status <> 'released'
+                LIMIT 1
+                """,
+                (dispatch.store_id,),
+            ).fetchone() is not None:
+                raise PaperStateConflictError("paper kill blocks reservation")
             session_row = self._load_session_row(dispatch.session_id)
             if session_row is None:
                 raise PaperStateConflictError(
@@ -1405,23 +1822,137 @@ class PaperStateStore:
                 raise PaperStateProvenanceError(
                     "paper dispatch does not match its execution session"
                 )
-            existing_row = self._connection.execute(
+            existing_dispatch_row = self._connection.execute(
                 """
                 SELECT order_plan_id, broker_order_id, idempotency_key, store_id, session_id,
                        fencing_token, status, revision, state_json, updated_at
                 FROM paper_order_dispatches
+                WHERE order_plan_id = ? OR idempotency_key = ? OR broker_order_id = ?
+                """,
+                (
+                    dispatch.order_plan_id,
+                    dispatch.idempotency_key,
+                    dispatch.broker_order_id,
+                ),
+            ).fetchone()
+            existing_reservation_row = self._connection.execute(
+                """
+                SELECT reservation_id, order_plan_id, idempotency_key, store_id,
+                       session_id, fencing_token, symbol, kind, status, revision,
+                       state_json, updated_at
+                FROM paper_risk_reservations
                 WHERE order_plan_id = ? OR idempotency_key = ?
                 """,
-                (dispatch.order_plan_id, dispatch.idempotency_key),
+                (reservation.order_plan_id, reservation.idempotency_key),
             ).fetchone()
-            if existing_row is not None:
-                existing = self._decode_paper_order_dispatch(existing_row)
-                if existing == dispatch:
-                    return existing
+            if (
+                existing_dispatch_row is not None
+                and existing_dispatch_row["broker_order_id"]
+                == dispatch.broker_order_id
+                and existing_dispatch_row["idempotency_key"]
+                != dispatch.idempotency_key
+            ):
                 raise PaperStateConflictError(
-                    "paper dispatch identity is already bound to different evidence"
+                    "paper dispatch broker order identity already exists"
                 )
+            if existing_dispatch_row is not None or existing_reservation_row is not None:
+                if existing_dispatch_row is None or existing_reservation_row is None:
+                    raise PaperStateConflictError(
+                        "paper dispatch and reservation pair is incomplete"
+                    )
+                existing_dispatch = self._decode_paper_order_dispatch(
+                    existing_dispatch_row
+                )
+                existing_reservation = self._decode_paper_risk_reservation(
+                    existing_reservation_row
+                )
+                if existing_dispatch == dispatch and existing_reservation == reservation:
+                    return existing_dispatch, existing_reservation
+                raise PaperStateConflictError(
+                    "paper dispatch or reservation identity is already bound to different evidence"
+                )
+
+            held_rows = self._connection.execute(
+                """
+                SELECT reservation_id, order_plan_id, idempotency_key, store_id,
+                       session_id, fencing_token, symbol, kind, status, revision,
+                       state_json, updated_at
+                FROM paper_risk_reservations
+                WHERE store_id = ? AND status = 'held'
+                ORDER BY reservation_id
+                """,
+                (reservation.store_id,),
+            ).fetchall()
+            held = [self._decode_paper_risk_reservation(row) for row in held_rows]
+            for item in held:
+                self._validate_reservation_provenance(item)
+            held_cash = sum(item.reserved_cash_krw or 0 for item in held)
+            held_gross = sum(item.reserved_gross_exposure_krw for item in held)
+            held_sell = sum(
+                item.reserved_sell_quantity or 0
+                for item in held
+                if item.kind == "sell_quantity" and item.symbol == reservation.symbol
+            )
+            if reservation.kind == "cash_buy":
+                cash_basis = reservation.broker_orderable_cash_basis_krw
+                buy_quantity_basis = (
+                    reservation.broker_orderable_buy_quantity_basis
+                )
+                if cash_basis is None or buy_quantity_basis is None:
+                    raise PaperStateConflictError(
+                        "paper buy reservation lacks buying-power basis"
+                    )
+                if (reservation.reserved_cash_krw or 0) + held_cash > cash_basis:
+                    raise PaperRiskReservationRejected(
+                        "paper buy exceeds durable cash availability"
+                    )
+                if quantity > buy_quantity_basis:
+                    raise PaperRiskReservationRejected(
+                        "paper buy exceeds broker quantity availability"
+                    )
+                if (
+                    reservation.snapshot_gross_exposure_basis_krw
+                    + held_gross
+                    + reservation.reserved_gross_exposure_krw
+                    > reservation.gross_exposure_limit_krw
+                ):
+                    raise PaperRiskReservationRejected(
+                        "paper buy exceeds durable gross exposure availability"
+                    )
+            else:
+                sell_basis = reservation.snapshot_orderable_quantity_basis
+                if sell_basis is None:
+                    raise PaperStateConflictError(
+                        "paper sell reservation lacks orderable quantity basis"
+                    )
+                if (reservation.reserved_sell_quantity or 0) + held_sell > sell_basis:
+                    raise PaperRiskReservationRejected(
+                        "paper sell exceeds durable quantity availability"
+                    )
             try:
+                self._connection.execute(
+                    """
+                    INSERT INTO paper_risk_reservations (
+                        reservation_id, order_plan_id, idempotency_key, store_id,
+                        session_id, fencing_token, symbol, kind, status, revision,
+                        state_json, updated_at
+                    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                    """,
+                    (
+                        reservation.reservation_id,
+                        reservation.order_plan_id,
+                        reservation.idempotency_key,
+                        reservation.store_id,
+                        reservation.session_id,
+                        reservation.fencing_token,
+                        reservation.symbol,
+                        reservation.kind,
+                        reservation.status,
+                        reservation.revision,
+                        self._serialize(reservation),
+                        reservation.updated_at.isoformat(),
+                    ),
+                )
                 self._connection.execute(
                     """
                     INSERT INTO paper_order_dispatches (
@@ -1444,9 +1975,9 @@ class PaperStateStore:
                 )
             except sqlite3.IntegrityError as exc:
                 raise PaperStateConflictError(
-                    "paper dispatch order or idempotency key already exists"
+                    "paper dispatch or reservation identity already exists"
                 ) from exc
-        return dispatch
+        return dispatch, reservation
 
     def claim_dispatch_attempt(
         self,
@@ -1477,6 +2008,21 @@ class PaperStateStore:
             ):
                 raise PaperStateConflictError(
                     "paper dispatch belongs to a different session fence"
+                )
+            reservation_row = self._load_reservation_row(current.order_plan_id)
+            if reservation_row is None:
+                raise PaperStateCorruptionError(
+                    "paper dispatch lost its risk reservation before claim"
+                )
+            reservation = self._decode_paper_risk_reservation(reservation_row)
+            self._validate_reservation_provenance(reservation)
+            if (
+                reservation.status != "held"
+                or reservation.session_id != current.session_id
+                or reservation.fencing_token != current.fencing_token
+            ):
+                raise PaperStateConflictError(
+                    "paper dispatch and reservation claim evidence disagree"
                 )
             if current.status != "prepared" or current.attempt_count != 0:
                 raise PaperStateConflictError(
@@ -1639,6 +2185,55 @@ class PaperStateStore:
                 raise PaperStateConflictError(
                     "prepared paper dispatch changed during fenced takeover"
                 )
+            reservation_row = self._load_reservation_row(current.order_plan_id)
+            if reservation_row is None:
+                raise PaperStateCorruptionError(
+                    "prepared paper dispatch lost its risk reservation"
+                )
+            reservation = self._decode_paper_risk_reservation(reservation_row)
+            self._validate_reservation_provenance(reservation)
+            if (
+                reservation.status != "held"
+                or reservation.session_id != current.session_id
+                or reservation.fencing_token != current.fencing_token
+            ):
+                raise PaperStateConflictError(
+                    "prepared dispatch and reservation takeover evidence disagree"
+                )
+            rebound_reservation = PaperRiskReservation.model_validate(
+                reservation.model_copy(
+                    update={
+                        "session_id": successor.session_id,
+                        "fencing_token": successor.fencing_token,
+                        "updated_at": taken_over_at,
+                        "revision": reservation.revision + 1,
+                    }
+                ).model_dump()
+            )
+            reservation_cursor = self._connection.execute(
+                """
+                UPDATE paper_risk_reservations
+                SET session_id = ?, fencing_token = ?, revision = ?,
+                    state_json = ?, updated_at = ?
+                WHERE reservation_id = ? AND session_id = ?
+                  AND fencing_token = ? AND status = 'held' AND revision = ?
+                """,
+                (
+                    rebound_reservation.session_id,
+                    rebound_reservation.fencing_token,
+                    rebound_reservation.revision,
+                    self._serialize(rebound_reservation),
+                    rebound_reservation.updated_at.isoformat(),
+                    reservation.reservation_id,
+                    reservation.session_id,
+                    reservation.fencing_token,
+                    reservation.revision,
+                ),
+            )
+            if reservation_cursor.rowcount != 1:
+                raise PaperStateConflictError(
+                    "prepared reservation changed during fenced takeover"
+                )
         return rebound
 
     @staticmethod
@@ -1678,6 +2273,7 @@ class PaperStateStore:
             dispatch.snapshot_monthly_loss_ratio,
             dispatch.broker_orderable_cash,
             dispatch.broker_orderable_buy_quantity,
+            dispatch.minimum_cash_reserve_krw,
             dispatch.entry_atr14,
             dispatch.store_id,
             dispatch.session_id,
@@ -1687,6 +2283,66 @@ class PaperStateStore:
             dispatch.account_scope_fingerprint,
             dispatch.prepared_at,
         )
+
+    def _release_reservation_for_terminal_dispatch(
+        self,
+        dispatch: PaperOrderDispatch,
+    ) -> PaperRiskReservation | None:
+        release = PAPER_RESERVATION_RELEASE_BY_DISPATCH.get(dispatch.status)
+        if release is None:
+            return None
+        row = self._load_reservation_row(dispatch.order_plan_id)
+        if row is None:
+            raise PaperStateCorruptionError(
+                "terminal paper dispatch lost its risk reservation"
+            )
+        current = self._decode_paper_risk_reservation(row)
+        self._validate_reservation_provenance(current)
+        target_status, reason = release
+        if current.status == target_status:
+            return current
+        if current.status != "held":
+            raise PaperStateConflictError(
+                "paper reservation cannot change between terminal release reasons"
+            )
+        if (
+            current.session_id != dispatch.session_id
+            or current.fencing_token != dispatch.fencing_token
+        ):
+            raise PaperStateConflictError(
+                "terminal dispatch and reservation fences disagree"
+            )
+        released = PaperRiskReservation.model_validate(
+            current.model_copy(
+                update={
+                    "status": target_status,
+                    "release_reason": reason,
+                    "released_at": dispatch.updated_at,
+                    "updated_at": dispatch.updated_at,
+                    "revision": current.revision + 1,
+                }
+            ).model_dump()
+        )
+        cursor = self._connection.execute(
+            """
+            UPDATE paper_risk_reservations
+            SET status = ?, revision = ?, state_json = ?, updated_at = ?
+            WHERE reservation_id = ? AND status = 'held' AND revision = ?
+            """,
+            (
+                released.status,
+                released.revision,
+                self._serialize(released),
+                released.updated_at.isoformat(),
+                current.reservation_id,
+                current.revision,
+            ),
+        )
+        if cursor.rowcount != 1:
+            raise PaperStateConflictError(
+                "paper reservation changed before terminal release"
+            )
+        return released
 
     def update_paper_order_dispatch(
         self,
@@ -1818,6 +2474,7 @@ class PaperStateStore:
                 raise PaperStateConflictError(
                     "paper dispatch changed before monotonic evidence update"
                 )
+            self._release_reservation_for_terminal_dispatch(dispatch)
         return dispatch
 
     def recover_interrupted_dispatches(
@@ -1940,6 +2597,59 @@ class PaperStateStore:
         for dispatch in dispatches:
             self._validate_dispatch_provenance(dispatch)
         return dispatches
+
+    def load_paper_risk_reservation(
+        self,
+        order_plan_id: str,
+    ) -> PaperRiskReservation | None:
+        row = self._load_reservation_row(order_plan_id)
+        if row is None:
+            return None
+        reservation = self._decode_paper_risk_reservation(row)
+        self._validate_reservation_provenance(reservation)
+        return reservation
+
+    def find_paper_risk_reservation_by_idempotency_key(
+        self,
+        idempotency_key: str,
+    ) -> PaperRiskReservation | None:
+        row = self._connection.execute(
+            """
+            SELECT reservation_id, order_plan_id, idempotency_key, store_id,
+                   session_id, fencing_token, symbol, kind, status, revision,
+                   state_json, updated_at
+            FROM paper_risk_reservations
+            WHERE idempotency_key = ?
+            """,
+            (idempotency_key.strip(),),
+        ).fetchone()
+        if row is None:
+            return None
+        reservation = self._decode_paper_risk_reservation(row)
+        self._validate_reservation_provenance(reservation)
+        return reservation
+
+    def list_paper_risk_reservations(
+        self,
+        *,
+        held_only: bool = False,
+    ) -> list[PaperRiskReservation]:
+        where = "WHERE store_id = ? AND status = 'held'" if held_only else "WHERE store_id = ?"
+        rows = self._connection.execute(
+            f"""
+            SELECT reservation_id, order_plan_id, idempotency_key, store_id,
+                   session_id, fencing_token, symbol, kind, status, revision,
+                   state_json, updated_at
+            FROM paper_risk_reservations
+            {where}
+            ORDER BY updated_at, reservation_id
+            """,
+            (self._require_paper_store().store_id,),
+        ).fetchall()
+        reservations = [self._decode_paper_risk_reservation(row) for row in rows]
+        for reservation in reservations:
+            self._validate_reservation_provenance(reservation)
+        return reservations
 
     def list_unresolved_paper_order_dispatches(self) -> list[PaperOrderDispatch]:
         return [

@@ -14,7 +14,10 @@ from quantpilot.packages.core.kis_paper import (
     KisDailyOrderFill,
     KisDailyOrdersResult,
 )
-from quantpilot.packages.core.operator.position_ledger import PaperOrderDispatch
+from quantpilot.packages.core.operator.position_ledger import (
+    PaperOrderDispatch,
+    PaperRiskReservation,
+)
 from quantpilot.packages.db.sqlite_repositories import PaperStateStore
 
 
@@ -57,6 +60,7 @@ def _prepared(**updates: object) -> PaperOrderDispatch:
         "snapshot_monthly_loss_ratio": -0.02,
         "broker_orderable_cash": 500000,
         "broker_orderable_buy_quantity": 6,
+        "minimum_cash_reserve_krw": 0,
         "entry_atr14": 1200,
         "store_id": "replace-from-store",
         "session_id": "replace-from-session",
@@ -69,6 +73,55 @@ def _prepared(**updates: object) -> PaperOrderDispatch:
     return PaperOrderDispatch(**values)
 
 
+def _insert_reserved(
+    store: PaperStateStore,
+    prepared: PaperOrderDispatch,
+) -> PaperOrderDispatch:
+    notional = int(prepared.quantity) * int(prepared.limit_price)
+    reservation = PaperRiskReservation(
+        reservation_id=f"presv-{prepared.order_plan_id}",
+        order_plan_id=prepared.order_plan_id,
+        idempotency_key=prepared.idempotency_key,
+        kind="cash_buy" if prepared.side == "buy" else "sell_quantity",
+        symbol=prepared.symbol,
+        side=prepared.side,
+        reserved_cash_krw=notional if prepared.side == "buy" else None,
+        reserved_sell_quantity=(
+            int(prepared.quantity) if prepared.side == "sell" else None
+        ),
+        reserved_gross_exposure_krw=(
+            notional if prepared.side == "buy" else 0
+        ),
+        broker_orderable_cash_basis_krw=int(
+            prepared.broker_orderable_cash or 0
+        ) if prepared.side == "buy" else None,
+        broker_orderable_buy_quantity_basis=int(
+            prepared.broker_orderable_buy_quantity or 0
+        ) if prepared.side == "buy" else None,
+        snapshot_orderable_quantity_basis=(
+            int(prepared.snapshot_symbol_orderable_quantity)
+            if prepared.side == "sell"
+            else None
+        ),
+        snapshot_gross_exposure_basis_krw=int(
+            prepared.snapshot_equity - prepared.snapshot_cash
+        ),
+        minimum_cash_reserve_krw=0,
+        gross_exposure_limit_krw=int(prepared.snapshot_equity),
+        store_id=prepared.store_id,
+        session_id=prepared.session_id,
+        fencing_token=prepared.fencing_token,
+        account_scope_fingerprint=prepared.account_scope_fingerprint,
+        created_at=prepared.prepared_at,
+        updated_at=prepared.prepared_at,
+    )
+    persisted, _ = store.reserve_and_insert_paper_order_dispatch(
+        prepared,
+        reservation,
+    )
+    return persisted
+
+
 def _claimed(store: PaperStateStore) -> PaperOrderDispatch:
     session = store.start_paper_execution_session(
         started_at=NOW - timedelta(minutes=1),
@@ -79,7 +132,7 @@ def _claimed(store: PaperStateStore) -> PaperOrderDispatch:
         session_id=session.session_id,
         fencing_token=session.fencing_token,
     )
-    store.insert_paper_order_dispatch(prepared)
+    _insert_reserved(store, prepared)
     return store.claim_dispatch_attempt(
         prepared.order_plan_id,
         session=session,
@@ -230,7 +283,7 @@ def _old_unknown(store: PaperStateStore) -> PaperOrderDispatch:
         prepared_at=old,
         updated_at=old,
     )
-    store.insert_paper_order_dispatch(prepared)
+    _insert_reserved(store, prepared)
     claimed = store.claim_dispatch_attempt(
         prepared.order_plan_id,
         session=session,
@@ -270,7 +323,7 @@ def _current_protective_claimed(store: PaperStateStore) -> PaperOrderDispatch:
         session_id=session.session_id,
         fencing_token=session.fencing_token,
     )
-    store.insert_paper_order_dispatch(prepared)
+    _insert_reserved(store, prepared)
     return store.claim_dispatch_attempt(
         prepared.order_plan_id,
         session=session,
@@ -356,6 +409,10 @@ def test_unique_match_creates_idempotent_delta_evidence_then_completes(tmp_path)
         assert partial.fill_evidence[0].time_basis == (
             "broker_daily_aggregate_first_observed"
         )
+        held = store.load_paper_risk_reservation(partial.order_plan_id)
+        assert held is not None
+        assert held.status == "held"
+        assert held.reserved_cash_krw == 140_000
         same = reconciler.reconcile_dispatch(
             partial,
             (_row(),),
@@ -380,6 +437,10 @@ def test_unique_match_creates_idempotent_delta_evidence_then_completes(tmp_path)
         assert len(filled.fill_evidence) == 2
         assert filled.fill_evidence[1].quantity == 1
         assert filled.fill_evidence[1].price == 71000
+        released = store.load_paper_risk_reservation(filled.order_plan_id)
+        assert released is not None
+        assert released.status == "released_filled"
+        assert released.release_reason == "filled"
 
 
 def test_post_forwarding_org_and_daily_branch_are_preserved_independently(
@@ -565,3 +626,10 @@ def test_terminal_rejection_and_cancellation_are_mapped_exactly(
         assert terminal.reconciliation_status == "reconciled"
         assert terminal.cumulative_filled_quantity == 0
         assert terminal.fill_evidence == []
+        released = store.load_paper_risk_reservation(terminal.order_plan_id)
+        assert released is not None
+        assert released.status == (
+            "released_rejected"
+            if expected_status == "rejected"
+            else "released_cancelled"
+        )

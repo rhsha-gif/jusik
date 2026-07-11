@@ -511,6 +511,7 @@ class PaperOrderDispatch(HarnessModel):
         ge=0,
         allow_inf_nan=False,
     )
+    minimum_cash_reserve_krw: int | None = Field(default=None, ge=0)
     entry_atr14: float | None = Field(default=None, ge=0, allow_inf_nan=False)
     store_id: str
     session_id: str
@@ -594,6 +595,26 @@ class PaperOrderDispatch(HarnessModel):
         except ValueError as exc:
             raise ValueError("broker order time must be valid HHMMSS") from exc
         return value
+
+    @field_validator("minimum_cash_reserve_krw", mode="before")
+    @classmethod
+    def minimum_cash_reserve_must_be_an_exact_integer(
+        cls,
+        value: object,
+    ) -> object:
+        if value is None:
+            return None
+        if isinstance(value, bool):
+            raise ValueError("paper-dispatch cash reserve must be an exact integer")
+        if isinstance(value, int):
+            return value
+        if isinstance(value, Decimal):
+            if value.is_finite() and value == value.to_integral_value():
+                return int(value)
+        elif isinstance(value, float):
+            if isfinite(value) and value.is_integer():
+                return int(value)
+        raise ValueError("paper-dispatch cash reserve must be an exact integer")
 
     @model_validator(mode="before")
     @classmethod
@@ -920,6 +941,7 @@ class PaperRiskReservation(HarnessModel):
     broker_orderable_buy_quantity_basis: int | None = Field(default=None, ge=0)
     snapshot_orderable_quantity_basis: int | None = Field(default=None, ge=0)
     snapshot_gross_exposure_basis_krw: int = Field(ge=0)
+    minimum_cash_reserve_krw: int = Field(ge=0)
     gross_exposure_limit_krw: int = Field(ge=0)
     store_id: str
     session_id: str
@@ -979,6 +1001,7 @@ class PaperRiskReservation(HarnessModel):
         "broker_orderable_buy_quantity_basis",
         "snapshot_orderable_quantity_basis",
         "snapshot_gross_exposure_basis_krw",
+        "minimum_cash_reserve_krw",
         "gross_exposure_limit_krw",
         mode="before",
     )

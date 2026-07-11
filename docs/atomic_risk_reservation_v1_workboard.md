@@ -67,9 +67,9 @@ gate of the roadmap (`docs/roadmap_execution_workboard.md`, Gate 1 of
 
 | Task ID | Owner/model | Reviewer/model | Depends on | Worktree/branch | Owned paths | Status | Acceptance | Evidence/commit |
 |---|---|---|---|---|---|---|---|---|
-| `QP-RISK-RES-V1-contract` | Claude Code Opus alias + `claude-fable-5` finalizer | GPT-5 Codex lead | `QP-RM-00`, `QP-RM-00A` | `주식트레이더-claude-roadmap-contracts` / `claude/qp-roadmap-contracts` | `docs/roadmap_acceptance_matrix.md`, `docs/contracts/atomic_risk_reservation_v1.md`, `docs/atomic_risk_reservation_v1_workboard.md` | integrated | Decision-complete v10 model/arithmetic/transaction/migration/tests; Codex review added integer gross reservation and corrected atomic store ownership. | Claude `215a4b9`, integrated `36d9a8a`; Codex review follow-up pending |
-| `QP-RISK-RES-V1-impl` | GPT-5 Codex lead | Claude Code (independent audit) | `QP-RISK-RES-V1-contract` | new sibling worktree / `codex/qp-risk-reservation-v1-core` | `operator/position_ledger.py` (reservation model), `db/sqlite_repositories.py` (table/migration/CAS methods), `execution/paper_submission.py` (reserve boundary), `harness_service.py` (durable guardrail projection), reservation tests | ready | Contract §10 tests green in full suite; smoke safe-default; migration preserves v9; zero P0/P1. | pending |
-| `QP-RISK-RES-V1-audit` | Claude Code (exact model recorded at audit) | GPT-5 Codex lead | `QP-RISK-RES-V1-impl` | read-only over impl branch | audit report only (no code) | proposed | Adversarial review of atomicity, conservative release, fencing, gross exposure, and migration; blocks merge on any P0/P1. | pending |
+| `QP-RISK-RES-V1-contract` | Claude Code Opus alias + `claude-fable-5` finalizer | GPT-5 Codex lead | `QP-RM-00`, `QP-RM-00A` | `주식트레이더-claude-roadmap-contracts` / `claude/qp-roadmap-contracts` | `docs/roadmap_acceptance_matrix.md`, `docs/contracts/atomic_risk_reservation_v1.md`, `docs/atomic_risk_reservation_v1_workboard.md` | integrated | Decision-complete v10 model/arithmetic/transaction/migration/tests; Codex review added integer gross reservation and corrected atomic store ownership. | Claude `215a4b9`, integrated `36d9a8a`; Codex hardening `5dff17a` |
+| `QP-RISK-RES-V1-impl` | GPT-5 Codex lead | Claude Code (independent audit) | `QP-RISK-RES-V1-contract` | `주식트레이더-risk-reservation-v1` / `codex/qp-risk-reservation-v1-core` | `operator/position_ledger.py` (reservation model), `db/sqlite_repositories.py` (table/migration/CAS methods), `execution/paper_submission.py` (reserve boundary), `harness_service.py` (durable guardrail projection), reservation tests | review | Contract §10 tests green in full suite; smoke safe-default; migration preserves v9; internal adversarial audit P0/P1 zero. | `884 passed, 2 skipped`; smoke mock/live=false; implementation commit pending |
+| `QP-RISK-RES-V1-audit` | Claude Code `claude-fable-5` | GPT-5 Codex lead | `QP-RISK-RES-V1-impl` | read-only over impl branch | audit report only (no code) | in_progress | Adversarial review of atomicity, conservative release, fencing, gross exposure, and migration; blocks integration on any P0/P1. | Claude request reached `claude-fable-5` but returned account `429 rate_limit_error` at 2026-07-11 11:53 KST; retry pending |
 
 Owned-path disjointness: the contract task owns only the three docs; the impl task
 owns the runtime paths; the audit task writes no code. No two active tasks share a
@@ -105,6 +105,20 @@ writable path.
   `execution/paper_submission.py`, `risk/gatekeeper.py`, `risk/batch.py`,
   `docs/contracts/kis_paper_kill_contract.md`); docs-only, no runtime change;
   `git diff --check` clean.
+- `2026-07-11 KST` — GPT-5 Codex lead — implemented schema v10 reservation,
+  exact dispatch/reservation capacity-evidence binding, one-transaction
+  reserve+prepare, terminal release CAS, takeover re-fencing, durable sell
+  guardrail projection, and v9 backfill/rollback handling.
+- `2026-07-11 KST` — independent Codex audit agent — reproduced a forged
+  reservation-basis P1 and a migrated-open reprepare P1; both were fixed with
+  adversarial regression tests. Final internal audit: P0=0, P1=0.
+- `2026-07-11 KST` — verification — `884 passed, 2 skipped`; smoke remained
+  `broker=mock`, `live_trading_enabled=false`, Level 5 blocked; `git diff --check`
+  clean; no network or real KIS POST.
+- `2026-07-11 11:53 KST` — Claude Code final implementation audit attempt —
+  resolved model `claude-fable-5`; request failed with account
+  `429 rate_limit_error`. Contract/acceptance authorship remains the substantive
+  Claude deliverable; implementation integration waits for audit retry.
 
 ## Handoff record
 
@@ -127,16 +141,40 @@ integration_requests:
   - reservation aggregate identity stable before QP-EXEC-EVENTS-V1 dual-write
 ```
 
+```text
+task_id: QP-RISK-RES-V1-impl
+agent_and_model: GPT-5 Codex lead with independent Codex audit agent
+commit: pending on codex/qp-risk-reservation-v1-core
+owned_paths:
+  - quantpilot/packages/core/operator/position_ledger.py
+  - quantpilot/packages/core/execution/paper_submission.py
+  - quantpilot/packages/core/harness_service.py
+  - quantpilot/packages/db/sqlite_repositories.py
+  - quantpilot/tests/unit/test_paper_*.py
+  - docs/contracts/atomic_risk_reservation_v1.md
+  - docs/atomic_risk_reservation_v1_workboard.md
+  - docs/atomic_risk_reservation_v1_completion_candidate.md
+acceptance_met: implementation/local acceptance yes; integration pending Claude
+  implementation-audit retry
+exact_checks: 884 passed, 2 skipped; smoke mock/live=false/Level 5 blocked;
+  git diff --check clean; internal audit P0=0/P1=0
+known_limits: real KIS calls remain manual; Claude final audit returned account 429
+integration_requests:
+  - retry Claude read-only audit after account reset
+  - preserve reservation aggregate identity for QP-EXEC-EVENTS-V1
+```
+
 ## Mission retrospective
 
 | Task ID | Task class | Agent/model | First-pass | P0 | P1 | P2 | Rework cycles | Required checks | Elapsed | Rating |
 |---|---|---|---|---:|---:|---:|---:|---|---|---:|
 | `QP-RISK-RES-V1-contract` | safety contract + acceptance authoring | Claude Code Opus alias + `claude-fable-5` | no | 0 | 1 | 0 | 1 | `git diff --check` clean; docs-only | recorded in Claude runs | 2 |
+| `QP-RISK-RES-V1-impl` | SQLite risk reservation + integration | GPT-5 Codex + independent Codex audit | no | 0 | 2 | 2 | 4 | 884 tests + smoke + migration/concurrency/fault tests | review candidate | 4 |
 
 - Routing decision quality: correct for independent contract authorship; Codex review found and repaired one P1 scope/atomicity defect before runtime implementation.
 - Capability scorecard update: append one record for the contract/acceptance class
   on completion; preference unchanged pending ≥3 comparable samples (scorecard §7).
 - User-owned changes preserved: original `main` worktree untouched; only the three
   owned docs staged on `claude/qp-roadmap-contracts`.
-- Remaining limitations: implementation (`QP-RISK-RES-V1-impl`) and its independent
-  audit are downstream; manual KIS validation deferred to Gate P.
+- Remaining limitations: Claude Code final implementation audit retry is pending
+  after account rate limiting; manual KIS validation remains deferred to Gate P.

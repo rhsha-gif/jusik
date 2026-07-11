@@ -191,7 +191,7 @@ behavior. They do not weaken any §0/§4/§5/§6 safety clause.
 
 | ID | Severity | File / symbol | Defect and impact | Recommendation |
 |---|---|---|---|---|
-| QP-RES-A1 | P2 | `db/sqlite_repositories.py:830` `_backfill_open_dispatch_reservations` (sell branch, `minimum_cash_reserve_krw = snapshot_equity - current_gross`) | For a legacy open **sell** dispatch with fractional float equity/cash where `ceil(equity − cash) > floor(equity)` (e.g. `equity=10_000_000.5`, `cash=0.3`), the reconstructed reserve is `−1`, so `PaperRiskReservation` raises a raw pydantic `ValidationError` instead of the contract-mandated `PaperStateMigrationRequired` (§9). **Reproduced** offline: `OTHER EXCEPTION pydantic_core...ValidationError: minimum_cash_reserve_krw ... input_value=-1`; after the failure `user_version=9`, metadata `schema_version=9`, no reservation table — the migration transaction rolls back completely, so the failure is fully fail-closed and no weaker reservation is created. Impact is diagnosability/error-contract only. | Clamp the sell-branch reconstruction (`max(0, ...)`) or wrap backfill model construction to re-raise as `PaperStateMigrationRequired`, plus one regression test with fractional legacy equity/cash. |
+| QP-RES-A1 | P2 — **CLOSED** by `a892210` (follow-up §9) | `db/sqlite_repositories.py:830` `_backfill_open_dispatch_reservations` (sell branch, `minimum_cash_reserve_krw = snapshot_equity - current_gross`) | For a legacy open **sell** dispatch with fractional float equity/cash where `ceil(equity − cash) > floor(equity)` (e.g. `equity=10_000_000.5`, `cash=0.3`), the reconstructed reserve is `−1`, so `PaperRiskReservation` raises a raw pydantic `ValidationError` instead of the contract-mandated `PaperStateMigrationRequired` (§9). **Reproduced** offline: `OTHER EXCEPTION pydantic_core...ValidationError: minimum_cash_reserve_krw ... input_value=-1`; after the failure `user_version=9`, metadata `schema_version=9`, no reservation table — the migration transaction rolls back completely, so the failure is fully fail-closed and no weaker reservation is created. Impact is diagnosability/error-contract only. | Clamp the sell-branch reconstruction (`max(0, ...)`) or wrap backfill model construction to re-raise as `PaperStateMigrationRequired`, plus one regression test with fractional legacy equity/cash. |
 | QP-RES-A2 | P2 | `harness_service.py:856-889` (held-reservation guardrail projection) | The durable held sell-reservation loop is not filtered by `policy_id` (reservations carry none), while the paired dispatch loop skips `dispatch.policy_id != policy.policy_id`. If one paper store ever serves multiple policies, one policy's held sell reservation inflates another policy's `reserved_sell_quantities`. Direction is strictly conservative (over-blocking, never under-reserving), and current usage is one policy per paper store, so this cannot over-allocate capacity. | Either document single-policy-per-store as an invariant or join reservations to their dispatch's `policy_id` before projecting. |
 | QP-RES-A3 | P3 | `db/sqlite_repositories.py:1975-1979` (pair-insert `sqlite3.IntegrityError` handler) | Any integrity failure during the pair insert (trigger, FK, constraint) is reported as "paper dispatch or reservation identity already exists", which is misleading for non-duplicate integrity causes (visible in the fault-injection test, which must match "already exists" for a forced trigger abort). Rollback behavior is correct. | Distinguish duplicate-key from other integrity causes in the message when convenient. |
 
@@ -206,10 +206,12 @@ model, table, or JSON.
 
 - **Residual P0: 0**
 - **Residual P1: 0**
-- P2: 2 (QP-RES-A1, QP-RES-A2 — both fail-closed or strictly conservative in
-  direction; neither can over-allocate capacity, release on ambiguity, or grant
-  POST authority)
-- P3: 1 (QP-RES-A3)
+- P2: 1 residual (QP-RES-A2 — strictly conservative in direction; cannot
+  over-allocate capacity, release on ambiguity, or grant POST authority).
+  QP-RES-A1 was a second P2 at the original audit HEAD `58715bd`; it is
+  **CLOSED** by fix commit `a892210` (verified in the §9 follow-up) and is kept
+  in the §4 table for history.
+- P3: 1 residual (QP-RES-A3)
 
 **Recommendation: ACCEPT** `QP-RISK-RES-V1-impl` for Gate 1 development
 readiness. The P2/P3 findings do not block under the contract's blocking rule
@@ -260,3 +262,74 @@ readiness. The P2/P3 findings do not block under the contract's blocking rule
    (`claude-fable-5`, independent implementation audit) at the mission
    completion checkpoint (scorecard is lead/owner-managed; not modified by this
    audit).
+
+## 9. Follow-up audit of QP-RES-A1 fix (2026-07-11 KST)
+
+Independent follow-up review by Claude Code, exact model `claude-fable-5`
+(CLI model selector alias `fable`, resolved to `claude-fable-5`), on branch
+`claude/qp-risk-reservation-v1-audit` at HEAD
+`a892210150db0c9c4b84fb1f8159d6e2cec8b7ee` (clean tree verified before any
+read). Reviewed delta: `c021a50..a892210`, a narrow Codex fix for QP-RES-A1
+plus one regression test; no other runtime file changed
+(`git diff c021a50..a892210 --stat`: `sqlite_repositories.py` +7/−1,
+`test_paper_dispatch_persistence.py` +56).
+
+**What the fix does.** In `_backfill_open_dispatch_reservations`
+(`db/sqlite_repositories.py:954-959`), the synthesized-reservation construction
+`PaperRiskReservation(**values)` is now wrapped in
+`try/except ValueError`, re-raised as
+`PaperStateMigrationRequired("open legacy dispatch cannot be promoted to a
+valid risk reservation") from exc`.
+
+**Verified properties:**
+
+1. **Correct error type, fail-closed.** A legacy open sell with fractional
+   equity/cash (`snapshot_equity=10_000_000.5`, `snapshot_cash=0.3`), whose
+   reconstructed `minimum_cash_reserve_krw` is `−1`, now fails as
+   `PaperStateMigrationRequired` per contract §9 instead of a raw pydantic
+   `ValidationError`. The handler only re-raises; nothing clamps, substitutes,
+   or admits a weaker reservation, and the chained `from exc` preserves the
+   original validation evidence.
+2. **Catch scope is exactly synthesized model validation.** The `try` block
+   wraps only the `PaperRiskReservation(**values)` constructor call. Pydantic
+   `ValidationError` subclasses `ValueError` and is caught;
+   `PaperStateMigrationRequired`/`PaperStateError` subclass `RuntimeError`
+   (`db/sqlite_repositories.py:36`, `:52`), so the pre-existing explicit
+   backfill raises (missing buy evidence `:907`, gross-capacity `:913`,
+   conflicting existing reservation `:868`) and any store error cannot be
+   intercepted or re-labeled by this handler. The SQL insert and dispatch
+   decode remain outside the `try`.
+3. **Whole-migration rollback preserved.** Backfill runs at
+   `db/sqlite_repositories.py:568` inside the single `BEGIN IMMEDIATE`
+   migration transaction (`with self._transaction():`, `:326`; rollback on any
+   exception, `:661-669`) that also creates the reservation table, applies the
+   metadata CAS update to v10, and sets `PRAGMA user_version = 10` (`:623`).
+   The regression test
+   `test_migration_fractional_sell_audit_failure_uses_migration_error`
+   asserts post-failure `PRAGMA user_version == 9`, metadata
+   `schema_version == 9`, and no `paper_risk_reservations` table.
+4. **Regression test is faithful.** It builds a real v10 store, downgrades to
+   v9 via the existing helper, injects the fractional equity/cash directly into
+   the legacy dispatch JSON, and requires the exact
+   `PaperStateMigrationRequired` match — the same reproduction shape as the
+   original §4 finding.
+
+**Focused offline evidence (no network, no KIS, no credentials):**
+
+```text
+python -m pytest quantpilot/tests/unit/test_paper_dispatch_persistence.py \
+    -p no:cacheprovider --basetemp=.pytest_tmp_claude_a1
+# 41 passed in 3.16s  (includes the new regression test; also passes alone
+#  under -k fractional_sell)
+
+git diff --check
+# clean
+```
+
+**Verdict: QP-RES-A1 is CLOSED.** The fix implements exactly the §4
+recommendation (re-raise as `PaperStateMigrationRequired` plus a
+fractional-legacy regression test), weakens no evidence check, admits no
+invalid reservation, and changes no safety flag or POST authority.
+QP-RES-A2 (P2) and QP-RES-A3 (P3) remain open, non-blocking, and unchanged by
+this delta. **Residual P0: 0. Residual P1: 0.** The §5 ACCEPT recommendation
+stands for the fixed HEAD `a892210`.

@@ -69,7 +69,7 @@ gate of the roadmap (`docs/roadmap_execution_workboard.md`, Gate 1 of
 |---|---|---|---|---|---|---|---|---|
 | `QP-RISK-RES-V1-contract` | Claude Code Opus alias + `claude-fable-5` finalizer | GPT-5 Codex lead | `QP-RM-00`, `QP-RM-00A` | `주식트레이더-claude-roadmap-contracts` / `claude/qp-roadmap-contracts` | `docs/roadmap_acceptance_matrix.md`, `docs/contracts/atomic_risk_reservation_v1.md`, `docs/atomic_risk_reservation_v1_workboard.md` | integrated | Decision-complete v10 model/arithmetic/transaction/migration/tests; Codex review added integer gross reservation and corrected atomic store ownership. | Claude `215a4b9`, integrated `36d9a8a`; Codex hardening `5dff17a` |
 | `QP-RISK-RES-V1-impl` | GPT-5 Codex lead | Claude Code (independent audit) | `QP-RISK-RES-V1-contract` | `주식트레이더-risk-reservation-v1` / `codex/qp-risk-reservation-v1-core` | `operator/position_ledger.py` (reservation model), `db/sqlite_repositories.py` (table/migration/CAS methods), `execution/paper_submission.py` (reserve boundary), `harness_service.py` (durable guardrail projection), reservation tests | review | Contract §10 tests green in full suite; smoke safe-default; migration preserves v9; internal adversarial audit P0/P1 zero. | `ce075bf`; `884 passed, 2 skipped`; smoke mock/live=false |
-| `QP-RISK-RES-V1-audit` | Claude Code `claude-fable-5` | GPT-5 Codex lead | `QP-RISK-RES-V1-impl` | read-only over impl branch | audit report only (no code) | review | Adversarial review of atomicity, conservative release, fencing, gross exposure, and migration; blocks integration on any P0/P1. | Historical: `429 rate_limit_error` at 2026-07-11 11:53 KST. Retry succeeded 2026-07-11 KST on `claude-fable-5`: `docs/atomic_risk_reservation_v1_claude_audit.md`; residual P0=0, P1=0 (2×P2, 1×P3 non-blocking); recommendation ACCEPT; `884 passed, 2 skipped`; smoke mock/live=false/blocked; kill CLI `paper_kill_disabled`; `git diff --check` clean |
+| `QP-RISK-RES-V1-audit` | Claude Code `claude-fable-5` | GPT-5 Codex lead | `QP-RISK-RES-V1-impl` | read-only over impl branch | audit report only (no code) | review | Adversarial review of atomicity, conservative release, fencing, gross exposure, and migration; blocks integration on any P0/P1. | Historical: `429 rate_limit_error` at 2026-07-11 11:53 KST. Retry succeeded 2026-07-11 KST on `claude-fable-5`: `docs/atomic_risk_reservation_v1_claude_audit.md`; residual P0=0, P1=0 (2×P2, 1×P3 non-blocking); recommendation ACCEPT; `884 passed, 2 skipped`; smoke mock/live=false/blocked; kill CLI `paper_kill_disabled`; `git diff --check` clean. Follow-up 2026-07-11 KST on `claude-fable-5` at `a892210`: QP-RES-A1 CLOSED; residual P0=0/P1=0; ACCEPT stands (audit doc §9) |
 
 Owned-path disjointness: the contract task owns only the three docs; the impl task
 owns the runtime paths; the audit task writes no code. No two active tasks share a
@@ -132,6 +132,21 @@ writable path.
   `884 passed, 2 skipped`; smoke `broker=mock`/`live_trading_enabled=false`/
   operator blocked; kill CLI `paper_kill_disabled`; `git diff --check` clean;
   no network or authority change.
+- `2026-07-11 KST` — Claude Code `claude-fable-5` (CLI alias `fable`) —
+  independent follow-up review of the QP-RES-A1 fix, delta `c021a50..a892210`
+  at HEAD `a892210` on `claude/qp-risk-reservation-v1-audit` (clean tree
+  verified first). Confirmed the fractional-legacy-sell backfill failure now
+  raises `PaperStateMigrationRequired` (catch scoped to synthesized
+  `PaperRiskReservation` validation only, re-raise fail-closed, no evidence
+  weakened, no invalid reservation admitted) and that the whole v9→v10
+  migration transaction still rolls back metadata, `user_version`, and the
+  reservation table. Focused check:
+  `python -m pytest quantpilot/tests/unit/test_paper_dispatch_persistence.py`
+  → `41 passed`; `git diff --check` clean. **QP-RES-A1 CLOSED**; QP-RES-A2/A3
+  remain non-blocking residuals; residual P0=0, P1=0 → final **ACCEPT** for
+  Gate 1 development readiness at `a892210` (audit doc §9). This checkpoint
+  does not claim mainline/baseline integration, Gate P/manual KIS validation,
+  or full roadmap completion. Docs-only edit; document lease released (free).
 
 ## Handoff record
 

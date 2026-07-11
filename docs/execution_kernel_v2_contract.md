@@ -628,6 +628,15 @@ The shadow-runner task additionally proves:
   existing no-rePOST counters; and
 - the static sole-POST-authority regression remains green.
 
+The Level 4 success fixture is not inferred from the existing two blocked-path
+tests. At base `8eaf15a` it is reproduced by injecting an approved default
+strategy whose allowed levels include `level_4`/`guarded_autopilot`, injecting
+an open KRX auto-order window, and using a policy with authority level 4,
+guarded execution, guarded policy flag true, and mock broker. The current
+fixture then submits three orders and records three fills with live disabled.
+The parity test must build these dependencies explicitly; it must not weaken
+the production default strategy or global safe flags.
+
 The minimum pure-model case matrix is binding:
 
 | Case | Expected result |

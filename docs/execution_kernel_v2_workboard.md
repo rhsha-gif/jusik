@@ -207,6 +207,11 @@ Required invariant evidence:
   `broker=mock`, live=false, Level 5 blocked with zero submitted operator
   orders. The temporary pytest tree was removed and only the two contract docs
   remained modified.
+- `2026-07-12 KST` — A read-only/in-memory Level 4 success probe showed the
+  default strategy correctly blocks at `strategy_promotion_approved`; with an
+  explicitly injected approved Level 4 recipe and open-window function, the
+  same fixture submits and fills three mock orders with live=false. This is the
+  required success-parity fixture and does not justify changing safe defaults.
 
 ## Handoff record
 

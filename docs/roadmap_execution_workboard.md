@@ -68,6 +68,7 @@ Score: `domain*0.30 + tools*0.25 + track*0.25 + continuity*0.10 + coordination*0
 - `2026-07-11 KST` — GPT-5 Codex lead — completed the Mission 1 implementation candidate and adversarial repair cycle; full backend `884 passed, 2 skipped`, smoke stayed mock/live=false, and internal independent audit closed at P0/P1 zero.
 - `2026-07-11 11:53 KST` — Claude Code `claude-fable-5` final implementation audit was attempted read-only but account rate limiting returned `429`; integration remains in review and the audit will be retried after reset.
 - `2026-07-11 KST` — Gate 2 repository inventory and adversarial test design completed in a clean worktree. A same-transaction schema-v11 shadow-journal contract was drafted; implementation is held until Gate 1 acceptance and Claude's required initial decomposition review.
+- `2026-07-11 12:55 KST` — Claude Code `sonnet` Gate 1 audit retry in safe mode also returned account-level HTTP 429 with reset at 15:40 KST and zero token usage. The Gate 2 Claude review worktree `claude/qp-exec-events-v1-review` is prepared at `c0a625e`; no runtime work started.
 
 ## Handoff record
 

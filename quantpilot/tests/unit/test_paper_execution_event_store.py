@@ -279,7 +279,11 @@ def test_mutation_guard_rejects_committed_row_self_declaration_attack(
         session = start_session(store)
         prepared = make_dispatch(store, session, suffix="guard-attack")
         _persisted_dispatch, reservation = insert_reserved_dispatch(store, prepared)
-        assert store.list_paper_execution_events() == []
+        before_events = store.list_paper_execution_events()
+        assert {event.event_type for event in before_events} == {
+            "RiskReserved",
+            "OrderPrepared",
+        }
 
         dispatch_key = _dispatch_key(prepared)
         reservation_key = _PaperAggregateKey(
@@ -303,7 +307,7 @@ def test_mutation_guard_rejects_committed_row_self_declaration_attack(
 
         assert store.load_paper_order_dispatch(prepared.order_plan_id) == prepared
         assert store.load_paper_risk_reservation(prepared.order_plan_id) == reservation
-        assert store.list_paper_execution_events() == []
+        assert store.list_paper_execution_events() == before_events
 
 
 def test_mutation_guard_rejects_missing_extra_and_noncanonical_changes(

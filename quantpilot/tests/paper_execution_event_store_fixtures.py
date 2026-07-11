@@ -214,14 +214,16 @@ def create_v10_legacy_corpus(path: str | Path) -> LegacyExecutionCorpus:
                     "broker_business_date": NOW.date(),
                     "broker_order_reference": "0000001234",
                     "broker_forwarding_order_org_number": "06010",
-                    "broker_order_branch_number": "00123",
                     "broker_order_time": "100001",
                     "updated_at": accepted_at,
                     "revision": claimed.revision + 1,
                 }
             ).model_dump()
         )
-        accepted = store.update_paper_order_dispatch(accepted)
+        accepted = store.update_paper_order_dispatch(
+            accepted,
+            mutation_origin="broker_post_result",
+        )
 
         observed_at = NOW + timedelta(seconds=4)
         fills = [
@@ -254,6 +256,7 @@ def create_v10_legacy_corpus(path: str | Path) -> LegacyExecutionCorpus:
             accepted.model_copy(
                 update={
                     "status": "partially_filled",
+                    "broker_order_branch_number": "00123",
                     "cumulative_filled_quantity": 3,
                     "fill_evidence": fills,
                     "updated_at": observed_at,
@@ -261,7 +264,10 @@ def create_v10_legacy_corpus(path: str | Path) -> LegacyExecutionCorpus:
                 }
             ).model_dump()
         )
-        partial = store.update_paper_order_dispatch(partial)
+        partial = store.update_paper_order_dispatch(
+            partial,
+            mutation_origin="broker_reconciliation",
+        )
         reservation = store.load_paper_risk_reservation(partial.order_plan_id)
         assert reservation is not None
 

@@ -152,7 +152,10 @@ def _unknown(store: PaperStateStore) -> PaperOrderDispatch:
             }
         ).model_dump()
     )
-    return store.update_paper_order_dispatch(unknown)
+    return store.update_paper_order_dispatch(
+        unknown,
+        mutation_origin="broker_post_result",
+    )
 
 
 def _accepted_from_post(store: PaperStateStore) -> PaperOrderDispatch:
@@ -170,7 +173,10 @@ def _accepted_from_post(store: PaperStateStore) -> PaperOrderDispatch:
             }
         ).model_dump()
     )
-    return store.update_paper_order_dispatch(accepted)
+    return store.update_paper_order_dispatch(
+        accepted,
+        mutation_origin="broker_post_result",
+    )
 
 
 def _row(
@@ -293,13 +299,16 @@ def _old_unknown(store: PaperStateStore) -> PaperOrderDispatch:
         claimed.model_copy(
             update={
                 "status": "outcome_unknown",
-                "last_error_code": "process_interrupted",
+                "last_error_code": "broker_response_ambiguous",
                 "updated_at": old + timedelta(microseconds=2),
                 "revision": claimed.revision + 1,
             }
         ).model_dump()
     )
-    return store.update_paper_order_dispatch(unknown)
+    return store.update_paper_order_dispatch(
+        unknown,
+        mutation_origin="broker_post_result",
+    )
 
 
 def _current_protective_claimed(store: PaperStateStore) -> PaperOrderDispatch:

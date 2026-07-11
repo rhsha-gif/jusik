@@ -149,7 +149,10 @@ def _accepted_dispatch(
             }
         ).model_dump()
     )
-    return store.update_paper_order_dispatch(accepted)
+    return store.update_paper_order_dispatch(
+        accepted,
+        mutation_origin="broker_post_result",
+    )
 
 
 def _cancel(store: PaperStateStore, kill, dispatch, at: datetime) -> PaperCancelRequest:
@@ -279,7 +282,11 @@ def test_unattempted_cancel_can_terminalize_when_fill_wins_race(tmp_path) -> Non
                 }
             ).model_dump()
         )
-        persisted = store.update_paper_cancel_request(filled, session=session)
+        persisted = store.update_paper_cancel_request(
+            filled,
+            session=session,
+            mutation_origin="kill_cancel_journal",
+        )
         assert persisted.status == "reconciled_filled"
         assert persisted.attempt_count == 0
 
@@ -316,7 +323,10 @@ def test_schema_v9_migrates_to_v11_and_backfills_open_dispatch(tmp_path) -> None
                 }
             ).model_dump()
         )
-        store.update_paper_order_dispatch(partial)
+        store.update_paper_order_dispatch(
+            partial,
+            mutation_origin="broker_reconciliation",
+        )
         original_session_id = session.session_id
         original_fencing_token = session.fencing_token
 
@@ -327,6 +337,8 @@ def test_schema_v9_migrates_to_v11_and_backfills_open_dispatch(tmp_path) -> None
         ).fetchone()
         state = json.loads(row[0])
         state["schema_version"] = 9
+        connection.execute("DROP TABLE paper_execution_event_identity_keys")
+        connection.execute("DROP TABLE paper_execution_events")
         connection.execute("DROP TABLE paper_risk_reservations")
         connection.execute(
             "UPDATE state_store_metadata SET schema_version = 9, state_json = ?",
@@ -429,7 +441,10 @@ class _Reconciler:
                         }
                     ).model_dump()
                 )
-                dispatch = self.store.update_paper_order_dispatch(observed)
+                dispatch = self.store.update_paper_order_dispatch(
+                    observed,
+                    mutation_origin="broker_reconciliation",
+                )
             if self.client.cancel_succeeded:
                 write_at = dispatch.updated_at + timedelta(microseconds=1)
                 cancelled = PaperOrderDispatch.model_validate(
@@ -444,7 +459,10 @@ class _Reconciler:
                         }
                     ).model_dump()
                 )
-                self.store.update_paper_order_dispatch(cancelled)
+                self.store.update_paper_order_dispatch(
+                    cancelled,
+                    mutation_origin="broker_reconciliation",
+                )
         return SimpleNamespace(blocked_order_plan_ids=())
 
 
@@ -577,12 +595,16 @@ def test_cancel_acceptance_persistence_failure_recovers_by_query(tmp_path) -> No
         original_update = store.update_paper_cancel_request
         failed_once = False
 
-        def fail_acceptance_once(request, *, session):
+        def fail_acceptance_once(request, *, session, mutation_origin):
             nonlocal failed_once
             if request.status == "cancel_accepted" and not failed_once:
                 failed_once = True
                 raise RuntimeError("simulated persistence failure")
-            return original_update(request, session=session)
+            return original_update(
+                request,
+                session=session,
+                mutation_origin=mutation_origin,
+            )
 
         store.update_paper_cancel_request = fail_acceptance_once  # type: ignore[method-assign]
         result = _kill_service(store, session, client).engage(

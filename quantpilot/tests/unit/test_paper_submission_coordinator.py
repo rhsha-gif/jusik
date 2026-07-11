@@ -485,6 +485,8 @@ def test_migrated_open_dispatch_reprepare_uses_backfilled_cash_reserve(
             ).fetchone()[0]
         )
         dispatch_state.pop("minimum_cash_reserve_krw", None)
+        connection.execute("DROP TABLE paper_execution_event_identity_keys")
+        connection.execute("DROP TABLE paper_execution_events")
         connection.execute("DROP TABLE paper_risk_reservations")
         connection.execute(
             "UPDATE paper_order_dispatches SET state_json = ?",

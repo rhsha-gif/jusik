@@ -211,6 +211,8 @@ def _downgrade_paper_schema_to_v9(path) -> None:
         ).fetchone()
         state = json.loads(row[0])
         state["schema_version"] = 9
+        connection.execute("DROP TABLE paper_execution_event_identity_keys")
+        connection.execute("DROP TABLE paper_execution_events")
         connection.execute("DROP TABLE paper_risk_reservations")
         for order_plan_id, payload in connection.execute(
             "SELECT order_plan_id, state_json FROM paper_order_dispatches"
@@ -352,13 +354,18 @@ def test_migration_backfills_open_buy_and_sell_but_not_terminal(tmp_path) -> Non
             claimed.model_copy(
                 update={
                     "status": "rejected",
-                    "last_error_code": "broker_business_rejection",
+                    "reconciliation_status": "reconciled",
+                    "last_error_code": "broker_business_rejected",
                     "updated_at": NOW + timedelta(seconds=3),
+                    "reconciled_at": NOW + timedelta(seconds=3),
                     "revision": claimed.revision + 1,
                 }
             ).model_dump()
         )
-        store.update_paper_order_dispatch(terminal)
+        store.update_paper_order_dispatch(
+            terminal,
+            mutation_origin="broker_post_result",
+        )
         original_store_id = store.provenance.store_id
         original_session_id = session.session_id
         original_fence = session.fencing_token
@@ -905,12 +912,13 @@ def test_terminal_dispatch_and_reservation_release_roll_back_together(
                     "status": "filled",
                     "broker_business_date": date(2026, 7, 10),
                     "broker_order_reference": "kis-order-atomic-rollback",
-                    "broker_forwarding_order_org_number": "00001",
                     "broker_order_branch_number": "91234",
                     "broker_order_time": "090001",
                     "cumulative_filled_quantity": claimed.quantity,
                     "fill_evidence": [fill],
+                    "reconciliation_status": "reconciled",
                     "updated_at": NOW + timedelta(seconds=3),
+                    "reconciled_at": NOW + timedelta(seconds=3),
                     "revision": claimed.revision + 1,
                 }
             ).model_dump()
@@ -928,7 +936,10 @@ def test_terminal_dispatch_and_reservation_release_roll_back_together(
         store._connection.commit()  # noqa: SLF001 - fault-injection boundary
 
         with pytest.raises(sqlite3.IntegrityError, match="forced reservation"):
-            store.update_paper_order_dispatch(filled)
+            store.update_paper_order_dispatch(
+                filled,
+                mutation_origin="broker_reconciliation",
+            )
 
         assert store.load_paper_order_dispatch(claimed.order_plan_id) == claimed
         held = store.load_paper_risk_reservation(claimed.order_plan_id)
@@ -970,12 +981,13 @@ def test_competing_terminal_updates_release_once_and_reopen_capacity(
                 "status": "filled",
                 "broker_business_date": date(2026, 7, 10),
                 "broker_order_reference": "kis-order-terminal-race",
-                "broker_forwarding_order_org_number": "00001",
                 "broker_order_branch_number": "91234",
                 "broker_order_time": "090001",
                 "cumulative_filled_quantity": claimed.quantity,
                 "fill_evidence": [fill],
+                "reconciliation_status": "reconciled",
                 "updated_at": NOW + timedelta(seconds=3),
+                "reconciled_at": NOW + timedelta(seconds=3),
                 "revision": claimed.revision + 1,
             }
         ).model_dump()
@@ -984,8 +996,10 @@ def test_competing_terminal_updates_release_once_and_reopen_capacity(
         claimed.model_copy(
             update={
                 "status": "rejected",
-                "last_error_code": "broker_business_rejection",
+                "reconciliation_status": "reconciled",
+                "last_error_code": "broker_business_rejected",
                 "updated_at": NOW + timedelta(seconds=3),
+                "reconciled_at": NOW + timedelta(seconds=3),
                 "revision": claimed.revision + 1,
             }
         ).model_dump()
@@ -996,7 +1010,14 @@ def test_competing_terminal_updates_release_once_and_reopen_capacity(
         with _paper_store(path) as store:
             start.wait()
             try:
-                store.update_paper_order_dispatch(candidate)
+                store.update_paper_order_dispatch(
+                    candidate,
+                    mutation_origin=(
+                        "broker_reconciliation"
+                        if candidate.status == "filled"
+                        else "broker_post_result"
+                    ),
+                )
             except PaperStateConflictError:
                 return "conflict"
             return candidate.status
@@ -1019,7 +1040,14 @@ def test_competing_terminal_updates_release_once_and_reopen_capacity(
         )
         assert reservation.revision == 1
 
-        assert store.update_paper_order_dispatch(terminal) == terminal
+        assert store.update_paper_order_dispatch(
+            terminal,
+            mutation_origin=(
+                "broker_reconciliation"
+                if terminal.status == "filled"
+                else "broker_post_result"
+            ),
+        ) == terminal
         replayed = store.load_paper_risk_reservation(claimed.order_plan_id)
         assert replayed is not None
         assert replayed.revision == 1
@@ -1186,13 +1214,18 @@ def test_guardrail_reads_only_held_sell_reservations_from_paper_store(
             sell.model_copy(
                 update={
                     "status": "expired_pre_dispatch",
+                    "reconciliation_status": "reconciled",
                     "last_error_code": "submission_evidence_expired",
                     "updated_at": NOW + timedelta(seconds=3),
+                    "reconciled_at": NOW + timedelta(seconds=3),
                     "revision": sell.revision + 1,
                 }
             ).model_dump()
         )
-        store.update_paper_order_dispatch(expired)
+        store.update_paper_order_dispatch(
+            expired,
+            mutation_origin="local_submission_guard",
+        )
         released_state = harness._guardrail_state(
             policy=policy,
             strategy_id=sell.strategy_id,
@@ -1293,13 +1326,16 @@ def test_unknown_buy_still_blocks_ordinary_rebalance_claims(tmp_path, side: str)
             claimed.model_copy(
                 update={
                     "status": "outcome_unknown",
-                    "last_error_code": "transport_outcome_unknown",
+                    "last_error_code": "broker_response_ambiguous",
                     "updated_at": NOW + timedelta(seconds=3),
                     "revision": claimed.revision + 1,
                 }
             ).model_dump()
         )
-        store.update_paper_order_dispatch(unknown)
+        store.update_paper_order_dispatch(
+            unknown,
+            mutation_origin="broker_post_result",
+        )
         held_unknown = store.load_paper_risk_reservation(buy.order_plan_id)
         assert held_unknown is not None
         assert held_unknown.status == "held"
@@ -1529,7 +1565,10 @@ def test_broker_and_risk_evidence_is_monotonic_and_immutable(tmp_path) -> None:
                 }
             ).model_dump()
         )
-        assert store.update_paper_order_dispatch(accepted) == accepted
+        assert store.update_paper_order_dispatch(
+            accepted,
+            mutation_origin="broker_post_result",
+        ) == accepted
 
         fill = PaperDispatchFillEvidence(
             broker_fill_reference="kis-fill-001",
@@ -1555,7 +1594,10 @@ def test_broker_and_risk_evidence_is_monotonic_and_immutable(tmp_path) -> None:
                 }
             ).model_dump()
         )
-        assert store.update_paper_order_dispatch(partial) == partial
+        assert store.update_paper_order_dispatch(
+            partial,
+            mutation_origin="broker_reconciliation",
+        ) == partial
         held_reservation = store.load_paper_risk_reservation(
             partial.order_plan_id
         )
@@ -1573,7 +1615,8 @@ def test_broker_and_risk_evidence_is_monotonic_and_immutable(tmp_path) -> None:
         )
         with pytest.raises(PaperStateConflictError, match="immutable"):
             store.update_paper_order_dispatch(
-                PaperOrderDispatch.model_validate(changed_quote.model_dump())
+                PaperOrderDispatch.model_validate(changed_quote.model_dump()),
+                mutation_origin="broker_reconciliation",
             )
 
         for field, value in (
@@ -1595,7 +1638,8 @@ def test_broker_and_risk_evidence_is_monotonic_and_immutable(tmp_path) -> None:
                 store.update_paper_order_dispatch(
                     PaperOrderDispatch.model_validate(
                         changed_risk_evidence.model_dump()
-                    )
+                    ),
+                    mutation_origin="broker_reconciliation",
                 )
 
         changed_forwarding_identity = partial.model_copy(
@@ -1609,7 +1653,8 @@ def test_broker_and_risk_evidence_is_monotonic_and_immutable(tmp_path) -> None:
             store.update_paper_order_dispatch(
                 PaperOrderDispatch.model_validate(
                     changed_forwarding_identity.model_dump()
-                )
+                ),
+                mutation_origin="broker_reconciliation",
             )
 
         changed_branch_identity = partial.model_copy(
@@ -1623,7 +1668,8 @@ def test_broker_and_risk_evidence_is_monotonic_and_immutable(tmp_path) -> None:
             store.update_paper_order_dispatch(
                 PaperOrderDispatch.model_validate(
                     changed_branch_identity.model_dump()
-                )
+                ),
+                mutation_origin="broker_reconciliation",
             )
 
         removed_fill = partial.model_copy(
@@ -1637,7 +1683,8 @@ def test_broker_and_risk_evidence_is_monotonic_and_immutable(tmp_path) -> None:
         )
         with pytest.raises(PaperStateConflictError):
             store.update_paper_order_dispatch(
-                PaperOrderDispatch.model_validate(removed_fill.model_dump())
+                PaperOrderDispatch.model_validate(removed_fill.model_dump()),
+                mutation_origin="broker_reconciliation",
             )
 
 

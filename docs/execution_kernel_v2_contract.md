@@ -560,4 +560,3 @@ The whole `QP-KERNEL-V2` gate is complete only when:
 - independent review reports P0=0 and P1=0; and
 - real KIS validation is still correctly reported as manual Gate P evidence,
   not implied by fake-only tests.
-

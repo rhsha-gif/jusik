@@ -63,7 +63,7 @@ Statuses: `proposed`, `ready`, `in_progress`, `review`, `integrated`, `done`,
 
 | Task ID | Owner/model | Reviewer/model | Depends on | Worktree/branch | Owned paths | Status | Acceptance | Evidence/commit |
 |---|---|---|---|---|---|---|---|---|
-| `QP-KER-000A` | GPT-5 Codex lead | Claude Code | Gate 2 | `주식트레이더-kernel-v2-contract` / `codex/qp-kernel-v2-contract` | `docs/execution_kernel_v2_contract.md`, `docs/execution_kernel_v2_workboard.md` | in_progress | Repository inventory and decision-complete draft; no runtime edits; original main untouched. | draft pending commit |
+| `QP-KER-000A` | GPT-5 Codex lead | Claude Code | Gate 2 | `주식트레이더-kernel-v2-contract` / `codex/qp-kernel-v2-contract` | `docs/execution_kernel_v2_contract.md`, `docs/execution_kernel_v2_workboard.md` | review | Repository inventory and decision-complete draft; no runtime edits; original main untouched. | draft `d3023a2` |
 | `QP-KER-000B` | Claude Code exact model to be recorded | GPT-5 Codex lead | `QP-KER-000A` | `주식트레이더-claude-kernel-v2-review` / `claude/qp-kernel-v2-review` | the same two docs in an isolated review branch only | ready | Independent decomposition/revision committed; P0/P1 contract defects zero after lead cross-check; only two docs changed. | session reset required at 12:20 KST |
 | `QP-KER-010` | GPT-5 Codex lead | Claude Code + independent read-only audit | accepted `QP-KER-000B` | new `주식트레이더-kernel-v2-pure` / `codex/qp-kernel-v2-pure` | `quantpilot/packages/core/execution/kernel.py`, `quantpilot/tests/unit/test_execution_kernel_v2.py` | proposed | Frozen pure input/output, closed decision order, deterministic fingerprint, forbidden-import and zero-side-effect tests. | pending |
 | `QP-KER-020` | GPT-5 Codex lead | independent audit | `QP-KER-010` | new isolated worktree / `codex/qp-kernel-v2-shadow` | `quantpilot/packages/core/execution/kernel_shadow.py`, focused tests, minimal composition/config boundary | proposed | `off` default; unknown mode fails closed; shadow has no authoritative mutation; no second broker callable. | pending |
@@ -188,19 +188,19 @@ Required invariant evidence:
   Sonnet retry returned the explicit `12:20 KST` session reset. All attempts
   left the Claude worktree clean.
 - `2026-07-12 KST` — Codex drafted the decision-complete contract and this
-  workboard. No runtime implementation started.
+  workboard as `d3023a2`. No runtime implementation started.
 
 ## Handoff record
 
 ```text
 task_id: QP-KER-000A
 agent_and_model: GPT-5 Codex desktop
-commit: pending
+commit: d3023a2
 owned_paths:
   - docs/execution_kernel_v2_contract.md
   - docs/execution_kernel_v2_workboard.md
 acceptance_met: repository-grounded draft complete; counterpart acceptance pending
-exact_checks: git diff --check and two-file allowlist to be run before commit
+exact_checks: two-file allowlist passed; git show --check exposed one blank EOF line, fixed in the follow-up evidence commit
 known_limits: Claude Code review unavailable until 12:20 KST; no runtime work authorized
 integration_requests: Claude must revise/accept the binding contract before QP-KER-010
 ```

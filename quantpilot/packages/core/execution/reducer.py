@@ -376,8 +376,20 @@ def _validate_dispatch_source(
         if (
             before.attempt_count != 1
             or after.attempt_count != 1
+            or (
+                before.status == "rejected"
+                and before.last_error_code in _LOCAL_GUARD_REJECTION_CODES
+            )
             or before.status
-            not in {"dispatch_claimed", "outcome_unknown", "accepted", "partially_filled"}
+            not in {
+                "dispatch_claimed",
+                "outcome_unknown",
+                "accepted",
+                "partially_filled",
+                "filled",
+                "rejected",
+                "cancelled",
+            }
         ):
             raise PaperEventStreamCorruption(
                 "broker reconciliation requires a claimed external attempt"

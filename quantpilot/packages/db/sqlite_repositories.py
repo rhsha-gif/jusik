@@ -4304,7 +4304,7 @@ class PaperStateStore:
             ).fetchone()
             if row is not None:
                 existing = self._decode_paper_cancel_request(row)
-                if self._cancel_immutable_identity(existing) != self._cancel_immutable_identity(request):
+                if existing != request:
                     raise PaperStateConflictError(
                         "paper cancel target already exists with different evidence"
                     )

@@ -15,6 +15,13 @@ from pathlib import Path
 import sqlite3
 from typing import Iterator
 
+from quantpilot.packages.core.execution.transitions import (
+    PAPER_CANCEL_TRANSITIONS,
+    PAPER_DISPATCH_RECONCILIATION_TRANSITIONS,
+    PAPER_DISPATCH_TRANSITIONS,
+    PAPER_RESERVATION_RELEASE_BY_DISPATCH,
+    PAPER_RESERVATION_TERMINALS,
+)
 from quantpilot.packages.core.operator.position_ledger import (
     ManagedPositionState,
     OperatorCycleClaim,
@@ -65,78 +72,12 @@ PAPER_STATE_SCHEMA_VERSION = 10
 PAPER_STATE_PREVIOUS_SCHEMA_VERSION = 9
 PAPER_STATE_MIGRATABLE_SCHEMA_VERSIONS = frozenset({6, 7, 8, 9})
 
-PAPER_DISPATCH_TRANSITIONS: dict[str, set[str]] = {
-    "prepared": {"expired_pre_dispatch", "failed_pre_dispatch"},
-    "dispatch_claimed": {
-        "outcome_unknown",
-        "accepted",
-        "partially_filled",
-        "filled",
-        "rejected",
-    },
-    "outcome_unknown": {
-        "outcome_unknown",
-        "accepted",
-        "partially_filled",
-        "filled",
-        "rejected",
-        "cancelled",
-    },
-    "accepted": {"accepted", "partially_filled", "filled", "rejected", "cancelled"},
-    "partially_filled": {"partially_filled", "filled", "cancelled"},
-    "filled": {"filled"},
-    "rejected": {"rejected"},
-    "cancelled": {"cancelled"},
-    "expired_pre_dispatch": {"expired_pre_dispatch"},
-    "failed_pre_dispatch": {"failed_pre_dispatch"},
-}
-
 PAPER_KILL_TRANSITIONS: dict[str, set[str]] = {
     "killing": {"killing", "killed", "recovery_required"},
     "recovery_required": {"killing", "recovery_required"},
     "killed": {"killed", "recovery_required", "released"},
     "released": {"released"},
 }
-
-PAPER_CANCEL_TRANSITIONS: dict[str, set[str]] = {
-    "prepared": {"reconciled_cancelled", "reconciled_filled"},
-    "cancel_claimed": {
-        "cancel_accepted",
-        "cancel_outcome_unknown",
-        "reconciled_cancelled",
-        "reconciled_filled",
-        "rejected",
-    },
-    "cancel_accepted": {
-        "cancel_accepted",
-        "reconciled_cancelled",
-        "reconciled_filled",
-    },
-    "cancel_outcome_unknown": {
-        "cancel_outcome_unknown",
-        "reconciled_cancelled",
-        "reconciled_filled",
-    },
-    "reconciled_cancelled": {"reconciled_cancelled"},
-    "reconciled_filled": {"reconciled_filled"},
-    "rejected": {"rejected", "reconciled_cancelled", "reconciled_filled"},
-}
-
-PAPER_RESERVATION_TERMINALS = {
-    "released_filled",
-    "released_cancelled",
-    "released_rejected",
-    "released_expired",
-}
-
-PAPER_RESERVATION_RELEASE_BY_DISPATCH = {
-    "filled": ("released_filled", "filled"),
-    "cancelled": ("released_cancelled", "cancelled"),
-    "rejected": ("released_rejected", "rejected"),
-    "expired_pre_dispatch": ("released_expired", "expired_pre_dispatch"),
-    "failed_pre_dispatch": ("released_expired", "failed_pre_dispatch"),
-}
-
 
 def _require_aware_timestamp(value: datetime, *, field_name: str) -> datetime:
     if value.tzinfo is None or value.utcoffset() is None:
@@ -2448,14 +2389,12 @@ class PaperStateStore:
                 raise PaperStateConflictError(
                     "paper dispatch cumulative fills cannot decrease"
                 )
-            reconciliation_transitions = {
-                "pending": {"pending", "blocked", "reconciled"},
-                "blocked": {"blocked", "reconciled"},
-                "reconciled": {"reconciled"},
-            }
-            if dispatch.reconciliation_status not in reconciliation_transitions[
-                existing.reconciliation_status
-            ]:
+            if (
+                dispatch.reconciliation_status
+                not in PAPER_DISPATCH_RECONCILIATION_TRANSITIONS[
+                    existing.reconciliation_status
+                ]
+            ):
                 raise PaperStateConflictError(
                     "paper dispatch reconciliation cannot move backward"
                 )

@@ -102,6 +102,14 @@ Score: `domain*0.30 + tools*0.25 + track*0.25 + continuity*0.10 + coordination*0
   audit reported P0/P1/P2/P3 zero; full backend `924 passed, 2 skipped` and
   safe smoke passed. Schema-v11 dual-write/migration (QP-EVT-030) is active.
 
+- `2026-07-12 KST` — QP-EVT-030A schema-v11 event-store substrate was integrated
+  through `9c45390`. Deterministic legacy import, exact current-schema
+  validation, raw before/after state binding, contiguous append semantics, and
+  paired causation atomicity are covered by adversarial tests. Final independent
+  re-audit reported P0/P1/P2 zero; full backend `956 passed, 2 skipped` and safe
+  mock/live=false smoke passed. QP-EVT-030B exhaustive mutation-site dual-write
+  is the active next slice.
+
 ## Handoff record
 
 ```text

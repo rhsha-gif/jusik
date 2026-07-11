@@ -118,6 +118,11 @@ Gate 2 accepted
   does not block Codex inventory/contract drafting.
 - Real KIS paper validation requires user credentials and explicit manual
   authority. It remains Gate P and does not block fake-only contract/model work.
+- Reproduced P1 pre-cutover finding: current Level 3 legacy submission can fill
+  an order whose `OrderPlan.expires_at` is already past while its risk evidence
+  remains fresh. This does not block the pure model, but it blocks shadow parity
+  acceptance and every level cutover until a fail-closed fix and independent
+  regression audit land.
 - The original main worktree contains user-owned modified and untracked files.
   It is not used for implementation, staging, or integration.
 
@@ -212,6 +217,10 @@ Required invariant evidence:
   explicitly injected approved Level 4 recipe and open-window function, the
   same fixture submits and fills three mock orders with live=false. This is the
   required success-parity fixture and does not justify changing safe defaults.
+- `2026-07-12 KST` — The current-order expiry gap was reproduced rather than
+  inferred: a past-expiry, user-approved Level 3 mock order with a still-valid
+  risk check became `filled` with one broker fill. Classified P1 for cutover;
+  runtime fix remains held for counterpart contract review.
 
 ## Handoff record
 

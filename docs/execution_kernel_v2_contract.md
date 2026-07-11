@@ -116,7 +116,10 @@ cutover gates are accepted.
   explicitly reject the current order's own `OrderPlan.expires_at`. The helper
   that excludes expired pre-submission orders from guardrail calculations
   excludes the current order during submit-time evaluation. This is a known
-  fail-closed hardening delta, not parity evidence to normalize away.
+  fail-closed hardening delta, not parity evidence to normalize away. It was
+  reproduced in-memory: a user-approved mock order with past
+  `OrderPlan.expires_at` and still-fresh risk evidence reached `filled`. This is
+  a P1 pre-cutover finding.
 
 ## 3. Bounded mission outcome
 

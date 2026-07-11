@@ -388,7 +388,7 @@ class PaperCancelRequest(HarnessModel):
         if self.status == "prepared":
             if self.attempt_count != 0 or self.claimed_at is not None:
                 raise ValueError("prepared cancel cannot claim an external attempt")
-        terminal = {"reconciled_cancelled", "reconciled_filled", "rejected"}
+        terminal = {"reconciled_cancelled", "reconciled_filled"}
         if self.status not in {"prepared", *terminal} and (
             self.attempt_count != 1 or self.claimed_at is None
         ):

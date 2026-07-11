@@ -79,7 +79,7 @@ PAPER_DISPATCH_TRANSITIONS: dict[str, set[str]] = {
     "accepted": {"accepted", "partially_filled", "filled", "rejected", "cancelled"},
     "partially_filled": {"partially_filled", "filled", "cancelled"},
     "filled": {"filled"},
-    "rejected": {"rejected", "reconciled_cancelled", "reconciled_filled"},
+    "rejected": {"rejected"},
     "cancelled": {"cancelled"},
     "expired_pre_dispatch": {"expired_pre_dispatch"},
     "failed_pre_dispatch": {"failed_pre_dispatch"},
@@ -105,17 +105,15 @@ PAPER_CANCEL_TRANSITIONS: dict[str, set[str]] = {
         "cancel_accepted",
         "reconciled_cancelled",
         "reconciled_filled",
-        "rejected",
     },
     "cancel_outcome_unknown": {
         "cancel_outcome_unknown",
         "reconciled_cancelled",
         "reconciled_filled",
-        "rejected",
     },
     "reconciled_cancelled": {"reconciled_cancelled"},
     "reconciled_filled": {"reconciled_filled"},
-    "rejected": {"rejected"},
+    "rejected": {"rejected", "reconciled_cancelled", "reconciled_filled"},
 }
 
 

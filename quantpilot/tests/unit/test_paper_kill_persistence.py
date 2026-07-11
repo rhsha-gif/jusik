@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import json
 import sqlite3
+from dataclasses import replace
 from datetime import datetime, timedelta, timezone
 from decimal import Decimal
 from types import SimpleNamespace
@@ -10,6 +11,7 @@ import pytest
 
 from quantpilot.packages.core.operator.position_ledger import (
     PaperCancelRequest,
+    PaperDispatchFillEvidence,
     PaperOrderDispatch,
 )
 from quantpilot.packages.core.execution.paper_kill import PaperKillService
@@ -17,6 +19,7 @@ from quantpilot.packages.core.kis_paper import (
     KisCancelableOrder,
     KisCancelableOrdersResult,
     KisCancelOrderResult,
+    KisPaperBusinessError,
     KisPaperCancelOutcomeUnknown,
 )
 from quantpilot.packages.db.sqlite_repositories import (
@@ -46,7 +49,13 @@ def _session(store: PaperStateStore, at: datetime = NOW):
     )
 
 
-def _accepted_dispatch(store: PaperStateStore, session) -> PaperOrderDispatch:
+def _accepted_dispatch(
+    store: PaperStateStore,
+    session,
+    *,
+    broker_business_date=None,
+    prepared_only: bool = False,
+) -> PaperOrderDispatch:
     prepared_at = NOW + timedelta(seconds=1)
     prepared = PaperOrderDispatch(
         order_plan_id="oplan-kill-001",
@@ -90,6 +99,8 @@ def _accepted_dispatch(store: PaperStateStore, session) -> PaperOrderDispatch:
         updated_at=prepared_at,
     )
     store.insert_paper_order_dispatch(prepared)
+    if prepared_only:
+        return prepared
     claimed = store.claim_dispatch_attempt(
         prepared.order_plan_id,
         session=session,
@@ -99,7 +110,7 @@ def _accepted_dispatch(store: PaperStateStore, session) -> PaperOrderDispatch:
         claimed.model_copy(
             update={
                 "status": "accepted",
-                "broker_business_date": NOW.date(),
+                "broker_business_date": broker_business_date or NOW.date(),
                 "broker_order_reference": "0000001234",
                 "broker_forwarding_order_org_number": "06010",
                 "broker_order_time": "100001",
@@ -247,6 +258,37 @@ def test_schema_v8_migrates_to_v9_with_existing_provenance(tmp_path) -> None:
     path = tmp_path / "migration.sqlite3"
     with _store(path) as store:
         original_store_id = store.provenance.store_id
+        session = _session(store)
+        accepted = _accepted_dispatch(store, session)
+        write_at = accepted.updated_at + timedelta(microseconds=1)
+        partial = PaperOrderDispatch.model_validate(
+            accepted.model_copy(
+                update={
+                    "status": "partially_filled",
+                    "broker_order_branch_number": "06010",
+                    "cumulative_filled_quantity": 2,
+                    "fill_evidence": [
+                        PaperDispatchFillEvidence(
+                            broker_fill_reference="fill-migration-001",
+                            broker_order_id=accepted.broker_order_id,
+                            broker_order_reference=accepted.broker_order_reference,
+                            symbol=accepted.symbol,
+                            side=accepted.side,
+                            quantity=2,
+                            price=70_000,
+                            notional=140_000,
+                            evidence_at=write_at,
+                            time_basis="broker_execution",
+                        )
+                    ],
+                    "updated_at": write_at,
+                    "revision": accepted.revision + 1,
+                }
+            ).model_dump()
+        )
+        store.update_paper_order_dispatch(partial)
+        original_session_id = session.session_id
+        original_fencing_token = session.fencing_token
 
     connection = sqlite3.connect(path)
     try:
@@ -270,6 +312,11 @@ def test_schema_v8_migrates_to_v9_with_existing_provenance(tmp_path) -> None:
         assert migrated.provenance.store_id == original_store_id
         assert migrated.provenance.schema_version == PAPER_STATE_SCHEMA_VERSION == 9
         assert migrated.list_paper_cancel_requests() == []
+        restored = migrated.load_paper_order_dispatch("oplan-kill-001")
+        assert restored.status == "partially_filled"
+        assert restored.fill_evidence[0].broker_fill_reference == "fill-migration-001"
+        restored_session = migrated.load_paper_execution_session(original_session_id)
+        assert restored_session.fencing_token == original_fencing_token
 
 
 class _Clock:
@@ -292,10 +339,16 @@ class _Client:
         *,
         rows: tuple[KisCancelableOrder, ...] = (),
         timeout: bool = False,
+        response_org_number: str = "06010",
+        confirm_terminal: bool = True,
+        business_reject: bool = False,
     ) -> None:
         self.account_scope_fingerprint = ACCOUNT
         self.rows = rows
         self.timeout = timeout
+        self.response_org_number = response_org_number
+        self.confirm_terminal = confirm_terminal
+        self.business_reject = business_reject
         self.cancel_calls = 0
         self.cancel_succeeded = False
 
@@ -309,11 +362,13 @@ class _Client:
         self.cancel_calls += 1
         if self.timeout:
             raise KisPaperCancelOutcomeUnknown("ambiguous fake cancel")
-        self.cancel_succeeded = True
+        self.cancel_succeeded = self.confirm_terminal
+        if self.business_reject:
+            raise KisPaperBusinessError("fake business rejection")
         return KisCancelOrderResult(
             original_order_number="0000001234",
             cancel_order_number="0000001235",
-            order_branch_number="06010",
+            order_branch_number=self.response_org_number,
             cancelled_quantity=10,
             order_time="100002",
             message_code="APBK0013",
@@ -326,10 +381,22 @@ class _Reconciler:
         self.client = client
 
     def reconcile_unresolved(self):
-        if self.client.cancel_succeeded:
-            for dispatch in self.store.list_paper_order_dispatches():
-                if dispatch.status not in {"accepted", "partially_filled"}:
-                    continue
+        for dispatch in self.store.list_paper_order_dispatches():
+            if dispatch.status not in {"accepted", "partially_filled"}:
+                continue
+            if dispatch.broker_order_branch_number is None:
+                write_at = dispatch.updated_at + timedelta(microseconds=1)
+                observed = PaperOrderDispatch.model_validate(
+                    dispatch.model_copy(
+                        update={
+                            "broker_order_branch_number": "06010",
+                            "updated_at": write_at,
+                            "revision": dispatch.revision + 1,
+                        }
+                    ).model_dump()
+                )
+                dispatch = self.store.update_paper_order_dispatch(observed)
+            if self.client.cancel_succeeded:
                 write_at = dispatch.updated_at + timedelta(microseconds=1)
                 cancelled = PaperOrderDispatch.model_validate(
                     dispatch.model_copy(
@@ -430,6 +497,65 @@ def test_cancel_timeout_requires_recovery_and_restart_never_reposts(tmp_path) ->
         assert request.status == "cancel_outcome_unknown"
 
 
+def test_cancel_claim_crash_restarts_query_only_without_post(tmp_path) -> None:
+    with _store(tmp_path / "claim-crash.sqlite3") as store:
+        session = _session(store)
+        dispatch = _accepted_dispatch(store, session)
+        client = _Client(rows=(_cancelable_row(),))
+        _Reconciler(store, client).reconcile_unresolved()
+        dispatch = store.load_paper_order_dispatch(dispatch.order_plan_id)
+        kill = store.start_paper_kill_operation(
+            session=session,
+            reason="operator_requested",
+            started_at=NOW + timedelta(seconds=5),
+        )
+        request = store.create_paper_cancel_request(
+            _cancel(store, kill, dispatch, NOW + timedelta(seconds=6)),
+            session=session,
+        )
+        store.claim_paper_cancel_attempt(
+            request.cancel_id,
+            session=session,
+            claimed_at=NOW + timedelta(seconds=7),
+        )
+
+        result = _kill_service(store, session, client).engage(
+            reason="operator_retry"
+        )
+        assert result.status == "recovery_required"
+        assert client.cancel_calls == 0
+        assert store.load_paper_cancel_request(request.cancel_id).status == (
+            "cancel_outcome_unknown"
+        )
+
+
+def test_cancel_acceptance_persistence_failure_recovers_by_query(tmp_path) -> None:
+    with _store(tmp_path / "acceptance-write-failure.sqlite3") as store:
+        session = _session(store)
+        _accepted_dispatch(store, session)
+        client = _Client(rows=(_cancelable_row(),))
+        original_update = store.update_paper_cancel_request
+        failed_once = False
+
+        def fail_acceptance_once(request, *, session):
+            nonlocal failed_once
+            if request.status == "cancel_accepted" and not failed_once:
+                failed_once = True
+                raise RuntimeError("simulated persistence failure")
+            return original_update(request, session=session)
+
+        store.update_paper_cancel_request = fail_acceptance_once  # type: ignore[method-assign]
+        result = _kill_service(store, session, client).engage(
+            reason="operator_requested"
+        )
+        assert failed_once is True
+        assert result.status == "killed"
+        assert client.cancel_calls == 1
+        assert store.list_paper_cancel_requests()[0].status == (
+            "reconciled_cancelled"
+        )
+
+
 def test_external_working_order_is_quarantined_without_cancel(tmp_path) -> None:
     with _store(tmp_path / "external-kill.sqlite3") as store:
         session = _session(store)
@@ -456,6 +582,103 @@ def test_duplicate_broker_match_fails_closed_without_cancel(tmp_path) -> None:
         assert client.cancel_calls == 0
 
 
+@pytest.mark.parametrize(
+    "row",
+    [
+        replace(_cancelable_row(), order_branch_number="99999"),
+        replace(_cancelable_row(), order_time="100009"),
+        replace(
+            _cancelable_row(),
+            total_filled_quantity=1,
+            total_filled_amount=Decimal("70000"),
+            cancelable_quantity=9,
+        ),
+        replace(_cancelable_row(), order_price=Decimal("70001")),
+    ],
+)
+def test_cross_source_identity_mismatch_never_posts_cancel(tmp_path, row) -> None:
+    with _store(tmp_path / f"mismatch-{row.order_time}-{row.order_price}.sqlite3") as store:
+        session = _session(store)
+        _accepted_dispatch(store, session)
+        client = _Client(rows=(row,))
+        result = _kill_service(store, session, client).engage(
+            reason="operator_requested"
+        )
+        assert result.status == "recovery_required"
+        assert client.cancel_calls == 0
+
+
+def test_prior_business_date_identity_never_posts_cancel(tmp_path) -> None:
+    with _store(tmp_path / "prior-date.sqlite3") as store:
+        session = _session(store)
+        _accepted_dispatch(
+            store,
+            session,
+            broker_business_date=NOW.date() - timedelta(days=1),
+        )
+        client = _Client(rows=(_cancelable_row(),))
+        result = _kill_service(store, session, client).engage(
+            reason="operator_requested"
+        )
+        assert result.status == "recovery_required"
+        assert client.cancel_calls == 0
+
+
+def test_cancel_response_identity_mismatch_becomes_outcome_unknown(tmp_path) -> None:
+    with _store(tmp_path / "response-mismatch.sqlite3") as store:
+        session = _session(store)
+        _accepted_dispatch(store, session)
+        client = _Client(
+            rows=(_cancelable_row(),),
+            response_org_number="99999",
+            confirm_terminal=False,
+        )
+        result = _kill_service(store, session, client).engage(
+            reason="operator_requested"
+        )
+        assert result.status == "recovery_required"
+        assert client.cancel_calls == 1
+        assert store.list_paper_cancel_requests()[0].status == (
+            "cancel_outcome_unknown"
+        )
+
+
+def test_business_rejection_can_later_reconcile_terminal(tmp_path) -> None:
+    with _store(tmp_path / "business-rejection.sqlite3") as store:
+        session = _session(store)
+        _accepted_dispatch(store, session)
+        client = _Client(
+            rows=(_cancelable_row(),),
+            business_reject=True,
+            confirm_terminal=True,
+        )
+        result = _kill_service(store, session, client).engage(
+            reason="operator_requested"
+        )
+        assert result.status == "killed"
+        assert store.list_paper_cancel_requests()[0].status == (
+            "reconciled_cancelled"
+        )
+
+
+def test_business_rejection_while_working_never_reposts(tmp_path) -> None:
+    with _store(tmp_path / "business-rejection-working.sqlite3") as store:
+        session = _session(store)
+        _accepted_dispatch(store, session)
+        client = _Client(
+            rows=(_cancelable_row(),),
+            business_reject=True,
+            confirm_terminal=False,
+        )
+        service = _kill_service(store, session, client)
+        first = service.engage(reason="operator_requested")
+        second = service.engage(reason="operator_retry")
+
+        assert first.status == second.status == "recovery_required"
+        assert client.cancel_calls == 1
+        assert store.list_paper_cancel_requests()[0].status == "rejected"
+
+
 def test_release_rechecks_and_detects_new_external_order(tmp_path) -> None:
     with _store(tmp_path / "release-proof.sqlite3") as store:
         session = _session(store)
@@ -467,3 +690,16 @@ def test_release_rechecks_and_detects_new_external_order(tmp_path) -> None:
         blocked = _kill_service(store, session, external_client).release()
         assert blocked.status == "recovery_required"
         assert store.paper_kill_blocks_submission() is True
+
+
+def test_release_rejects_stray_prepared_dispatch(tmp_path) -> None:
+    with _store(tmp_path / "release-prepared.sqlite3") as store:
+        session = _session(store)
+        client = _Client()
+        service = _kill_service(store, session, client)
+        assert service.engage(reason="operator_requested").status == "killed"
+        _accepted_dispatch(store, session, prepared_only=True)
+
+        blocked = service.release()
+        assert blocked.status == "recovery_required"
+        assert "prepared_dispatch_unresolved" in blocked.unresolved_reason_codes

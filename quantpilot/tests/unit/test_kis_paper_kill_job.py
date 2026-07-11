@@ -32,6 +32,7 @@ def _environment(tmp_path, *, confirmation: str = ENGAGE_CONFIRMATION):
         "LIVE_TRADING_ENABLED": "false",
         "MARKET_ORDERS_ENABLED": "false",
         "BROKER_MODE": "paper",
+        "DATA_MODE": "paper_trading",
         "KIS_PAPER_STATE_DB": str((tmp_path / "paper.sqlite3").resolve()),
         "KIS_PAPER_APP_KEY": "secret-app-key",
         "KIS_PAPER_APP_SECRET": "secret-app-secret",
@@ -84,6 +85,8 @@ def test_kill_gate_is_disabled_by_default_and_rejects_unsafe_flags() -> None:
     enabled["LIVE_TRADING_ENABLED"] = "false"
     enabled["MARKET_ORDERS_ENABLED"] = "true"
     assert paper_kill_gate_reason("engage", enabled) == "market_orders_flag_engaged"
+    enabled["MARKET_ORDERS_ENABLED"] = "false"
+    assert paper_kill_gate_reason("engage", enabled) == "paper_data_mode_required"
 
 
 def test_kill_config_requires_action_specific_confirmation_and_redacts_secrets(

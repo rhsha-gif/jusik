@@ -117,6 +117,7 @@ $env:KIS_PAPER_KILL_CONFIRMATION='cancel managed paper orders'
 $env:LIVE_TRADING_ENABLED='false'
 $env:MARKET_ORDERS_ENABLED='false'
 $env:BROKER_MODE='paper'
+$env:DATA_MODE='paper_trading'
 python -m quantpilot.jobs.run_kis_paper_kill engage
 ```
 

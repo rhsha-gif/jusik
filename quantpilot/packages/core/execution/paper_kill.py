@@ -1,10 +1,11 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
-from datetime import datetime, timedelta
+from datetime import date, datetime, timedelta
 from decimal import Decimal
 from math import isclose
 from typing import Callable
+from zoneinfo import ZoneInfo
 
 from quantpilot.packages.core.execution.paper_reconciliation import (
     PaperBrokerReconciler,
@@ -39,6 +40,7 @@ _TERMINAL_CANCEL_STATUSES = {
     "reconciled_cancelled",
     "reconciled_filled",
 }
+KST = ZoneInfo("Asia/Seoul")
 
 
 class PaperKillError(RuntimeError):
@@ -254,8 +256,17 @@ class PaperKillService:
         ]
         matched_rows: dict[str, list[tuple[PaperOrderDispatch, KisCancelableOrder]]] = {}
         reasons: set[str] = set()
+        business_date = self._now().astimezone(KST).date()
         for row in rows:
-            candidates = [item for item in managed if _cancel_identity_matches(item, row)]
+            candidates = [
+                item
+                for item in managed
+                if _cancel_identity_matches(
+                    item,
+                    row,
+                    business_date=business_date,
+                )
+            ]
             if len(candidates) != 1:
                 reasons.add(
                     "external_working_order_detected"
@@ -330,7 +341,6 @@ class PaperKillService:
                 request,
                 status="rejected",
                 error_code="broker_business_rejected",
-                reconciled=True,
             )
             return
         except KisPaperCancelOutcomeUnknown:
@@ -348,6 +358,17 @@ class PaperKillService:
             )
             return
         try:
+            if (
+                result.original_order_number != row.order_number
+                or result.order_branch_number != row.order_branch_number
+                or result.cancelled_quantity != row.cancelable_quantity
+            ):
+                self._persist_cancel_state(
+                    request,
+                    status="cancel_outcome_unknown",
+                    error_code="cancel_response_identity_mismatch",
+                )
+                return
             self._persist_cancel_state(
                 request,
                 status="cancel_accepted",
@@ -422,6 +443,8 @@ class PaperKillService:
         dispatch_by_order = {item.order_plan_id: item for item in dispatches}
         if any(item.status in _WORKING_DISPATCH_STATUSES for item in dispatches):
             reasons.add("managed_working_order_unresolved")
+        if any(item.status == "prepared" for item in dispatches):
+            reasons.add("prepared_dispatch_unresolved")
         if any(
             item.reconciliation_status == "blocked"
             for item in dispatches
@@ -517,12 +540,25 @@ class PaperKillService:
 def _cancel_identity_matches(
     dispatch: PaperOrderDispatch,
     row: KisCancelableOrder,
+    *,
+    business_date: date,
 ) -> bool:
+    expected_filled_quantity = int(dispatch.cumulative_filled_quantity)
+    expected_cancelable_quantity = int(
+        dispatch.quantity - dispatch.cumulative_filled_quantity
+    )
+    expected_filled_amount = sum(
+        (Decimal(str(item.notional)) for item in dispatch.fill_evidence),
+        Decimal("0"),
+    )
     return bool(
         dispatch.broker_order_reference
         and dispatch.broker_forwarding_order_org_number
+        and dispatch.broker_order_branch_number
+        and dispatch.broker_business_date == business_date
         and row.order_number == dispatch.broker_order_reference
         and row.order_branch_number == dispatch.broker_forwarding_order_org_number
+        and row.order_branch_number == dispatch.broker_order_branch_number
         and (
             dispatch.broker_order_time is None
             or row.order_time == dispatch.broker_order_time
@@ -531,13 +567,15 @@ def _cancel_identity_matches(
         and row.symbol == dispatch.symbol
         and row.side == dispatch.side
         and row.order_quantity == int(dispatch.quantity)
-        and Decimal(row.order_price) == Decimal(str(int(dispatch.limit_price)))
-        and 0 < row.cancelable_quantity
-        <= int(dispatch.quantity - dispatch.cumulative_filled_quantity)
+        and isclose(dispatch.quantity, float(int(dispatch.quantity)), abs_tol=0.000001)
         and isclose(
-            float(row.cancelable_quantity + row.total_filled_quantity),
-            dispatch.quantity,
+            dispatch.cumulative_filled_quantity,
+            float(expected_filled_quantity),
             abs_tol=0.000001,
         )
+        and Decimal(row.order_price) == Decimal(str(int(dispatch.limit_price)))
+        and row.total_filled_quantity == expected_filled_quantity
+        and Decimal(row.total_filled_amount) == expected_filled_amount
+        and row.cancelable_quantity == expected_cancelable_quantity > 0
         and row.exchange_id == "KRX"
     )

@@ -109,6 +109,8 @@ def paper_kill_gate_reason(
         return "market_orders_flag_engaged"
     if environment.get("BROKER_MODE", "mock").strip().lower() != "paper":
         return "paper_broker_mode_required"
+    if environment.get("DATA_MODE", "fixture").strip().lower() != "paper_trading":
+        return "paper_data_mode_required"
     return None
 
 

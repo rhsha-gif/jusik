@@ -437,18 +437,36 @@ def _validate_dispatch_source(
     raise PaperEventStreamCorruption("dispatch source is not allowed for this mutation")
 
 
-def _validate_reservation_source(event: PaperExecutionEvent) -> None:
-    expected_sources: dict[str, set[str]] = {
-        "LegacyRiskReservationImported": {"schema_migration"},
-        "RiskReserved": {"local_prepare"},
-        "RiskReservationFenceRebound": {"local_session_takeover"},
-        "RiskReservationReleased": {
-            "broker_acceptance",
-            "broker_reconciliation",
-            "local_submission_result",
+def _validate_reservation_source(
+    event: PaperExecutionEvent,
+    after: PaperRiskReservation,
+) -> None:
+    expected_source = {
+        "LegacyRiskReservationImported": "schema_migration",
+        "RiskReserved": "local_prepare",
+        "RiskReservationFenceRebound": "local_session_takeover",
+    }.get(event.event_type)
+    if expected_source is not None:
+        if event.source != expected_source:
+            raise PaperEventStreamCorruption("reservation source is invalid")
+        return
+    release_pairs_by_source = {
+        "broker_acceptance": {("released_rejected", "rejected")},
+        "broker_reconciliation": {
+            ("released_filled", "filled"),
+            ("released_cancelled", "cancelled"),
+            ("released_rejected", "rejected"),
+        },
+        "local_submission_result": {
+            ("released_expired", "expired_pre_dispatch"),
+            ("released_expired", "failed_pre_dispatch"),
+            ("released_rejected", "rejected"),
         },
     }
-    if event.source not in expected_sources[event.event_type]:
+    if (after.status, after.release_reason) not in release_pairs_by_source.get(
+        event.source,
+        set(),
+    ):
         raise PaperEventStreamCorruption("reservation source is invalid")
 
 
@@ -585,7 +603,7 @@ def _validate_transition_and_identity_keys(
                 raise PaperEventStreamCorruption(
                     "reservation event type does not match transition"
                 )
-            _validate_reservation_source(event)
+            _validate_reservation_source(event, after)
         else:
             if before is not None and not isinstance(before, PaperCancelRequest):
                 raise ValueError("cancel stream changed aggregate model")
@@ -728,6 +746,13 @@ def join_correlated_execution_projections(
                 raise PaperEventStreamConflict("duplicate reservation projection in parity join")
             target.risk_reservation = projection
         else:
+            if any(
+                item.aggregate_id == projection.aggregate_id
+                for item in target.cancel_requests
+            ):
+                raise PaperEventStreamConflict(
+                    "duplicate cancel projection in parity join"
+                )
             target.cancel_requests.append(projection)
             target.cancel_requests.sort(key=lambda item: item.aggregate_id)
     return [grouped[key] for key in sorted(grouped)]

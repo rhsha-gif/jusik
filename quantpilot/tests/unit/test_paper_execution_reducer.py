@@ -904,6 +904,81 @@ def test_reservation_create_fence_and_release_are_closed() -> None:
         )
 
 
+@pytest.mark.parametrize(
+    ("source", "status", "reason", "is_valid"),
+    [
+        ("broker_acceptance", "released_rejected", "rejected", True),
+        ("broker_acceptance", "released_filled", "filled", False),
+        ("broker_reconciliation", "released_filled", "filled", True),
+        ("broker_reconciliation", "released_cancelled", "cancelled", True),
+        ("broker_reconciliation", "released_rejected", "rejected", True),
+        (
+            "broker_reconciliation",
+            "released_expired",
+            "expired_pre_dispatch",
+            False,
+        ),
+        (
+            "local_submission_result",
+            "released_expired",
+            "expired_pre_dispatch",
+            True,
+        ),
+        (
+            "local_submission_result",
+            "released_expired",
+            "failed_pre_dispatch",
+            True,
+        ),
+        ("local_submission_result", "released_rejected", "rejected", True),
+        ("local_submission_result", "released_filled", "filled", False),
+    ],
+)
+def test_reservation_release_source_matches_terminal_reason(
+    source: str,
+    status: str,
+    reason: str,
+    is_valid: bool,
+) -> None:
+    held = _reservation(_dispatch())
+    projection = reduce_paper_execution_event(
+        None,
+        build_paper_execution_event(
+            event_id="pevt-risk-source-matrix",
+            aggregate_version=1,
+            event_type="RiskReserved",
+            source="local_prepare",
+            after=held,
+            causation_id=None,
+        ),
+    )
+    released_at = held.updated_at + timedelta(seconds=1)
+    released = PaperRiskReservation.model_validate(
+        held.model_copy(
+            update={
+                "status": status,
+                "release_reason": reason,
+                "released_at": released_at,
+                "updated_at": released_at,
+                "revision": held.revision + 1,
+            }
+        ).model_dump()
+    )
+    event = build_paper_execution_event(
+        event_id=f"pevt-release-{source}-{status}-{reason}",
+        aggregate_version=2,
+        event_type="RiskReservationReleased",
+        source=source,
+        after=released,
+        causation_id="pevt-terminal-dispatch",
+    )
+    if is_valid:
+        assert reduce_paper_execution_event(projection, event).after == released
+    else:
+        with pytest.raises(PaperEventStreamCorruption, match="reservation source"):
+            reduce_paper_execution_event(projection, event)
+
+
 def test_cancel_create_claim_terminal_and_same_status_tightening() -> None:
     prepared = _cancel()
     prepared_event = build_paper_execution_event(
@@ -1043,4 +1118,18 @@ def test_read_only_join_preserves_independent_aggregate_streams() -> None:
                 reduce_paper_execution_event(None, order_event),
                 reduce_paper_execution_event(None, foreign_event),
             ]
+        )
+
+    cancel_event = build_paper_execution_event(
+        event_id="pevt-cancel-for-join",
+        aggregate_version=1,
+        event_type="CancelPrepared",
+        source="kill_cancel",
+        after=_cancel(),
+        causation_id=None,
+    )
+    cancel_projection = reduce_paper_execution_event(None, cancel_event)
+    with pytest.raises(PaperEventStreamConflict, match="duplicate cancel"):
+        join_correlated_execution_projections(
+            [cancel_projection, cancel_projection]
         )

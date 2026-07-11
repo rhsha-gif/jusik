@@ -366,7 +366,7 @@ def test_migration_backfills_open_buy_and_sell_but_not_terminal(tmp_path) -> Non
     _downgrade_paper_schema_to_v9(path)
 
     with _paper_store(path) as migrated:
-        assert migrated.provenance.schema_version == 10
+        assert migrated.provenance.schema_version == 11
         assert migrated.provenance.store_id == original_store_id
         restored_session = migrated.load_paper_execution_session(
             original_session_id
@@ -518,7 +518,7 @@ def test_future_paper_schema_fails_closed(tmp_path) -> None:
         pass
     connection = sqlite3.connect(path)
     try:
-        connection.execute("PRAGMA user_version = 11")
+        connection.execute("PRAGMA user_version = 12")
         connection.commit()
     finally:
         connection.close()

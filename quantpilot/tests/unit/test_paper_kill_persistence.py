@@ -284,7 +284,7 @@ def test_unattempted_cancel_can_terminalize_when_fill_wins_race(tmp_path) -> Non
         assert persisted.attempt_count == 0
 
 
-def test_schema_v9_migrates_to_v10_and_backfills_open_dispatch(tmp_path) -> None:
+def test_schema_v9_migrates_to_v11_and_backfills_open_dispatch(tmp_path) -> None:
     path = tmp_path / "migration.sqlite3"
     with _store(path) as store:
         original_store_id = store.provenance.store_id
@@ -339,7 +339,7 @@ def test_schema_v9_migrates_to_v10_and_backfills_open_dispatch(tmp_path) -> None
 
     with _store(path) as migrated:
         assert migrated.provenance.store_id == original_store_id
-        assert migrated.provenance.schema_version == PAPER_STATE_SCHEMA_VERSION == 10
+        assert migrated.provenance.schema_version == PAPER_STATE_SCHEMA_VERSION == 11
         assert migrated.list_paper_cancel_requests() == []
         restored = migrated.load_paper_order_dispatch("oplan-kill-001")
         assert restored.status == "partially_filled"

@@ -70,7 +70,7 @@ Score formula: `domain*0.30 + tools*0.25 + track*0.25 + continuity*0.10 + coordi
 |---|---|---|---|---|---|---|---|---|
 | `QP-EVT-000` | GPT-5 Codex lead + read-only inventory/test/audit agents | Claude Code | Gate 1 accepted | `주식트레이더-exec-events-v1` / `codex/qp-exec-events-v1-contract` | repository inventory, contract draft, workboard | done | Every mutation path, identifier meaning, and migration risk is grounded in code and incorporated into the accepted contract. | inventory + test design; internal re-audits P0/P1=0; Gate 1 merged; Claude review integrated |
 | `QP-EVT-010` | Claude Code `claude-fable-5` | GPT-5 Codex lead | `QP-EVT-000` | `주식트레이더-claude-exec-events-review` / `claude/qp-exec-events-v1-review` | contract corrections + adversarial acceptance artifact | integrated | Initial decomposition review is substantive, decision-complete, committed, and contains no runtime/network changes. | `80e05d5`; findings R1-R12/decisions A-H closed; lead cross-check P0=0/P1=0; P2 precision corrections integrated |
-| `QP-EVT-020A` | Claude Code `claude-fable-5` | GPT-5 Codex lead | `QP-EVT-010`, Gate 1 accepted | separate Claude implementation worktree | new `transitions.py`, `events.py`, `reducer.py`; new event-model/reducer tests | ready | Deterministic pure replay; strict duplicate/gap/hash/provenance/precedence behavior; no DB or broker imports. | accepted contract `80e05d5` + lead precision corrections |
+| `QP-EVT-020A` | GPT-5 Codex fallback implementer | independent reviewer + mission lead | `QP-EVT-010`, Gate 1 accepted | `주식트레이더-exec-events-domain-fallback` / `codex/qp-exec-events-v1-domain-fallback` | new `transitions.py`, `events.py`, `reducer.py`; new event-model/reducer tests | in_progress | Deterministic pure replay; strict duplicate/gap/hash/provenance/precedence behavior; no DB or broker imports. | Claude `claude-fable-5` was first-routed after its accepted contract review, but the implementation invocation hit account 429/reset 01:40 KST before editing any file; exact clean no-artifact fallback recorded |
 | `QP-EVT-020B` | GPT-5 Codex lead | independent read-only reviewer | `QP-EVT-020A` merged | event integration worktree | narrow SQLite transition import/re-export shim + equality regression only | proposed | SQLite and pure transition definitions are identical without concurrent ownership overlap. | pending |
 | `QP-EVT-030` | GPT-5 Codex lead | independent auditor | `QP-EVT-020B` | implementation worktree | schema v11, append helpers, exhaustive dual-write, migration, mutation-origin call sites | proposed | Authoritative row/event batch commits or rolls back together at every mutation site. | pending |
 | `QP-EVT-040` | GPT-5 Codex lead | Claude/internally independent reviewer | `QP-EVT-030` | integration worktree | parity corpus, race/fault/restart tests, report | proposed | Replay equals all authoritative observable fields; no broker side effects; full suite/smoke green. | pending |
@@ -173,6 +173,14 @@ No later gate can be waived because an earlier test count is high.
   precedence/no-write tests are required. QP-EVT-020 was split into 020A pure
   new paths and 020B lead-owned SQLite re-export integration to eliminate the
   ownership overlap. Runtime remains unchanged at this checkpoint.
+- `2026-07-11 KST` — Claude Code `claude-fable-5` was first-routed to
+  QP-EVT-020A in isolated branch `claude/qp-exec-events-v1-domain`. The
+  invocation ended with account `429 session limit` (reset 01:40 KST) before
+  creating or modifying any file; the branch remained clean at `0e9bab9`.
+  Per the availability fallback rule, the mission lead rerouted the same exact
+  five-path pure-domain scope to a separate Codex fallback worktree. This is an
+  availability deviation, not Claude quality evidence; Claude's substantive
+  contract review `80e05d5` remains integrated.
 
 ## Handoff record
 

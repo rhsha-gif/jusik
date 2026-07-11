@@ -243,7 +243,7 @@ assurance:
   policy_authorized
   operator_authorized
 evaluated_at: aware datetime
-checks: ordered immutable list of {name, passed, detail_code}
+checks: ordered tuple of {name, passed, detail_code}
 first_failed_check: optional string
 ```
 
@@ -280,14 +280,14 @@ single_order:
   idempotency_key
   created_at
   expires_at
-  passed_checks
-  failed_checks
+  passed_checks: tuple
+  failed_checks: tuple
 batch:
   passed
   mode
   policy_version
-  accepted_order_plan_ids
-  failed_checks
+  accepted_order_plan_ids: tuple
+  failed_checks: tuple
 snapshot_id
 snapshot_captured_at
 guardrail_fingerprint
@@ -372,7 +372,7 @@ schema_version = 1
 order_plan_id
 verdict: eligible_for_legacy_submit | blocked
 blocked_stage: authorization | risk | final_safety | capability | none
-reason_codes: sorted unique immutable list
+reason_codes: sorted unique tuple
 would_require_durable_prepare: bool
 would_require_atomic_reservation: bool
 intended_next_stage: none | legacy_submit_handoff

@@ -540,6 +540,72 @@ def test_kill_service_cancels_managed_order_exactly_once(tmp_path) -> None:
         assert client.cancel_calls == 1
 
 
+def test_full_fill_wins_active_cancel_race_without_reposting(tmp_path) -> None:
+    with _store(tmp_path / "fill-wins-active-cancel.sqlite3") as store:
+        session = _session(store)
+        original = _accepted_dispatch(store, session)
+        client = _Client(
+            rows=(_cancelable_row(),),
+            confirm_terminal=False,
+        )
+        service = _kill_service(store, session, client)
+
+        first = service.engage(reason="operator_requested")
+        assert first.status == "recovery_required"
+        assert first.cancel_post_count == 1
+        assert client.cancel_calls == 1
+        request = store.list_paper_cancel_requests()[0]
+        assert request.status == "cancel_accepted"
+
+        working = store.load_paper_order_dispatch(original.order_plan_id)
+        assert working is not None
+        filled_at = working.updated_at + timedelta(microseconds=1)
+        filled = PaperOrderDispatch.model_validate(
+            working.model_copy(
+                update={
+                    "status": "filled",
+                    "reconciliation_status": "reconciled",
+                    "cumulative_filled_quantity": working.quantity,
+                    "fill_evidence": [
+                        PaperDispatchFillEvidence(
+                            broker_fill_reference="fill-wins-cancel-race",
+                            broker_order_id=working.broker_order_id,
+                            broker_order_reference=(
+                                working.broker_order_reference or "0000001234"
+                            ),
+                            symbol=working.symbol,
+                            side=working.side,
+                            quantity=working.quantity,
+                            price=working.limit_price,
+                            notional=working.quantity * working.limit_price,
+                            evidence_at=filled_at,
+                            time_basis="broker_execution",
+                        )
+                    ],
+                    "updated_at": filled_at,
+                    "reconciled_at": filled_at,
+                    "revision": working.revision + 1,
+                }
+            ).model_dump()
+        )
+        store.update_paper_order_dispatch(
+            filled,
+            mutation_origin="broker_reconciliation",
+        )
+        client.rows = ()
+
+        second = service.engage(reason="operator_retry_after_fill")
+        assert second.status == "killed"
+        assert second.cancel_post_count == 0
+        assert client.cancel_calls == 1
+        assert store.list_paper_cancel_requests()[0].status == (
+            "reconciled_filled"
+        )
+        reservation = store.load_paper_risk_reservation(original.order_plan_id)
+        assert reservation is not None
+        assert reservation.status == "released_filled"
+
+
 def test_cancel_timeout_requires_recovery_and_restart_never_reposts(tmp_path) -> None:
     with _store(tmp_path / "timeout-kill.sqlite3") as store:
         session = _session(store)

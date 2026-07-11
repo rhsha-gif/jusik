@@ -4,12 +4,14 @@ from __future__ import annotations
 
 from collections import defaultdict
 from datetime import timedelta
+import sqlite3
 import pytest
 
 from quantpilot.packages.core.execution.events import (
     PaperExecutionEventProvenance,
     canonical_json_bytes,
     event_canonical_bytes,
+    identity_keys_for_dispatch,
 )
 from quantpilot.packages.core.execution.reducer import (
     join_correlated_execution_projections,
@@ -26,6 +28,7 @@ from quantpilot.packages.db.sqlite_repositories import (
     PaperStateStore,
 )
 from quantpilot.tests.paper_execution_event_store_fixtures import (
+    ACCOUNT_B,
     NOW,
     downgrade_to_schema,
     insert_reserved_dispatch,
@@ -420,6 +423,44 @@ def test_fill_before_ack_and_cancel_fill_races_remain_atomic_and_in_parity(
         session = start_session(store)
         prepared = make_dispatch(store, session, suffix="fill-before-ack")
         insert_reserved_dispatch(store, prepared)
+        forged_at = NOW + timedelta(seconds=2)
+        forged_fill = _fill(
+            prepared,
+            reference="fill-before-claim",
+            quantity=1,
+            at=forged_at,
+        )
+        fill_before_claim = PaperOrderDispatch.model_validate(
+            prepared.model_copy(
+                update={
+                    "status": "partially_filled",
+                    "attempt_count": 1,
+                    "dispatch_claimed_at": forged_at,
+                    "broker_business_date": NOW.date(),
+                    "broker_order_reference": "0000001234",
+                    "broker_order_branch_number": "00123",
+                    "broker_order_time": "100001",
+                    "cumulative_filled_quantity": 1,
+                    "fill_evidence": [forged_fill],
+                    "updated_at": forged_at,
+                    "revision": prepared.revision + 1,
+                }
+            ).model_dump()
+        )
+        before_claim_events = tuple(
+            event_canonical_bytes(event)
+            for event in store.list_paper_execution_events()
+        )
+        with pytest.raises(PaperStateConflictError):
+            store.update_paper_order_dispatch(
+                fill_before_claim,
+                mutation_origin="broker_reconciliation",
+            )
+        assert store.load_paper_order_dispatch(prepared.order_plan_id) == prepared
+        assert tuple(
+            event_canonical_bytes(event)
+            for event in store.list_paper_execution_events()
+        ) == before_claim_events
         claimed = store.claim_dispatch_attempt(
             prepared.order_plan_id,
             session=session,
@@ -436,15 +477,20 @@ def test_fill_before_ack_and_cancel_fill_races_remain_atomic_and_in_parity(
             event_canonical_bytes(event)
             for event in store.list_paper_execution_events()
         ]
-        late_acceptance = partial.model_copy(
-            update={
-                "status": "accepted",
-                "broker_forwarding_order_org_number": "06010",
-                "updated_at": NOW + timedelta(seconds=4),
-                "revision": partial.revision + 1,
-            }
+        late_acceptance = PaperOrderDispatch.model_validate(
+            claimed.model_copy(
+                update={
+                    "status": "accepted",
+                    "broker_business_date": NOW.date(),
+                    "broker_order_reference": "0000001234",
+                    "broker_forwarding_order_org_number": "06010",
+                    "broker_order_time": "100001",
+                    "updated_at": NOW + timedelta(seconds=4),
+                    "revision": partial.revision + 1,
+                }
+            ).model_dump()
         )
-        with pytest.raises(ValueError):
+        with pytest.raises(PaperStateConflictError):
             store.update_paper_order_dispatch(
                 late_acceptance,
                 mutation_origin="broker_post_result",
@@ -461,6 +507,28 @@ def test_fill_before_ack_and_cancel_fill_races_remain_atomic_and_in_parity(
             quantities=(1, 9),
             at=NOW + timedelta(seconds=5),
         )
+        _assert_store_parity(store)
+
+    with paper_store(tmp_path / "full-fill-before-ack.sqlite3") as store:
+        session = start_session(store)
+        prepared = make_dispatch(store, session, suffix="full-fill-before-ack")
+        insert_reserved_dispatch(store, prepared)
+        claimed = store.claim_dispatch_attempt(
+            prepared.order_plan_id,
+            session=session,
+            claimed_at=NOW + timedelta(seconds=2),
+        )
+        filled = _with_fill_state(
+            store,
+            claimed,
+            status="filled",
+            quantities=(10,),
+            at=NOW + timedelta(seconds=3),
+        )
+        assert filled.status == "filled"
+        reservation = store.load_paper_risk_reservation(prepared.order_plan_id)
+        assert reservation is not None
+        assert reservation.status == "released_filled"
         _assert_store_parity(store)
 
     with paper_store(tmp_path / "fill-wins-cancel.sqlite3") as store:
@@ -557,14 +625,20 @@ def test_cumulative_fill_replay_growth_and_regression_have_closed_results(
             store,
             one,
             status="partially_filled",
-            quantities=(1, 2),
+            quantities=(1, 1),
             at=NOW + timedelta(seconds=5),
         )
-        assert two.cumulative_filled_quantity == 3
+        assert two.cumulative_filled_quantity == 2
         two_events = tuple(
             event_canonical_bytes(event)
             for event in store.list_paper_execution_events()
         )
+        partial_events = store.list_paper_execution_events(
+            "order_dispatch",
+            prepared.order_plan_id,
+        )
+        assert len(partial_events) == 5
+        assert len(partial_events[-1].identity_keys) == 1
         regressed = PaperOrderDispatch.model_validate(
             two.model_copy(
                 update={
@@ -586,6 +660,91 @@ def test_cumulative_fill_replay_growth_and_regression_have_closed_results(
             for event in store.list_paper_execution_events()
         ) == two_events
         _assert_store_parity(store)
+
+
+def test_runtime_multi_fill_event_persists_one_identity_row_per_new_fill(
+    tmp_path,
+) -> None:
+    with paper_store(tmp_path / "multi-fill.sqlite3") as store:
+        session = start_session(store)
+        prepared = make_dispatch(store, session, suffix="multi-fill")
+        insert_reserved_dispatch(store, prepared)
+        accepted = _accepted(
+            store,
+            store.claim_dispatch_attempt(
+                prepared.order_plan_id,
+                session=session,
+                claimed_at=NOW + timedelta(seconds=2),
+            ),
+        )
+        partial = _with_fill_state(
+            store,
+            accepted,
+            status="partially_filled",
+            quantities=(1, 2),
+            at=NOW + timedelta(seconds=4),
+        )
+        events = store.list_paper_execution_events(
+            "order_dispatch",
+            prepared.order_plan_id,
+        )
+        multi_fill_event = events[-1]
+        assert multi_fill_event.event_type == "OrderPartiallyFilled"
+        assert len(multi_fill_event.identity_keys) == 2
+        persisted_identity_count = store._connection.execute(  # noqa: SLF001
+            "SELECT COUNT(*) FROM paper_execution_event_identity_keys "
+            "WHERE event_id = ?",
+            (multi_fill_event.event_id,),
+        ).fetchone()[0]
+        assert persisted_identity_count == 2
+        assert partial.cumulative_filled_quantity == 3
+        _assert_store_parity(store)
+
+
+def test_execution_identity_scope_is_account_sensitive(tmp_path) -> None:
+    with paper_store(tmp_path / "identity-account-scope.sqlite3") as store:
+        session = start_session(store)
+        prepared = make_dispatch(store, session, suffix="identity-account")
+        insert_reserved_dispatch(store, prepared)
+        accepted = _accepted(
+            store,
+            store.claim_dispatch_attempt(
+                prepared.order_plan_id,
+                session=session,
+                claimed_at=NOW + timedelta(seconds=2),
+            ),
+        )
+        partial = _with_fill_state(
+            store,
+            accepted,
+            status="partially_filled",
+            quantities=(1,),
+            at=NOW + timedelta(seconds=4),
+        )
+        venue_scoped = PaperOrderDispatch.model_validate(
+            partial.model_copy(
+                update={
+                    "fill_evidence": [
+                        partial.fill_evidence[0].model_copy(
+                            update={"time_basis": "broker_execution"}
+                        )
+                    ]
+                }
+            ).model_dump()
+        )
+        local_key = identity_keys_for_dispatch(None, venue_scoped)[0]
+        foreign = PaperOrderDispatch.model_validate(
+            venue_scoped.model_copy(
+                update={"account_scope_fingerprint": ACCOUNT_B}
+            ).model_dump()
+        )
+        foreign_key = identity_keys_for_dispatch(None, foreign)[0]
+
+        assert local_key.kind == "venue_execution"
+        assert local_key.kind == foreign_key.kind
+        assert local_key.external_id == foreign_key.external_id
+        assert local_key.evidence_payload_hash == foreign_key.evidence_payload_hash
+        assert local_key.scope_hash != foreign_key.scope_hash
 
 
 def test_partial_cancel_preserves_fills_and_cancel_rejection_holds_capacity(
@@ -703,6 +862,183 @@ def test_partial_cancel_preserves_fills_and_cancel_rejection_holds_capacity(
         _assert_store_parity(store)
 
 
+def test_contradictory_post_terminal_evidence_changes_nothing(tmp_path) -> None:
+    with paper_store(tmp_path / "terminal-contradiction.sqlite3") as store:
+        session = start_session(store)
+        prepared = make_dispatch(store, session, suffix="terminal-contradiction")
+        insert_reserved_dispatch(store, prepared)
+        accepted = _accepted(
+            store,
+            store.claim_dispatch_attempt(
+                prepared.order_plan_id,
+                session=session,
+                claimed_at=NOW + timedelta(seconds=2),
+            ),
+        )
+        filled = _with_fill_state(
+            store,
+            accepted,
+            status="filled",
+            quantities=(10,),
+            at=NOW + timedelta(seconds=4),
+        )
+        released = store.load_paper_risk_reservation(prepared.order_plan_id)
+        assert released is not None
+        before_events = tuple(
+            event_canonical_bytes(event)
+            for event in store.list_paper_execution_events()
+        )
+        contradicted_at = NOW + timedelta(seconds=5)
+        contradictory = PaperOrderDispatch.model_validate(
+            filled.model_copy(
+                update={
+                    "status": "cancelled",
+                    "updated_at": contradicted_at,
+                    "reconciled_at": contradicted_at,
+                    "revision": filled.revision + 1,
+                }
+            ).model_dump()
+        )
+
+        with pytest.raises(PaperStateConflictError):
+            store.update_paper_order_dispatch(
+                contradictory,
+                mutation_origin="broker_reconciliation",
+            )
+
+        assert store.load_paper_order_dispatch(prepared.order_plan_id) == filled
+        assert store.load_paper_risk_reservation(prepared.order_plan_id) == released
+        assert tuple(
+            event_canonical_bytes(event)
+            for event in store.list_paper_execution_events()
+        ) == before_events
+        _assert_store_parity(store)
+
+
+def test_reconciliation_block_and_legacy_terminal_reconcile_emit_exact_events(
+    tmp_path,
+) -> None:
+    with paper_store(tmp_path / "reconciliation-block.sqlite3") as store:
+        session = start_session(store)
+        prepared = make_dispatch(store, session, suffix="reconciliation-block")
+        insert_reserved_dispatch(store, prepared)
+        claimed = store.claim_dispatch_attempt(
+            prepared.order_plan_id,
+            session=session,
+            claimed_at=NOW + timedelta(seconds=2),
+        )
+        blocked_at = NOW + timedelta(seconds=3)
+        blocked = PaperOrderDispatch.model_validate(
+            claimed.model_copy(
+                update={
+                    "status": "outcome_unknown",
+                    "reconciliation_status": "blocked",
+                    "last_error_code": "broker_match_ambiguous",
+                    "updated_at": blocked_at,
+                    "revision": claimed.revision + 1,
+                }
+            ).model_dump()
+        )
+        blocked = store.update_paper_order_dispatch(
+            blocked,
+            mutation_origin="broker_reconciliation",
+        )
+        events = store.list_paper_execution_events(
+            "order_dispatch",
+            prepared.order_plan_id,
+        )
+        assert events[-1].event_type == "ReconciliationBlocked"
+        assert events[-1].source_revision == blocked.revision
+        _assert_store_parity(store)
+
+    path = tmp_path / "legacy-terminal-reconciled.sqlite3"
+    with paper_store(path) as store:
+        session = start_session(store)
+        prepared = make_dispatch(store, session, suffix="legacy-reconciled")
+        insert_reserved_dispatch(store, prepared)
+        accepted = _accepted(
+            store,
+            store.claim_dispatch_attempt(
+                prepared.order_plan_id,
+                session=session,
+                claimed_at=NOW + timedelta(seconds=2),
+            ),
+        )
+        filled = _with_fill_state(
+            store,
+            accepted,
+            status="filled",
+            quantities=(10,),
+            at=NOW + timedelta(seconds=4),
+        )
+    downgrade_to_schema(path, target_version=10)
+    legacy_blocked = PaperOrderDispatch.model_validate(
+        filled.model_copy(
+            update={
+                "reconciliation_status": "blocked",
+                "last_error_code": "broker_match_ambiguous",
+                "reconciled_at": None,
+            }
+        ).model_dump()
+    )
+    connection = sqlite3.connect(path)
+    try:
+        connection.execute(
+            "UPDATE paper_order_dispatches SET status = ?, revision = ?, "
+            "state_json = ?, updated_at = ? WHERE order_plan_id = ?",
+            (
+                legacy_blocked.status,
+                legacy_blocked.revision,
+                canonical_json_bytes(legacy_blocked).decode("utf-8"),
+                legacy_blocked.updated_at.isoformat(),
+                legacy_blocked.order_plan_id,
+            ),
+        )
+        connection.commit()
+    finally:
+        connection.close()
+
+    with paper_store(path) as migrated:
+        imported_events = migrated.list_paper_execution_events(
+            "order_dispatch",
+            legacy_blocked.order_plan_id,
+        )
+        assert [event.event_type for event in imported_events] == [
+            "LegacyOrderDispatchImported"
+        ]
+        reconciled_at = legacy_blocked.updated_at + timedelta(seconds=1)
+        reconciled = PaperOrderDispatch.model_validate(
+            legacy_blocked.model_copy(
+                update={
+                    "reconciliation_status": "reconciled",
+                    "last_error_code": None,
+                    "updated_at": reconciled_at,
+                    "reconciled_at": reconciled_at,
+                    "revision": legacy_blocked.revision + 1,
+                }
+            ).model_dump()
+        )
+        reconciled = migrated.update_paper_order_dispatch(
+            reconciled,
+            mutation_origin="broker_reconciliation",
+        )
+        events = migrated.list_paper_execution_events(
+            "order_dispatch",
+            legacy_blocked.order_plan_id,
+        )
+        assert [event.event_type for event in events] == [
+            "LegacyOrderDispatchImported",
+            "DispatchReconciled",
+        ]
+        reservation_events = migrated.list_paper_execution_events(
+            "risk_reservation",
+            f"presv-{legacy_blocked.order_plan_id}",
+        )
+        assert len(reservation_events) == 1
+        assert reconciled.reconciliation_status == "reconciled"
+        _assert_store_parity(migrated)
+
+
 def _advance_dispatch_for_import(
     store: PaperStateStore,
     session,
@@ -813,6 +1149,7 @@ def test_v10_import_replays_every_dispatch_and_reservation_state(
             prepared.order_plan_id
         )
         assert expected_reservation is not None
+        _assert_store_parity(store)
     downgrade_to_schema(path, target_version=10)
 
     with paper_store(path) as migrated:
@@ -887,6 +1224,7 @@ def test_v10_import_replays_every_cancel_state(tmp_path, status: str) -> None:
                 at=NOW + timedelta(seconds=7),
             )
         expected = request
+        _assert_store_parity(store)
     downgrade_to_schema(path, target_version=10)
 
     with paper_store(path) as migrated:
@@ -950,6 +1288,7 @@ def test_restart_shadow_rebuild_is_read_only_and_has_zero_broker_authority(
 
     with paper_store(path) as reopened:
         changes_before = reopened._connection.total_changes  # noqa: SLF001
+        assert changes_before == 0
         _assert_store_parity(reopened)
         after_events = tuple(
             event_canonical_bytes(event)

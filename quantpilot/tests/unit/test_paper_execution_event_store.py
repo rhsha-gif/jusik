@@ -644,6 +644,67 @@ def test_identity_scope_reuse_rolls_back_new_aggregate_and_event(tmp_path) -> No
         assert len(store.list_paper_execution_events()) == before_event_count
 
 
+def test_identical_identity_scope_under_distinct_event_id_is_unique_and_atomic(
+    tmp_path,
+) -> None:
+    path = tmp_path / "identical-identity-collision.sqlite3"
+    create_v10_legacy_corpus(path)
+    with paper_store(path) as store:
+        original = next(
+            event
+            for event in store.list_paper_execution_events()
+            if event.identity_keys
+        )
+        original_key = original.identity_keys[0]
+        row = store._connection.execute(  # noqa: SLF001
+            "SELECT * FROM paper_execution_events WHERE event_id = ?",
+            (original.event_id,),
+        ).fetchone()
+        assert row is not None
+        columns = [
+            item[1]
+            for item in store._connection.execute(  # noqa: SLF001
+                "PRAGMA table_info(paper_execution_events)"
+            ).fetchall()
+        ]
+        values = {column: row[column] for column in columns}
+        clone_event_id = "pevt-identical-identity-collision"
+        values.update(
+            {
+                "event_id": clone_event_id,
+                "aggregate_id": "oplan-identical-identity-collision",
+                "aggregate_version": 1,
+            }
+        )
+        placeholders = ", ".join("?" for _ in columns)
+        quoted_columns = ", ".join(f'"{column}"' for column in columns)
+
+        with pytest.raises(sqlite3.IntegrityError):
+            with store._transaction():  # noqa: SLF001
+                store._connection.execute(  # noqa: SLF001
+                    f"INSERT INTO paper_execution_events ({quoted_columns}) "
+                    f"VALUES ({placeholders})",
+                    tuple(values[column] for column in columns),
+                )
+                store._connection.execute(  # noqa: SLF001
+                    "INSERT INTO paper_execution_event_identity_keys "
+                    "(event_id, identity_kind, identity_scope_hash, external_id, "
+                    "evidence_payload_hash) VALUES (?, ?, ?, ?, ?)",
+                    (
+                        clone_event_id,
+                        original_key.kind,
+                        original_key.scope_hash,
+                        original_key.external_id,
+                        original_key.evidence_payload_hash,
+                    ),
+                )
+
+        assert store._connection.execute(  # noqa: SLF001
+            "SELECT 1 FROM paper_execution_events WHERE event_id = ?",
+            (clone_event_id,),
+        ).fetchone() is None
+
+
 def test_two_connections_same_expected_version_have_one_winner_and_no_gap(
     tmp_path,
 ) -> None:

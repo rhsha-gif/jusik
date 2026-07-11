@@ -49,14 +49,17 @@ Score: `domain*0.30 + tools*0.25 + track*0.25 + continuity*0.10 + coordination*0
 | `QP-RM-00` | GPT-5 Codex lead | Claude counterpart | none | `주식트레이더-roadmap-baseline` / `codex/qp-roadmap-baseline-v9` | baseline integration, this workboard, baseline report | done | Kill v1 is fast-forwarded from clean main, full backend and smoke pass, user dirty tree unchanged. | `216ff22`; `819 passed, 2 skipped`; smoke mock/live=false; CLI disabled |
 | `QP-RM-00A` | Claude Code Opus alias + `claude-fable-5` | GPT-5 Codex lead | `QP-RM-00` baseline | sibling worktree / `claude/qp-roadmap-contracts` | acceptance matrix and reservation contract/workboard | integrated | Repository-grounded gate dependencies, invariants, and exact acceptance evidence are decision-complete after Codex correction. | Claude `215a4b9`; integrated `36d9a8a`; Codex hardening `5dff17a` |
 | `QP-RISK-RES-V1` | GPT-5 Codex lead | Claude Code `claude-fable-5` | `QP-RM-00`, `QP-RM-00A` | `주식트레이더-risk-reservation-v1` / `codex/qp-risk-reservation-v1-core` | risk reservation model/store/integration/tests/report | done | Schema v10 atomic cash/sell-quantity/gross-exposure reservation passed concurrency, crash, migration, independent audit, baseline integration, full-suite, smoke, and default-blocked kill gates. | implementation/audit `5eb70a9`; Claude audit `c021a50` + follow-up `b280bef`; QP-RES-A1 closed; residual P0=0/P1=0; `885 passed, 2 skipped`; smoke mock/live=false/blocked; kill CLI `paper_kill_disabled` |
-| `QP-EXEC-EVENTS-V1` | GPT-5 Codex lead; Claude Code `claude-fable-5` contract reviewer | independent auditors | `QP-RISK-RES-V1` acceptance | `주식트레이더-exec-events-v1` / `codex/qp-exec-events-v1-contract` | canonical events/reducer/shadow parity | implementation_in_progress | Pure model/reducer, schema-v11 store, exhaustive runtime dual-write, and migration are accepted; parity/race/fault/restart evidence remains. | Claude contract `80e05d5`; runtime integrated through `9cece01`; final 030B audits P0/P1/P2=0; `975 passed, 2 skipped`; safe smoke |
-| `QP-KERNEL-V2` | best-fit routed per scorecard | independent auditor | reservation + events | separate worktree | shadow then gated cutover | proposed | Level 3/4/5 use one kernel, no shadow side effects, and no dual broker POST path. | pending |
+| `QP-EXEC-EVENTS-V1` | GPT-5 Codex lead; Claude Code `claude-fable-5` contract reviewer | independent auditors | `QP-RISK-RES-V1` acceptance | `주식트레이더-exec-events-parity` / `codex/qp-exec-events-v1-parity` | canonical events/reducer/shadow parity | done | Pure replay, schema-v11 truthful import, exhaustive atomic runtime dual-write, full parity/race/fault/restart evidence, and final audit pass without changing authority. | accepted through `7826d24`; Claude contract `80e05d5`; full `1003 passed, 2 skipped`; safe smoke; final contract/production/safety audits P0/P1/P2=0 |
+| `QP-KERNEL-V2` | best-fit routed per scorecard | independent auditor | reservation + events | separate worktree | shadow then gated cutover | in_progress | Level 3/4/5 use one kernel, no shadow side effects, and no dual broker POST path. | Gate 2 accepted; contract/inventory slice is next |
 | `QP-LEDGER-RUNTIME` | best-fit routed per scorecard | independent auditor | kernel cutover | separate missions/worktrees | ledger, reconciliation, continuous runtime | proposed | Projection replay, broker parity, continuous protection, and paper-readiness gates pass. | pending |
 
 ## Integration requests
 
 - `QP-RM-00A -> QP-RISK-RES-V1`: acceptance matrix must bind the reservation transaction, release evidence, crash points, and schema migration gate.
 - `QP-RISK-RES-V1 -> QP-EXEC-EVENTS-V1`: reservation lifecycle events must have stable aggregate identities before event dual-write begins.
+- `QP-EXEC-EVENTS-V1 -> QP-KERNEL-V2`: the common kernel must retain atomic
+  reservation, schema-v11 canonical dual-write, closed mutation origins,
+  account provenance, and ambiguous-POST no-retry semantics.
 
 ## Blockers and authority requests
 
@@ -121,6 +124,16 @@ Score: `domain*0.30 + tools*0.25 + track*0.25 + continuity*0.10 + coordination*0
   the same complete suite passed with a worktree-local `--basetemp`. QP-EVT-040
   parity/race/fault/restart testing is active.
 
+- `2026-07-12 KST` — QP-EVT-040/050 completed Gate 2. The accepted parity
+  commits `adb5bc1` and `7826d24` cover every runtime/v10 aggregate state,
+  broker ordering and cancel/fill races, identity collisions/scoping, restart,
+  and read-only replay. Full backend verification is `1003 passed, 2 skipped`;
+  smoke remains mock/live=false/operator blocked. Three final complete-diff,
+  contract, and safety audits report P0/P1/P2 zero, with contract verdict
+  `ACCEPT`. Completion evidence is recorded in
+  `docs/canonical_order_events_v1_completion_report.md`. Gate 2 is done and
+  `QP-KERNEL-V2` is now active.
+
 ## Handoff record
 
 ```text
@@ -139,12 +152,29 @@ integration_requests: preserve reservation aggregate identity while starting
   QP-EXEC-EVENTS-V1; do not treat Gate 1 as paper-operational readiness
 ```
 
+```text
+task_id: QP-EXEC-EVENTS-V1
+agent_and_model: GPT-5 Codex lead + Claude Code claude-fable-5 contract reviewer
+  + independent audit agents
+commit: accepted Gate 2 implementation/evidence through 7826d24 on
+  codex/qp-exec-events-v1-parity
+acceptance_met: yes for fake-only development; schema-v10 paper rows remain
+  authoritative and real KIS/manual Gate P is still pending
+exact_checks: 1003 passed, 2 skipped; safe smoke; contract/production/safety
+  final audits all P0/P1/P2 zero; git diff clean
+integration_requests: start QP-KERNEL-V2 in shadow mode; preserve atomic risk
+  reservation, schema-v11 dual-write, typed origins, provenance, and no-rePOST
+known_limits: no live/source-of-truth cutover, ledger, continuous runtime,
+  flatten, replace/correction/bust, or broker expansion
+```
+
 ## Mission retrospective
 
 | Task ID | Task class | Agent/model | First-pass | P0 | P1 | P2 | Rework cycles | Required checks | Elapsed | Rating |
 |---|---|---|---|---:|---:|---:|---:|---|---|---:|
 | `QP-RM-00` | baseline integration | GPT-5 Codex | yes | 0 | 0 | 0 | 0 | 819 tests + smoke + disabled CLI | pending | 5 |
 | `QP-RISK-RES-V1` | atomic reservation + independent audit | GPT-5 Codex + Claude Code `claude-fable-5` | no | 0 | 2 | 2 | 5 | 885 tests + smoke + disabled kill CLI + audit | completed 2026-07-11 KST | 4 |
+| `QP-EXEC-EVENTS-V1` | canonical event shadow journal + parity | GPT-5 Codex + Claude Code contract reviewer + independent auditors | no | 0 | 21 | 7 | staged audited repair cycles | 1003 tests + smoke + three final zero-finding audits | completed 2026-07-12 KST | 4 |
 
 - Routing decision quality: contract authorship and independent audit were
   correctly separated; the audit reproduced one fail-closed P2 and verified its
@@ -152,5 +182,6 @@ integration_requests: preserve reservation aggregate identity while starting
 - Capability scorecard update: Claude-owned evidence update is handled as a
   separate bounded documentation task.
 - User-owned changes preserved: original worktree remains untouched; its pre-existing modified and untracked paths were not staged or copied
-- Remaining limitations: manual KIS paper validation and all post-Gate-1
-  missions remain pending; one conservative P2 and one diagnostic P3 are open.
+- Remaining limitations: manual KIS paper validation and all post-Gate-2
+  missions remain pending; the Gate 1 conservative P2 and diagnostic P3 remain
+  documented and nonblocking for fake-only development.

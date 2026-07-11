@@ -74,8 +74,8 @@ Score formula: `domain*0.30 + tools*0.25 + track*0.25 + continuity*0.10 + coordi
 | `QP-EVT-020B` | GPT-5 Codex lead/sub-agent | independent read-only reviewer | `QP-EVT-020A` merged | event integration worktree | narrow SQLite transition import/re-export shim + equality regression only | done | SQLite and pure transition definitions are identical without concurrent ownership overlap. | `447b843`; focused `2 passed`; persistence audit `121 passed`; full `924 passed, 2 skipped`; P0/P1/P2/P3=0 |
 | `QP-EVT-030A` | GPT-5 Codex lead | independent read-only auditor | `QP-EVT-020B` | `주식트레이더-exec-events-store` / `codex/qp-exec-events-v1-store` | schema v11, exact DDL validation, deterministic import anchors, append primitive, typed mutation guard | integrated | Store substrate fails closed on schema/state tampering and preserves deterministic, contiguous, atomic event streams. | `def8cb0`, `e758c53`, `9220328`, `9c45390`; focused `32 passed`; full `956 passed, 2 skipped`; safe smoke; final P0/P1/P2=0 |
 | `QP-EVT-030B` | GPT-5 Codex lead | three independent read-only auditors | `QP-EVT-030A` | `주식트레이더-exec-events-dual-write` / `codex/qp-exec-events-v1-dual-write` | exhaustive runtime dual-write and explicit mutation-origin call sites | integrated | Every authoritative dispatch/reservation/cancel mutation advances its canonical event in the same transaction or rolls back both. | `0c932ad`, `cf9ad49`, `9ed90a9`, `d52321b`, `9cece01`; focused `42 passed`; full `975 passed, 2 skipped`; safe smoke; final P0/P1/P2=0 |
-| `QP-EVT-040` | GPT-5 Codex lead | Claude/internally independent reviewer | `QP-EVT-030B` | dedicated parity worktree | parity corpus, race/fault/restart tests, report | in_progress | Replay equals all authoritative observable fields; no broker side effects; full suite/smoke green. | unblocked by accepted 030B |
-| `QP-EVT-050` | independent read-only auditor | GPT-5 Codex lead | `QP-EVT-040` | no-write audit | complete diff and safety invariants | proposed | P0/P1 zero; no missing dual-write path or widened broker authority. | pending |
+| `QP-EVT-040` | GPT-5 Codex lead | three independent read-only reviewers | `QP-EVT-030B` | `주식트레이더-exec-events-parity` / `codex/qp-exec-events-v1-parity` | parity corpus, race/fault/restart tests, report | integrated | Replay equals all authoritative observable fields; no broker side effects; full suite/smoke green. | `adb5bc1`, `7826d24`; parity `26 passed`; related final re-audit `100 passed`; full `1003 passed, 2 skipped`; safe smoke; P0/P1/P2=0 |
+| `QP-EVT-050` | three independent read-only auditors | GPT-5 Codex lead | `QP-EVT-040` | no-write audit | complete diff, contract, and safety invariants | done | P0/P1 zero; no missing dual-write path or widened broker authority. | full production diff + contract + safety verdicts all P0/P1/P2=0; contract `ACCEPT`; completion report added |
 
 ## Ownership map
 
@@ -121,10 +121,10 @@ No later gate can be waived because an earlier test count is high.
 ## Blockers and authority requests
 
 - Gate 1 is accepted and no longer blocks Gate 2.
-- The contract/decomposition review, QP-EVT-020A pure domain, QP-EVT-020B
-  transition shim, QP-EVT-030A schema-v11 store substrate, and QP-EVT-030B
-  exhaustive runtime dual-write are accepted. QP-EVT-040 parity/race/fault/
-  restart evidence is the active slice.
+- Gate 2 contract, pure reducer, schema-v11 store, exhaustive runtime
+  dual-write, parity/race/fault/restart corpus, and final audits are accepted.
+  `QP-EXEC-EVENTS-V1` is complete for fake-only development; Kernel v2 is the
+  next roadmap gate.
 - Real KIS paper validation remains manual and is not needed for this fake-only
   development gate.
 - No request for live, secrets, network access, or user-owned dirty-tree changes
@@ -233,6 +233,22 @@ No later gate can be waived because an earlier test count is high.
   exact-copy validation, terminal self-transition rules, and passing valid/
   invalid terminal regressions. QP-EVT-040 is now active.
 
+- `2026-07-12 KST` — QP-EVT-040 added the complete runtime/v10 shadow-parity
+  corpus plus fill-before-claim/ack, direct full-fill-before-ack, valid late
+  acceptance, exact cumulative 1→2→1, runtime multi-fill identity rows,
+  cancel/fill outcomes, counted `PaperKillService` no-repost, cancel rejection,
+  reconciliation block/reconcile, terminal contradiction, account-sensitive
+  venue identities, identical identity collision rollback, and restart
+  zero-write/zero-broker evidence. Accepted commits are `adb5bc1` and
+  `7826d24`; parity tests are `26 passed`, full backend is `1003 passed,
+  2 skipped`, and smoke is mock/live=false/operator blocked.
+- `2026-07-12 KST` — QP-EVT-050 independently audited the full Gate 2
+  production diff from `0a9b644` through `7826d24`, all contract sections, and
+  safety defaults. Complete-diff, contract, and safety reviewers each reported
+  P0/P1/P2 zero; the contract verdict is `ACCEPT`. The completion report is
+  `docs/canonical_order_events_v1_completion_report.md`. Gate 2 is accepted and
+  Kernel v2 becomes the active roadmap gate.
+
 ## Handoff record
 
 ```text
@@ -259,6 +275,27 @@ integration_requests:
     after 020B
 ```
 
+```text
+task_id: QP-EXEC-EVENTS-V1
+agent_and_model: GPT-5 Codex lead + Claude Code claude-fable-5 contract reviewer
+  + independent audit agents
+commit: accepted implementation and evidence through 7826d24 on
+  codex/qp-exec-events-v1-parity
+owned_paths: pure event domain, schema-v11 shadow store, exhaustive mutation
+  dual-write, fake-only parity/race/fault/restart tests, and Gate 2 documents
+acceptance_met: yes for fake-only Gate 2 development; schema-v10 rows remain
+  authoritative and real KIS/manual Gate P remains pending
+exact_checks: 1003 passed, 2 skipped; smoke mock/live=false/operator blocked;
+  complete-diff/contract/safety final audits P0/P1/P2 zero; git diff clean
+known_limits: no source-of-truth cutover, live trading, real KIS validation,
+  replace/correction/bust, ledger, continuous runtime, or flatten authority
+integration_requests:
+  - Kernel v2 must consume OrderIntent and retain the canonical dual-write path
+  - shadow mode must perform no broker POST and cannot repair authoritative rows
+  - preserve typed mutation origins, no-rePOST, reservation-release pairing,
+    account provenance, and schema-v11 replay compatibility
+```
+
 ## Mission retrospective
 
 | Task ID | Task class | Agent/model | First-pass | P0 | P1 | P2 | Rework cycles | Required checks | Elapsed | Rating |
@@ -269,3 +306,5 @@ integration_requests:
 | `QP-EVT-020B` | transition compatibility shim | GPT-5 Codex sub-agent | yes | 0 | 0 | 0 | 0 | focused `2 passed`; persistence `121 passed`; full `924 passed, 2 skipped`; safe smoke | completed 2026-07-11 KST | 5 |
 | `QP-EVT-030A` | schema-v11 event-store substrate | GPT-5 Codex lead + independent audit agents | rework-required | 0 | 8 | 1 | 3 audited repair cycles | focused `32 passed`; full `956 passed, 2 skipped`; safe smoke; final P0/P1/P2 zero | completed 2026-07-12 KST | 3 |
 | `QP-EVT-030B` | exhaustive runtime dual-write | GPT-5 Codex lead + three independent audit agents | rework-required | 0 | 4 | 2 | 3 audited repair cycles | focused `42 passed`; full `975 passed, 2 skipped`; safe smoke; final P0/P1/P2 zero | completed 2026-07-12 KST | 3 |
+| `QP-EVT-040` | parity/race/fault/restart evidence | GPT-5 Codex lead + three independent audit agents | rework-required | 0 | 6 | 1 | 2 audited repair cycles | parity `26 passed`; focused closure `100 passed`; full `1003 passed, 2 skipped`; safe smoke; P0/P1/P2 zero | completed 2026-07-12 KST | 4 |
+| `QP-EVT-050` | final complete-diff/contract/safety audit | three independent read-only audit agents | yes | 0 | 0 | 0 | 0 | contract `ACCEPT`; three audits P0/P1/P2 zero; full verification already green | completed 2026-07-12 KST | 5 |

@@ -7,15 +7,42 @@ SQLite only when ``PaperStateStore`` is explicitly constructed.
 from __future__ import annotations
 
 from contextlib import contextmanager
+from dataclasses import dataclass, field
 from datetime import date, datetime, timedelta, timezone
 from decimal import Decimal, ROUND_CEILING, ROUND_FLOOR
 import json
 from math import isfinite
 from pathlib import Path
 import sqlite3
-from typing import Iterator
+from typing import Iterator, Mapping, Sequence
 
+from quantpilot.packages.core.execution.events import (
+    PaperCancelRequestEventPayload,
+    PaperEventSchemaUnsupported,
+    PaperEventStreamConflict,
+    PaperEventStreamCorruption,
+    PaperExecutionAfter,
+    PaperExecutionAggregateType,
+    PaperExecutionEvent,
+    PaperExecutionEventProvenance,
+    PaperExecutionSource,
+    PaperOrderDispatchEventPayload,
+    PaperRiskReservationEventPayload,
+    build_paper_execution_event,
+    canonical_import_event_id,
+    canonical_json_bytes,
+    canonical_sha256,
+    decode_paper_execution_event,
+    event_canonical_bytes,
+    payload_after,
+)
+from quantpilot.packages.core.execution.reducer import (
+    PaperExecutionProjection,
+    reduce_paper_execution_event,
+    replay_paper_execution_events,
+)
 from quantpilot.packages.core.execution.transitions import (
+    IMPORT_EVENT_TYPES,
     PAPER_CANCEL_TRANSITIONS,
     PAPER_DISPATCH_RECONCILIATION_TRANSITIONS,
     PAPER_DISPATCH_TRANSITIONS,
@@ -37,7 +64,7 @@ from quantpilot.packages.core.operator.position_ledger import (
     StateStoreProvenance,
     StrategyOperatorState,
 )
-from quantpilot.packages.core.schemas import ProcessedFillRecord
+from quantpilot.packages.core.schemas import ProcessedFillRecord, new_id
 
 
 class PaperStateError(RuntimeError):
@@ -68,9 +95,101 @@ class PaperRiskReservationRejected(PaperStateConflictError):
     pass
 
 
-PAPER_STATE_SCHEMA_VERSION = 10
-PAPER_STATE_PREVIOUS_SCHEMA_VERSION = 9
-PAPER_STATE_MIGRATABLE_SCHEMA_VERSIONS = frozenset({6, 7, 8, 9})
+PAPER_STATE_SCHEMA_VERSION = 11
+PAPER_STATE_PREVIOUS_SCHEMA_VERSION = 10
+PAPER_STATE_MIGRATABLE_SCHEMA_VERSIONS = frozenset({6, 7, 8, 9, 10})
+
+
+@dataclass(frozen=True, order=True)
+class _PaperAggregateKey:
+    aggregate_type: PaperExecutionAggregateType
+    aggregate_id: str
+
+
+@dataclass
+class _PaperEventMutationGuard:
+    changes: dict[_PaperAggregateKey, tuple[PaperExecutionAfter, str]] = field(
+        default_factory=dict
+    )
+    candidates: dict[_PaperAggregateKey, PaperExecutionEvent] = field(
+        default_factory=dict
+    )
+    append_results: dict[_PaperAggregateKey, bool] = field(default_factory=dict)
+
+    def register_change(
+        self,
+        *,
+        after: PaperExecutionAfter,
+        state_json: str,
+    ) -> None:
+        key = _paper_aggregate_key(after)
+        if key in self.changes:
+            raise PaperStateConflictError(
+                "paper event mutation changed one aggregate more than once"
+            )
+        self.changes[key] = (after.model_copy(deep=True), state_json)
+
+    def register_candidate(self, event: PaperExecutionEvent) -> None:
+        key = _PaperAggregateKey(event.aggregate_type, event.aggregate_id)
+        if key in self.candidates:
+            raise PaperStateConflictError(
+                "paper event mutation produced multiple events for one aggregate"
+            )
+        self.candidates[key] = PaperExecutionEvent.model_validate(event.model_dump())
+
+    def register_append_result(
+        self,
+        event: PaperExecutionEvent,
+        *,
+        advanced: bool,
+    ) -> None:
+        key = _PaperAggregateKey(event.aggregate_type, event.aggregate_id)
+        if key not in self.candidates or key in self.append_results:
+            raise PaperStateConflictError("paper event append result is not registered")
+        self.append_results[key] = advanced
+
+    def assert_complete(self) -> None:
+        if set(self.candidates) != set(self.append_results):
+            raise PaperStateConflictError("paper event mutation has an incomplete append batch")
+        advanced = {key for key, value in self.append_results.items() if value}
+        if advanced != set(self.changes):
+            raise PaperStateConflictError(
+                "paper event mutation rows and advancing events are not one-to-one"
+            )
+        for key, (after, state_json) in self.changes.items():
+            event = self.candidates[key]
+            if (
+                payload_after(event.payload) != after
+                or event.source_revision != after.revision
+                or canonical_json_bytes(after).decode("utf-8") != state_json
+            ):
+                raise PaperStateCorruptionError(
+                    "paper event mutation payload does not equal its authoritative row"
+                )
+
+
+def _paper_aggregate_key(after: PaperExecutionAfter) -> _PaperAggregateKey:
+    if isinstance(after, PaperOrderDispatch):
+        return _PaperAggregateKey("order_dispatch", after.order_plan_id)
+    if isinstance(after, PaperRiskReservation):
+        return _PaperAggregateKey("risk_reservation", after.reservation_id)
+    return _PaperAggregateKey("cancel_request", after.cancel_id)
+
+
+def _paper_event_provenance(
+    provenance: StateStoreProvenance,
+) -> PaperExecutionEventProvenance:
+    try:
+        return PaperExecutionEventProvenance(
+            store_id=provenance.store_id,
+            account_scope_fingerprint=provenance.account_scope_fingerprint,
+            data_mode=provenance.data_mode,
+            broker_environment=provenance.broker_environment,
+        )
+    except ValueError as exc:
+        raise PaperStateProvenanceError(
+            "paper execution events require KIS paper provenance"
+        ) from exc
 
 PAPER_KILL_TRANSITIONS: dict[str, set[str]] = {
     "killing": {"killing", "killed", "recovery_required"},
@@ -488,6 +607,54 @@ class PaperStateStore:
                 ON paper_cancel_requests (store_id, status, updated_at)
                 """,
                 """
+                CREATE TABLE IF NOT EXISTS paper_execution_events (
+                    event_id TEXT PRIMARY KEY,
+                    store_id TEXT NOT NULL,
+                    aggregate_type TEXT NOT NULL,
+                    aggregate_id TEXT NOT NULL,
+                    aggregate_version INTEGER NOT NULL,
+                    event_type TEXT NOT NULL,
+                    account_scope_fingerprint TEXT NOT NULL,
+                    data_mode TEXT NOT NULL,
+                    broker_environment TEXT NOT NULL,
+                    source TEXT NOT NULL,
+                    occurred_at TEXT NOT NULL,
+                    received_at TEXT NOT NULL,
+                    correlation_id TEXT NOT NULL,
+                    causation_id TEXT,
+                    idempotency_key TEXT,
+                    local_broker_order_id TEXT,
+                    broker_order_id TEXT,
+                    original_client_order_id TEXT,
+                    venue_order_id TEXT,
+                    broker_sequence INTEGER,
+                    source_revision INTEGER NOT NULL,
+                    event_schema_version INTEGER NOT NULL,
+                    payload_json TEXT NOT NULL,
+                    payload_hash TEXT NOT NULL,
+                    UNIQUE (store_id, aggregate_type, aggregate_id, aggregate_version),
+                    FOREIGN KEY (store_id) REFERENCES state_store_metadata(store_id)
+                ) WITHOUT ROWID
+                """,
+                """
+                CREATE INDEX IF NOT EXISTS ix_paper_execution_event_stream
+                ON paper_execution_events (
+                    store_id, aggregate_type, aggregate_id, aggregate_version
+                )
+                """,
+                """
+                CREATE TABLE IF NOT EXISTS paper_execution_event_identity_keys (
+                    event_id TEXT NOT NULL,
+                    identity_kind TEXT NOT NULL,
+                    identity_scope_hash TEXT NOT NULL,
+                    external_id TEXT NOT NULL,
+                    evidence_payload_hash TEXT NOT NULL,
+                    PRIMARY KEY (event_id, identity_kind, identity_scope_hash),
+                    UNIQUE (identity_kind, identity_scope_hash),
+                    FOREIGN KEY (event_id) REFERENCES paper_execution_events(event_id)
+                ) WITHOUT ROWID
+                """,
+                """
                 CREATE TABLE IF NOT EXISTS paper_portfolio_loss_baselines (
                     store_id TEXT NOT NULL,
                     business_date TEXT NOT NULL,
@@ -505,8 +672,25 @@ class PaperStateStore:
             if (
                 persisted is not None
                 and persisted.schema_version in PAPER_STATE_MIGRATABLE_SCHEMA_VERSIONS
+                and persisted.schema_version < 10
             ):
                 self._backfill_open_dispatch_reservations()
+
+            if (
+                persisted is not None
+                and persisted.schema_version in PAPER_STATE_MIGRATABLE_SCHEMA_VERSIONS
+                and persisted.data_mode == "paper_trading"
+            ):
+                migration_received_at = datetime.now(timezone.utc)
+                try:
+                    self._import_legacy_execution_events(
+                        persisted=persisted,
+                        received_at=migration_received_at,
+                    )
+                except Exception as exc:
+                    raise PaperStateMigrationRequired(
+                        "paper execution events could not be imported"
+                    ) from exc
 
             if persisted is None:
                 requested = self._requested_provenance
@@ -608,6 +792,13 @@ class PaperStateStore:
             raise
         else:
             self._connection.commit()
+
+    @contextmanager
+    def _event_transaction(self) -> Iterator[_PaperEventMutationGuard]:
+        guard = _PaperEventMutationGuard()
+        with self._transaction():
+            yield guard
+            guard.assert_complete()
 
     @staticmethod
     def _serialize(
@@ -979,6 +1170,623 @@ class PaperStateStore:
                 "paper-cancel identity does not match its metadata"
             )
         return model
+
+    @staticmethod
+    def _raise_paper_event_error(exc: Exception) -> None:
+        if isinstance(exc, PaperEventStreamConflict):
+            raise PaperStateConflictError(str(exc)) from exc
+        if isinstance(exc, PaperEventStreamCorruption):
+            raise PaperStateCorruptionError(str(exc)) from exc
+        if isinstance(exc, PaperEventSchemaUnsupported):
+            raise PaperStateMigrationRequired(str(exc)) from exc
+        raise exc
+
+    def _decode_paper_execution_event_row(
+        self,
+        row: sqlite3.Row,
+    ) -> PaperExecutionEvent:
+        identity_rows = self._connection.execute(
+            """
+            SELECT identity_kind, identity_scope_hash, external_id,
+                   evidence_payload_hash
+            FROM paper_execution_event_identity_keys
+            WHERE event_id = ?
+            ORDER BY identity_kind, identity_scope_hash
+            """,
+            (row["event_id"],),
+        ).fetchall()
+        try:
+            payload = json.loads(row["payload_json"])
+        except (TypeError, ValueError) as exc:
+            raise PaperStateCorruptionError(
+                "invalid paper execution event payload JSON"
+            ) from exc
+        raw = {
+            "event_id": row["event_id"],
+            "store_id": row["store_id"],
+            "aggregate_type": row["aggregate_type"],
+            "aggregate_id": row["aggregate_id"],
+            "aggregate_version": row["aggregate_version"],
+            "event_type": row["event_type"],
+            "account_scope_fingerprint": row["account_scope_fingerprint"],
+            "data_mode": row["data_mode"],
+            "broker_environment": row["broker_environment"],
+            "source": row["source"],
+            "occurred_at": row["occurred_at"],
+            "received_at": row["received_at"],
+            "correlation_id": row["correlation_id"],
+            "causation_id": row["causation_id"],
+            "idempotency_key": row["idempotency_key"],
+            "local_broker_order_id": row["local_broker_order_id"],
+            "broker_order_id": row["broker_order_id"],
+            "original_client_order_id": row["original_client_order_id"],
+            "venue_order_id": row["venue_order_id"],
+            "broker_sequence": row["broker_sequence"],
+            "source_revision": row["source_revision"],
+            "event_schema_version": row["event_schema_version"],
+            "payload": payload,
+            "payload_hash": row["payload_hash"],
+            "identity_keys": [
+                {
+                    "kind": identity_row["identity_kind"],
+                    "scope_hash": identity_row["identity_scope_hash"],
+                    "external_id": identity_row["external_id"],
+                    "evidence_payload_hash": identity_row[
+                        "evidence_payload_hash"
+                    ],
+                }
+                for identity_row in identity_rows
+            ],
+        }
+        try:
+            event = decode_paper_execution_event(raw)
+        except (
+            PaperEventStreamConflict,
+            PaperEventStreamCorruption,
+            PaperEventSchemaUnsupported,
+        ) as exc:
+            self._raise_paper_event_error(exc)
+            raise AssertionError("unreachable")
+        if canonical_json_bytes(event.payload).decode("utf-8") != row["payload_json"]:
+            raise PaperStateCorruptionError(
+                "paper execution event payload JSON is not canonical"
+            )
+        return event
+
+    def _list_paper_execution_events(
+        self,
+        *,
+        expected_provenance: PaperExecutionEventProvenance,
+        aggregate_type: PaperExecutionAggregateType | None = None,
+        aggregate_id: str | None = None,
+    ) -> list[PaperExecutionEvent]:
+        clauses = ["store_id = ?"]
+        parameters: list[object] = [expected_provenance.store_id]
+        if aggregate_type is not None:
+            if aggregate_type not in {
+                "order_dispatch",
+                "risk_reservation",
+                "cancel_request",
+            }:
+                raise PaperStateConflictError(
+                    "unsupported paper execution aggregate type"
+                )
+            clauses.append("aggregate_type = ?")
+            parameters.append(aggregate_type)
+        if aggregate_id is not None:
+            normalized_id = aggregate_id.strip()
+            if not normalized_id:
+                raise PaperStateConflictError(
+                    "paper execution aggregate id must not be blank"
+                )
+            clauses.append("aggregate_id = ?")
+            parameters.append(normalized_id)
+        rows = self._connection.execute(
+            f"""
+            SELECT event_id, store_id, aggregate_type, aggregate_id,
+                   aggregate_version, event_type, account_scope_fingerprint,
+                   data_mode, broker_environment, source, occurred_at,
+                   received_at, correlation_id, causation_id, idempotency_key,
+                   local_broker_order_id, broker_order_id,
+                   original_client_order_id, venue_order_id, broker_sequence,
+                   source_revision, event_schema_version, payload_json,
+                   payload_hash
+            FROM paper_execution_events
+            WHERE {' AND '.join(clauses)}
+            ORDER BY aggregate_type, aggregate_id, aggregate_version, event_id
+            """,
+            tuple(parameters),
+        ).fetchall()
+        events = [self._decode_paper_execution_event_row(row) for row in rows]
+        for event in events:
+            if (
+                event.store_id != expected_provenance.store_id
+                or event.account_scope_fingerprint
+                != expected_provenance.account_scope_fingerprint
+                or event.data_mode != expected_provenance.data_mode
+                or event.broker_environment
+                != expected_provenance.broker_environment
+            ):
+                raise PaperStateCorruptionError(
+                    "paper execution event provenance does not match its store"
+                )
+        return events
+
+    def list_paper_execution_events(
+        self,
+        aggregate_type: PaperExecutionAggregateType | None = None,
+        aggregate_id: str | None = None,
+    ) -> list[PaperExecutionEvent]:
+        """Return typed journal facts in deterministic stream order."""
+
+        provenance = _paper_event_provenance(self._require_paper_store())
+        return self._list_paper_execution_events(
+            expected_provenance=provenance,
+            aggregate_type=aggregate_type,
+            aggregate_id=aggregate_id,
+        )
+
+    def _load_paper_execution_projection(
+        self,
+        *,
+        key: _PaperAggregateKey,
+        expected_provenance: PaperExecutionEventProvenance,
+    ) -> PaperExecutionProjection | None:
+        events = self._list_paper_execution_events(
+            expected_provenance=expected_provenance,
+            aggregate_type=key.aggregate_type,
+            aggregate_id=key.aggregate_id,
+        )
+        if not events:
+            return None
+        try:
+            return replay_paper_execution_events(
+                events,
+                expected_provenance=expected_provenance,
+            )
+        except (
+            PaperEventStreamConflict,
+            PaperEventStreamCorruption,
+            PaperEventSchemaUnsupported,
+        ) as exc:
+            self._raise_paper_event_error(exc)
+            raise AssertionError("unreachable")
+
+    def _load_paper_execution_authoritative_after(
+        self,
+        key: _PaperAggregateKey,
+    ) -> PaperExecutionAfter | None:
+        if key.aggregate_type == "order_dispatch":
+            row = self._connection.execute(
+                """
+                SELECT order_plan_id, broker_order_id, idempotency_key, store_id,
+                       session_id, fencing_token, status, revision, state_json,
+                       updated_at
+                FROM paper_order_dispatches
+                WHERE order_plan_id = ?
+                """,
+                (key.aggregate_id,),
+            ).fetchone()
+            return None if row is None else self._decode_paper_order_dispatch(row)
+        if key.aggregate_type == "risk_reservation":
+            row = self._connection.execute(
+                """
+                SELECT reservation_id, order_plan_id, idempotency_key, store_id,
+                       session_id, fencing_token, symbol, kind, status, revision,
+                       state_json, updated_at
+                FROM paper_risk_reservations
+                WHERE reservation_id = ?
+                """,
+                (key.aggregate_id,),
+            ).fetchone()
+            return None if row is None else self._decode_paper_risk_reservation(row)
+        row = self._connection.execute(
+            """
+            SELECT cancel_id, kill_id, order_plan_id, broker_order_reference,
+                   store_id, status, revision, state_json, updated_at
+            FROM paper_cancel_requests
+            WHERE cancel_id = ?
+            """,
+            (key.aggregate_id,),
+        ).fetchone()
+        return None if row is None else self._decode_paper_cancel_request(row)
+
+    @staticmethod
+    def _legacy_paper_execution_event(
+        *,
+        after: PaperExecutionAfter,
+        received_at: datetime,
+    ) -> PaperExecutionEvent:
+        if isinstance(after, PaperOrderDispatch):
+            event_type = "LegacyOrderDispatchImported"
+            payload = PaperOrderDispatchEventPayload(
+                after=after,
+                legacy_snapshot=True,
+            )
+        elif isinstance(after, PaperRiskReservation):
+            event_type = "LegacyRiskReservationImported"
+            payload = PaperRiskReservationEventPayload(
+                after=after,
+                legacy_snapshot=True,
+            )
+        else:
+            event_type = "LegacyCancelRequestImported"
+            payload = PaperCancelRequestEventPayload(
+                after=after,
+                legacy_snapshot=True,
+            )
+        payload_hash = canonical_sha256(payload)
+        key = _paper_aggregate_key(after)
+        return build_paper_execution_event(
+            event_id=canonical_import_event_id(
+                store_id=after.store_id,
+                aggregate_type=key.aggregate_type,
+                aggregate_id=key.aggregate_id,
+                source_revision=after.revision,
+                payload_hash=payload_hash,
+            ),
+            aggregate_version=1,
+            event_type=event_type,
+            source="schema_migration",
+            after=after,
+            causation_id=None,
+            legacy_snapshot=True,
+            migration_received_at=received_at,
+        )
+
+    @staticmethod
+    def _new_runtime_paper_execution_event(
+        *,
+        aggregate_version: int,
+        event_type: str,
+        source: PaperExecutionSource,
+        after: PaperExecutionAfter,
+        causation_id: str | None,
+        before: PaperOrderDispatch | None = None,
+    ) -> PaperExecutionEvent:
+        if source == "schema_migration" or event_type in IMPORT_EVENT_TYPES:
+            raise PaperStateConflictError(
+                "runtime event candidates cannot claim migration authority"
+            )
+        try:
+            return build_paper_execution_event(
+                event_id=new_id("pevt"),
+                aggregate_version=aggregate_version,
+                event_type=event_type,
+                source=source,
+                after=after,
+                causation_id=causation_id,
+                before=before,
+            )
+        except ValueError as exc:
+            raise PaperStateCorruptionError(
+                "authoritative row cannot form a canonical runtime event"
+            ) from exc
+
+    def _load_paper_execution_event_by_id(
+        self,
+        event_id: str,
+    ) -> PaperExecutionEvent | None:
+        row = self._connection.execute(
+            """
+            SELECT event_id, store_id, aggregate_type, aggregate_id,
+                   aggregate_version, event_type, account_scope_fingerprint,
+                   data_mode, broker_environment, source, occurred_at,
+                   received_at, correlation_id, causation_id, idempotency_key,
+                   local_broker_order_id, broker_order_id,
+                   original_client_order_id, venue_order_id, broker_sequence,
+                   source_revision, event_schema_version, payload_json,
+                   payload_hash
+            FROM paper_execution_events
+            WHERE event_id = ?
+            """,
+            (event_id,),
+        ).fetchone()
+        return None if row is None else self._decode_paper_execution_event_row(row)
+
+    def _insert_paper_execution_event(self, event: PaperExecutionEvent) -> None:
+        self._connection.execute(
+            """
+            INSERT INTO paper_execution_events (
+                event_id, store_id, aggregate_type, aggregate_id,
+                aggregate_version, event_type, account_scope_fingerprint,
+                data_mode, broker_environment, source, occurred_at, received_at,
+                correlation_id, causation_id, idempotency_key,
+                local_broker_order_id, broker_order_id,
+                original_client_order_id, venue_order_id, broker_sequence,
+                source_revision, event_schema_version, payload_json, payload_hash
+            ) VALUES (
+                ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?,
+                ?, ?, ?, ?
+            )
+            """,
+            (
+                event.event_id,
+                event.store_id,
+                event.aggregate_type,
+                event.aggregate_id,
+                event.aggregate_version,
+                event.event_type,
+                event.account_scope_fingerprint,
+                event.data_mode,
+                event.broker_environment,
+                event.source,
+                event.occurred_at.isoformat(),
+                event.received_at.isoformat(),
+                event.correlation_id,
+                event.causation_id,
+                event.idempotency_key,
+                event.local_broker_order_id,
+                event.broker_order_id,
+                event.original_client_order_id,
+                event.venue_order_id,
+                event.broker_sequence,
+                event.source_revision,
+                event.event_schema_version,
+                canonical_json_bytes(event.payload).decode("utf-8"),
+                event.payload_hash,
+            ),
+        )
+        for identity in event.identity_keys:
+            self._connection.execute(
+                """
+                INSERT INTO paper_execution_event_identity_keys (
+                    event_id, identity_kind, identity_scope_hash, external_id,
+                    evidence_payload_hash
+                ) VALUES (?, ?, ?, ?, ?)
+                """,
+                (
+                    event.event_id,
+                    identity.kind,
+                    identity.scope_hash,
+                    identity.external_id,
+                    identity.evidence_payload_hash,
+                ),
+            )
+
+    def _append_paper_execution_events(
+        self,
+        events: Sequence[PaperExecutionEvent],
+        *,
+        expected_previous_versions: Mapping[_PaperAggregateKey, int],
+        guard: _PaperEventMutationGuard | None,
+        expected_provenance: PaperExecutionEventProvenance | None = None,
+        import_mode: bool = False,
+    ) -> tuple[bool, ...]:
+        """Append a validated batch inside the caller's existing transaction."""
+
+        if not self._connection.in_transaction:
+            raise PaperStateConflictError(
+                "paper execution events require an existing write transaction"
+            )
+        if import_mode:
+            if guard is not None:
+                raise PaperStateConflictError(
+                    "schema import cannot use a runtime mutation guard"
+                )
+        elif guard is None:
+            raise PaperStateConflictError(
+                "runtime event append requires a mutation guard"
+            )
+        provenance = expected_provenance
+        if provenance is None:
+            provenance = _paper_event_provenance(self._require_paper_store())
+
+        candidates: list[PaperExecutionEvent] = []
+        keys: list[_PaperAggregateKey] = []
+        for raw_event in events:
+            try:
+                event = decode_paper_execution_event(raw_event)
+            except (
+                PaperEventStreamConflict,
+                PaperEventStreamCorruption,
+                PaperEventSchemaUnsupported,
+            ) as exc:
+                self._raise_paper_event_error(exc)
+                raise AssertionError("unreachable")
+            key = _PaperAggregateKey(event.aggregate_type, event.aggregate_id)
+            if key in keys:
+                raise PaperStateConflictError(
+                    "an append batch cannot advance one aggregate twice"
+                )
+            if import_mode:
+                if (
+                    event.event_type not in IMPORT_EVENT_TYPES
+                    or event.source != "schema_migration"
+                ):
+                    raise PaperStateConflictError(
+                        "schema import accepts only deterministic import anchors"
+                    )
+            elif (
+                event.event_type in IMPORT_EVENT_TYPES
+                or event.source == "schema_migration"
+            ):
+                raise PaperStateConflictError(
+                    "runtime append cannot claim migration authority"
+                )
+            if (
+                event.store_id != provenance.store_id
+                or event.account_scope_fingerprint
+                != provenance.account_scope_fingerprint
+                or event.data_mode != provenance.data_mode
+                or event.broker_environment != provenance.broker_environment
+            ):
+                raise PaperStateCorruptionError(
+                    "paper execution event provenance does not match its store"
+                )
+            if guard is not None:
+                registered = guard.candidates.get(key)
+                if (
+                    registered is None
+                    or event_canonical_bytes(registered)
+                    != event_canonical_bytes(event)
+                ):
+                    raise PaperStateConflictError(
+                        "runtime event candidate was not registered by its mutation"
+                    )
+            candidates.append(event)
+            keys.append(key)
+
+        if set(expected_previous_versions) != set(keys):
+            raise PaperStateConflictError(
+                "expected event versions do not match the append batch"
+            )
+
+        append_results: list[bool] = []
+        for event, key in zip(candidates, keys, strict=True):
+            persisted_event = self._load_paper_execution_event_by_id(event.event_id)
+            if persisted_event is not None:
+                if event_canonical_bytes(persisted_event) != event_canonical_bytes(event):
+                    raise PaperStateCorruptionError(
+                        "paper execution event_id was reused with divergent bytes"
+                    )
+                authoritative = self._load_paper_execution_authoritative_after(key)
+                if (
+                    authoritative is None
+                    or canonical_json_bytes(authoritative)
+                    != canonical_json_bytes(payload_after(persisted_event.payload))
+                ):
+                    raise PaperStateCorruptionError(
+                        "duplicate event no longer matches its authoritative row"
+                    )
+                if guard is not None:
+                    guard.register_append_result(event, advanced=False)
+                append_results.append(False)
+                continue
+
+            projection = self._load_paper_execution_projection(
+                key=key,
+                expected_provenance=provenance,
+            )
+            current_version = 0 if projection is None else projection.aggregate_version
+            expected_previous = expected_previous_versions[key]
+            if (
+                isinstance(expected_previous, bool)
+                or not isinstance(expected_previous, int)
+                or expected_previous < 0
+                or expected_previous != current_version
+            ):
+                raise PaperStateConflictError(
+                    "paper execution stream expected version changed"
+                )
+            try:
+                reduce_paper_execution_event(
+                    projection,
+                    event,
+                    expected_provenance=provenance,
+                )
+            except (
+                PaperEventStreamConflict,
+                PaperEventStreamCorruption,
+                PaperEventSchemaUnsupported,
+            ) as exc:
+                self._raise_paper_event_error(exc)
+                raise AssertionError("unreachable")
+
+            authoritative = self._load_paper_execution_authoritative_after(key)
+            after = payload_after(event.payload)
+            if (
+                authoritative is None
+                or canonical_json_bytes(authoritative) != canonical_json_bytes(after)
+            ):
+                raise PaperStateConflictError(
+                    "event payload does not equal its authoritative row"
+                )
+            if guard is not None:
+                changed = guard.changes.get(key)
+                if (
+                    changed is None
+                    or changed[0] != after
+                    or changed[1] != canonical_json_bytes(after).decode("utf-8")
+                    or event.source_revision != after.revision
+                ):
+                    raise PaperStateCorruptionError(
+                        "event candidate does not match its registered row mutation"
+                    )
+            try:
+                self._insert_paper_execution_event(event)
+            except sqlite3.IntegrityError as exc:
+                raise PaperStateConflictError(
+                    "paper execution event identity or version already exists"
+                ) from exc
+            if guard is not None:
+                guard.register_append_result(event, advanced=True)
+            append_results.append(True)
+        return tuple(append_results)
+
+    def _import_legacy_execution_events(
+        self,
+        *,
+        persisted: StateStoreProvenance,
+        received_at: datetime,
+    ) -> None:
+        """Seed truthful version-one anchors during the v6-v10 transaction."""
+
+        _require_aware_timestamp(received_at, field_name="migration received_at")
+        provenance = _paper_event_provenance(persisted)
+        after_states: list[PaperExecutionAfter] = []
+        dispatch_rows = self._connection.execute(
+            """
+            SELECT order_plan_id, broker_order_id, idempotency_key, store_id,
+                   session_id, fencing_token, status, revision, state_json,
+                   updated_at
+            FROM paper_order_dispatches
+            ORDER BY order_plan_id
+            """
+        ).fetchall()
+        after_states.extend(
+            self._decode_paper_order_dispatch(row) for row in dispatch_rows
+        )
+        reservation_rows = self._connection.execute(
+            """
+            SELECT reservation_id, order_plan_id, idempotency_key, store_id,
+                   session_id, fencing_token, symbol, kind, status, revision,
+                   state_json, updated_at
+            FROM paper_risk_reservations
+            ORDER BY reservation_id
+            """
+        ).fetchall()
+        after_states.extend(
+            self._decode_paper_risk_reservation(row) for row in reservation_rows
+        )
+        cancel_rows = self._connection.execute(
+            """
+            SELECT cancel_id, kill_id, order_plan_id, broker_order_reference,
+                   store_id, status, revision, state_json, updated_at
+            FROM paper_cancel_requests
+            ORDER BY cancel_id
+            """
+        ).fetchall()
+        after_states.extend(
+            self._decode_paper_cancel_request(row) for row in cancel_rows
+        )
+        if not after_states:
+            return
+
+        events = [
+            self._legacy_paper_execution_event(
+                after=after,
+                received_at=received_at,
+            )
+            for after in sorted(
+                after_states,
+                key=lambda value: (
+                    _paper_aggregate_key(value).aggregate_type,
+                    _paper_aggregate_key(value).aggregate_id,
+                ),
+            )
+        ]
+        expected_versions = {
+            _PaperAggregateKey(event.aggregate_type, event.aggregate_id): 0
+            for event in events
+        }
+        self._append_paper_execution_events(
+            events,
+            expected_previous_versions=expected_versions,
+            guard=None,
+            expected_provenance=provenance,
+            import_mode=True,
+        )
 
     @staticmethod
     def _decode_paper_portfolio_loss_baseline(

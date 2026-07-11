@@ -456,6 +456,62 @@ def test_migration_backfill_failure_rolls_back_schema_metadata(tmp_path) -> None
         connection.close()
 
 
+def test_migration_fractional_sell_audit_failure_uses_migration_error(
+    tmp_path,
+) -> None:
+    path = tmp_path / "migration-fractional-sell.sqlite3"
+    with _paper_store(path) as store:
+        session = _session(store)
+        prepared = _sell_dispatch(
+            store,
+            session,
+            order_plan_id="oplan-migration-fractional-sell",
+            idempotency_key="paper-order-migration-fractional-sell",
+            purpose="protective_exit",
+        )
+        _insert_reserved_dispatch(store, prepared)
+
+    _downgrade_paper_schema_to_v9(path)
+    connection = sqlite3.connect(path)
+    try:
+        row = connection.execute(
+            "SELECT state_json FROM paper_order_dispatches WHERE order_plan_id = ?",
+            (prepared.order_plan_id,),
+        ).fetchone()
+        state = json.loads(row[0])
+        state["snapshot_equity"] = 10_000_000.5
+        state["snapshot_cash"] = 0.3
+        connection.execute(
+            "UPDATE paper_order_dispatches SET state_json = ? WHERE order_plan_id = ?",
+            (
+                json.dumps(state, separators=(",", ":"), sort_keys=True),
+                prepared.order_plan_id,
+            ),
+        )
+        connection.commit()
+    finally:
+        connection.close()
+
+    with pytest.raises(
+        PaperStateMigrationRequired,
+        match="cannot be promoted to a valid risk reservation",
+    ):
+        _paper_store(path)
+
+    connection = sqlite3.connect(path)
+    try:
+        assert connection.execute("PRAGMA user_version").fetchone()[0] == 9
+        assert connection.execute(
+            "SELECT schema_version FROM state_store_metadata"
+        ).fetchone()[0] == 9
+        assert connection.execute(
+            "SELECT 1 FROM sqlite_master WHERE type = 'table' "
+            "AND name = 'paper_risk_reservations'"
+        ).fetchone() is None
+    finally:
+        connection.close()
+
+
 def test_future_paper_schema_fails_closed(tmp_path) -> None:
     path = tmp_path / "future.sqlite3"
     with _paper_store(path):

@@ -951,7 +951,12 @@ class PaperStateStore:
                         "gross_exposure_limit_krw": current_gross,
                     }
                 )
-            reservation = PaperRiskReservation(**values)
+            try:
+                reservation = PaperRiskReservation(**values)
+            except ValueError as exc:
+                raise PaperStateMigrationRequired(
+                    "open legacy dispatch cannot be promoted to a valid risk reservation"
+                ) from exc
             self._connection.execute(
                 """
                 INSERT INTO paper_risk_reservations (

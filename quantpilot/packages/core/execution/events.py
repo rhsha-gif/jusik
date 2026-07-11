@@ -13,7 +13,7 @@ import re
 from typing import Any, Literal, Mapping, TypeAlias
 from zoneinfo import ZoneInfo
 
-from pydantic import BaseModel, Field, field_validator, model_validator
+from pydantic import BaseModel, Field, ValidationError, field_validator, model_validator
 
 from quantpilot.packages.core.execution.transitions import (
     CANCEL_REQUEST_EVENT_TYPES,
@@ -541,7 +541,10 @@ def decode_paper_execution_event(
     """Classify unknown schema/type before strict Pydantic construction."""
 
     if isinstance(value, PaperExecutionEvent):
-        return PaperExecutionEvent.model_validate(value.model_dump())
+        try:
+            return PaperExecutionEvent.model_validate(value.model_dump())
+        except ValidationError as exc:
+            raise PaperEventStreamCorruption("malformed canonical event") from exc
     if not isinstance(value, Mapping):
         raise PaperEventStreamCorruption("canonical event must be an object")
     schema = value.get("event_schema_version")

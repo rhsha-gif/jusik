@@ -451,6 +451,20 @@ def test_known_schema_malformed_event_is_corruption() -> None:
         decode_paper_execution_event(raw)
 
 
+def test_unchecked_event_instance_revalidation_is_corruption() -> None:
+    event = build_paper_execution_event(
+        event_id="pevt-order-prepared",
+        aggregate_version=1,
+        event_type="OrderPrepared",
+        source="local_prepare",
+        after=_dispatch(),
+        causation_id="pevt-risk-reserved",
+    )
+    unchecked = event.model_copy(update={"payload_hash": "sha256:" + "0" * 64})
+    with pytest.raises(PaperEventStreamCorruption, match="malformed canonical event"):
+        decode_paper_execution_event(unchecked)
+
+
 def test_cancel_envelope_uses_local_and_actual_broker_ids_without_idempotency() -> None:
     request = PaperCancelRequest(
         cancel_id="pcancel-event-001",

@@ -311,8 +311,11 @@ def _validate_dispatch_fence_rebound(
         raise ValueError("dispatch fence rebound requires an unattempted prepared order")
     if after.updated_at <= before.updated_at:
         raise ValueError("dispatch fence rebound timestamp must advance")
-    if after.fencing_token <= before.fencing_token:
-        raise ValueError("dispatch fence rebound requires a successor fence")
+    if (
+        after.session_id == before.session_id
+        or after.fencing_token <= before.fencing_token
+    ):
+        raise ValueError("dispatch fence rebound requires a successor session and fence")
     expected = PaperOrderDispatch.model_validate(
         before.model_copy(
             update={
@@ -452,8 +455,13 @@ def validate_reservation_event_transition(
     if event_type == "RiskReservationFenceRebound":
         if before.status != "held" or after.status != "held":
             raise ValueError("reservation fence rebound requires a held reservation")
-        if after.fencing_token <= before.fencing_token:
-            raise ValueError("reservation fence rebound requires a successor fence")
+        if (
+            after.session_id == before.session_id
+            or after.fencing_token <= before.fencing_token
+        ):
+            raise ValueError(
+                "reservation fence rebound requires a successor session and fence"
+            )
         expected = PaperRiskReservation.model_validate(
             before.model_copy(
                 update={

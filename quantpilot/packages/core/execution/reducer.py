@@ -204,12 +204,37 @@ _LOCAL_GUARD_REJECTION_CODES = {
     "paper_session_closed_after_claim",
     "local_configuration_error",
 }
-_LOCAL_PRE_DISPATCH_CODES = {
-    "paper_kill_engaged",
-    "paper_session_closed_before_dispatch",
-    "risk_check_expired",
-    "submission_evidence_expired",
+_LOCAL_PRE_DISPATCH_STATUS_BY_CODE = {
+    "paper_kill_engaged": "expired_pre_dispatch",
+    "risk_check_expired": "expired_pre_dispatch",
+    "submission_evidence_expired": "expired_pre_dispatch",
+    "paper_session_closed_before_dispatch": "failed_pre_dispatch",
 }
+_BROKER_RECONCILIATION_BLOCK_CODES = {
+    "broker_amount_negative",
+    "broker_fill_amount_inconsistent",
+    "broker_fill_evidence_regressed",
+    "broker_history_window_manual_resolution_required",
+    "broker_match_ambiguous",
+    "broker_order_branch_mismatch",
+    "broker_quantity_inconsistent",
+    "broker_quantity_negative",
+    "broker_state_inconsistent",
+}
+
+
+def _require_exact_dispatch_copy(
+    before: PaperOrderDispatch,
+    after: PaperOrderDispatch,
+    *,
+    updates: Mapping[str, Any],
+    error: str,
+) -> None:
+    expected = PaperOrderDispatch.model_validate(
+        before.model_copy(update=dict(updates)).model_dump()
+    )
+    if after != expected:
+        raise PaperEventStreamCorruption(error)
 
 
 def _validate_dispatch_source(
@@ -236,13 +261,19 @@ def _validate_dispatch_source(
     if before is None:
         raise PaperEventStreamConflict("dispatch update lacks prior state")
     if event.source == "process_recovery":
-        if not (
-            event.event_type == "OutcomeUnknown"
-            and before.status == "dispatch_claimed"
-            and after.status == "outcome_unknown"
-            and after.last_error_code == "process_interrupted"
-        ):
+        if event.event_type != "OutcomeUnknown" or before.status != "dispatch_claimed":
             raise PaperEventStreamCorruption("process-recovery delta is invalid")
+        _require_exact_dispatch_copy(
+            before,
+            after,
+            updates={
+                "status": "outcome_unknown",
+                "last_error_code": "process_interrupted",
+                "updated_at": after.updated_at,
+                "revision": before.revision + 1,
+            },
+            error="process-recovery delta is invalid",
+        )
         return
     if event.source == PAPER_MUTATION_ORIGIN_SOURCES["broker_post_result"]:
         if before.status != "dispatch_claimed" or after.status not in {
@@ -251,33 +282,128 @@ def _validate_dispatch_source(
             "outcome_unknown",
         }:
             raise PaperEventStreamCorruption("broker POST result delta is invalid")
-        if after.status == "accepted" and after.last_error_code is not None:
-            raise PaperEventStreamCorruption("accepted broker result cannot retain an error")
-        if after.status == "rejected" and after.last_error_code != "broker_business_rejected":
-            raise PaperEventStreamCorruption("broker rejection code is invalid")
-        if after.status == "outcome_unknown" and after.last_error_code not in _BROKER_UNKNOWN_CODES:
-            raise PaperEventStreamCorruption("ambiguous broker result code is invalid")
+        if after.status == "accepted":
+            _require_exact_dispatch_copy(
+                before,
+                after,
+                updates={
+                    "status": "accepted",
+                    "broker_business_date": after.broker_business_date,
+                    "broker_order_reference": after.broker_order_reference,
+                    "broker_forwarding_order_org_number": (
+                        after.broker_forwarding_order_org_number
+                    ),
+                    "broker_order_time": after.broker_order_time,
+                    "last_error_code": None,
+                    "updated_at": after.updated_at,
+                    "revision": before.revision + 1,
+                },
+                error="broker acceptance delta is invalid",
+            )
+        elif after.status == "rejected":
+            if after.last_error_code != "broker_business_rejected":
+                raise PaperEventStreamCorruption("broker rejection code is invalid")
+            _require_exact_dispatch_copy(
+                before,
+                after,
+                updates={
+                    "status": "rejected",
+                    "reconciliation_status": "reconciled",
+                    "last_error_code": "broker_business_rejected",
+                    "updated_at": after.updated_at,
+                    "reconciled_at": after.updated_at,
+                    "revision": before.revision + 1,
+                },
+                error="broker rejection delta is invalid",
+            )
+        else:
+            if after.last_error_code not in _BROKER_UNKNOWN_CODES:
+                raise PaperEventStreamCorruption("ambiguous broker result code is invalid")
+            _require_exact_dispatch_copy(
+                before,
+                after,
+                updates={
+                    "status": "outcome_unknown",
+                    "last_error_code": after.last_error_code,
+                    "updated_at": after.updated_at,
+                    "revision": before.revision + 1,
+                },
+                error="ambiguous broker result delta is invalid",
+            )
         return
     if event.source == PAPER_MUTATION_ORIGIN_SOURCES["local_submission_guard"]:
-        prepared_terminal = (
-            before.status == "prepared"
-            and after.status in {"expired_pre_dispatch", "failed_pre_dispatch"}
-            and after.last_error_code in _LOCAL_PRE_DISPATCH_CODES
-        )
-        claimed_rejection = (
-            before.status == "dispatch_claimed"
-            and after.status == "rejected"
-            and after.last_error_code in _LOCAL_GUARD_REJECTION_CODES
-        )
-        if not (prepared_terminal or claimed_rejection):
+        if before.status == "prepared":
+            expected_status = _LOCAL_PRE_DISPATCH_STATUS_BY_CODE.get(
+                after.last_error_code or ""
+            )
+            if expected_status is None or after.status != expected_status:
+                raise PaperEventStreamCorruption("local submission guard delta is invalid")
+            _require_exact_dispatch_copy(
+                before,
+                after,
+                updates={
+                    "status": expected_status,
+                    "reconciliation_status": "reconciled",
+                    "last_error_code": after.last_error_code,
+                    "updated_at": after.updated_at,
+                    "reconciled_at": after.updated_at,
+                    "revision": before.revision + 1,
+                },
+                error="local submission guard delta is invalid",
+            )
+            return
+        if (
+            before.status != "dispatch_claimed"
+            or after.status != "rejected"
+            or after.last_error_code not in _LOCAL_GUARD_REJECTION_CODES
+        ):
             raise PaperEventStreamCorruption("local submission guard delta is invalid")
+        _require_exact_dispatch_copy(
+            before,
+            after,
+            updates={
+                "status": "rejected",
+                "reconciliation_status": "reconciled",
+                "last_error_code": after.last_error_code,
+                "updated_at": after.updated_at,
+                "reconciled_at": after.updated_at,
+                "revision": before.revision + 1,
+            },
+            error="local submission guard delta is invalid",
+        )
         return
     if event.source == PAPER_MUTATION_ORIGIN_SOURCES["broker_reconciliation"]:
-        if before.attempt_count != 1 or after.attempt_count != 1:
+        if (
+            before.attempt_count != 1
+            or after.attempt_count != 1
+            or before.status
+            not in {"dispatch_claimed", "outcome_unknown", "accepted", "partially_filled"}
+        ):
             raise PaperEventStreamCorruption(
                 "broker reconciliation requires a claimed external attempt"
             )
-        if event.event_type != "ReconciliationBlocked" and after.status not in {
+        if event.event_type == "ReconciliationBlocked":
+            if after.last_error_code not in _BROKER_RECONCILIATION_BLOCK_CODES:
+                raise PaperEventStreamCorruption(
+                    "broker reconciliation block code is invalid"
+                )
+            expected_status = (
+                "outcome_unknown" if before.status == "dispatch_claimed" else before.status
+            )
+            _require_exact_dispatch_copy(
+                before,
+                after,
+                updates={
+                    "status": expected_status,
+                    "reconciliation_status": "blocked",
+                    "last_error_code": after.last_error_code,
+                    "updated_at": after.updated_at,
+                    "revision": before.revision + 1,
+                },
+                error="broker reconciliation blocked delta is invalid",
+            )
+            return
+        if after.status not in {
             "accepted",
             "partially_filled",
             "filled",
@@ -287,6 +413,26 @@ def _validate_dispatch_source(
             raise PaperEventStreamCorruption(
                 "broker reconciliation produced an unreachable lifecycle delta"
             )
+        terminal = after.status in {"filled", "rejected", "cancelled"}
+        _require_exact_dispatch_copy(
+            before,
+            after,
+            updates={
+                "status": after.status,
+                "reconciliation_status": "reconciled" if terminal else "pending",
+                "broker_business_date": after.broker_business_date,
+                "broker_order_reference": after.broker_order_reference,
+                "broker_order_branch_number": after.broker_order_branch_number,
+                "broker_order_time": after.broker_order_time,
+                "cumulative_filled_quantity": after.cumulative_filled_quantity,
+                "fill_evidence": after.fill_evidence,
+                "last_error_code": None,
+                "updated_at": after.updated_at,
+                "reconciled_at": after.updated_at if terminal else None,
+                "revision": before.revision + 1,
+            },
+            error="broker reconciliation delta is invalid",
+        )
         return
     raise PaperEventStreamCorruption("dispatch source is not allowed for this mutation")
 
@@ -312,6 +458,94 @@ def _validate_cancel_source(event: PaperExecutionEvent) -> None:
         raise PaperEventStreamCorruption("cancel source is invalid")
 
 
+def _expected_dispatch_event_type(
+    before: PaperOrderDispatch | None,
+    after: PaperOrderDispatch,
+    *,
+    legacy_snapshot: bool,
+) -> str:
+    if before is None:
+        special: PaperDispatchSpecialEventType = (
+            "LegacyOrderDispatchImported" if legacy_snapshot else "OrderPrepared"
+        )
+        return classify_dispatch_event_type(
+            None,
+            after,
+            special_event_type=special,
+        )
+    legal: list[str] = []
+    for special in ("DispatchFenceRebound", "DispatchClaimed", None):
+        try:
+            legal.append(
+                classify_dispatch_event_type(
+                    before,
+                    after,
+                    special_event_type=cast(
+                        PaperDispatchSpecialEventType | None,
+                        special,
+                    ),
+                )
+            )
+        except ValueError:
+            continue
+    if len(legal) != 1:
+        raise ValueError("dispatch transition is illegal or ambiguous")
+    return legal[0]
+
+
+def _expected_reservation_event_type(
+    before: PaperRiskReservation | None,
+    after: PaperRiskReservation,
+    *,
+    legacy_snapshot: bool,
+) -> str:
+    candidates = (
+        ["LegacyRiskReservationImported" if legacy_snapshot else "RiskReserved"]
+        if before is None
+        else ["RiskReservationFenceRebound", "RiskReservationReleased"]
+    )
+    legal: list[str] = []
+    for candidate in candidates:
+        try:
+            validate_reservation_event_transition(before, after, candidate)
+            legal.append(candidate)
+        except ValueError:
+            continue
+    if len(legal) != 1:
+        raise ValueError("reservation transition is illegal or ambiguous")
+    return legal[0]
+
+
+def _expected_cancel_event_type(
+    before: PaperCancelRequest | None,
+    after: PaperCancelRequest,
+    *,
+    legacy_snapshot: bool,
+) -> str:
+    candidates = (
+        ["LegacyCancelRequestImported" if legacy_snapshot else "CancelPrepared"]
+        if before is None
+        else [
+            "CancelClaimed",
+            "CancelAccepted",
+            "CancelOutcomeUnknown",
+            "CancelRejected",
+            "CancelReconciledCancelled",
+            "CancelReconciledFilled",
+        ]
+    )
+    legal: list[str] = []
+    for candidate in candidates:
+        try:
+            validate_cancel_event_transition(before, after, candidate)
+            legal.append(candidate)
+        except ValueError:
+            continue
+    if len(legal) != 1:
+        raise ValueError("cancel transition is illegal or ambiguous")
+    return legal[0]
+
+
 def _validate_transition_and_identity_keys(
     projection: PaperExecutionProjection | None,
     event: PaperExecutionEvent,
@@ -323,44 +557,48 @@ def _validate_transition_and_identity_keys(
             if before is not None and not isinstance(before, PaperOrderDispatch):
                 raise ValueError("dispatch stream changed aggregate model")
             dispatch_before = before if isinstance(before, PaperOrderDispatch) else None
-            special = cast(
-                PaperDispatchSpecialEventType | None,
-                event.event_type
-                if event.event_type
-                in {
-                    "LegacyOrderDispatchImported",
-                    "OrderPrepared",
-                    "DispatchFenceRebound",
-                    "DispatchClaimed",
-                }
-                else None,
-            )
-            expected_type = classify_dispatch_event_type(
+            expected_type = _expected_dispatch_event_type(
                 dispatch_before,
                 after,
-                special_event_type=special,
+                legacy_snapshot=event.payload.legacy_snapshot is True,
             )
             if event.event_type != expected_type:
-                raise ValueError("dispatch event type does not match transition")
+                raise PaperEventStreamCorruption(
+                    "dispatch event type does not match transition"
+                )
             expected_keys = identity_keys_for_dispatch(dispatch_before, after)
             if tuple(event.identity_keys) != expected_keys:
-                raise ValueError("dispatch identity keys do not equal the fill delta")
+                raise PaperEventStreamCorruption(
+                    "dispatch identity keys do not equal the fill delta"
+                )
             _validate_dispatch_source(dispatch_before, after, event)
         elif isinstance(after, PaperRiskReservation):
             if before is not None and not isinstance(before, PaperRiskReservation):
                 raise ValueError("reservation stream changed aggregate model")
             reservation_before = before if isinstance(before, PaperRiskReservation) else None
-            validate_reservation_event_transition(
+            expected_type = _expected_reservation_event_type(
                 reservation_before,
                 after,
-                event.event_type,
+                legacy_snapshot=event.payload.legacy_snapshot is True,
             )
+            if event.event_type != expected_type:
+                raise PaperEventStreamCorruption(
+                    "reservation event type does not match transition"
+                )
             _validate_reservation_source(event)
         else:
             if before is not None and not isinstance(before, PaperCancelRequest):
                 raise ValueError("cancel stream changed aggregate model")
             cancel_before = before if isinstance(before, PaperCancelRequest) else None
-            validate_cancel_event_transition(cancel_before, after, event.event_type)
+            expected_type = _expected_cancel_event_type(
+                cancel_before,
+                after,
+                legacy_snapshot=event.payload.legacy_snapshot is True,
+            )
+            if event.event_type != expected_type:
+                raise PaperEventStreamCorruption(
+                    "cancel event type does not match transition"
+                )
             _validate_cancel_source(event)
     except PaperEventStreamCorruption:
         raise
@@ -409,18 +647,11 @@ def reduce_paper_execution_event(
     else:
         if event.aggregate_version != 1:
             raise PaperEventStreamCorruption("first aggregate event version must be one")
-        if event.event_type not in {
-            *IMPORT_EVENT_TYPES,
-            "OrderPrepared",
-            "RiskReserved",
-            "CancelPrepared",
-        }:
-            raise PaperEventStreamConflict("non-create event cannot seed a stream")
         if event.event_type not in IMPORT_EVENT_TYPES and event.source_revision != 0:
             raise PaperEventStreamConflict("create event source revision must be zero")
 
-    _validate_causation(current, event)
     _validate_transition_and_identity_keys(current, event)
+    _validate_causation(current, event)
 
     prior_scopes = set(() if current is None else current.identity_scope_hashes)
     new_scopes = {item.scope_hash for item in event.identity_keys}
@@ -472,10 +703,18 @@ def join_correlated_execution_projections(
     """Join independent streams only for read-only parity diagnostics."""
 
     grouped: dict[str, PaperCorrelatedExecutionProjection] = {}
+    provenance_by_order_plan: dict[str, PaperExecutionEventProvenance] = {}
     for source in projections:
         projection = _deep_projection(source)
         after = projection.after
         order_plan_id = after.order_plan_id
+        provenance = _projection_provenance(projection)
+        known_provenance = provenance_by_order_plan.get(order_plan_id)
+        if known_provenance is not None and known_provenance != provenance:
+            raise PaperEventStreamCorruption(
+                "correlated execution projections have mismatched provenance"
+            )
+        provenance_by_order_plan.setdefault(order_plan_id, provenance)
         target = grouped.setdefault(
             order_plan_id,
             PaperCorrelatedExecutionProjection(order_plan_id=order_plan_id),

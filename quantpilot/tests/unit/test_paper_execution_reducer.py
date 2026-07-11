@@ -11,6 +11,7 @@ from quantpilot.packages.core.execution.events import (
     PaperExecutionEvent,
     PaperExecutionEventProvenance,
     build_paper_execution_event,
+    identity_keys_for_dispatch,
 )
 from quantpilot.packages.core.execution.reducer import (
     join_correlated_execution_projections,
@@ -197,13 +198,16 @@ def _filled(dispatch: PaperOrderDispatch) -> PaperOrderDispatch:
         dispatch.model_copy(
             update={
                 "status": "filled",
+                "reconciliation_status": "reconciled",
                 "broker_business_date": date(2026, 7, 10),
                 "broker_order_reference": "0000012345",
                 "broker_order_branch_number": "00123",
                 "broker_order_time": "101530",
                 "cumulative_filled_quantity": dispatch.quantity,
                 "fill_evidence": fills,
+                "last_error_code": None,
                 "updated_at": observed_at,
+                "reconciled_at": observed_at,
                 "revision": dispatch.revision + 1,
             }
         ).model_dump()
@@ -356,6 +360,15 @@ def test_special_classifier_runs_before_generic_enrichment() -> None:
         rebound,
         special_event_type="DispatchFenceRebound",
     ) == "DispatchFenceRebound"
+    same_session = PaperOrderDispatch.model_validate(
+        rebound.model_copy(update={"session_id": prepared.session_id}).model_dump()
+    )
+    with pytest.raises(ValueError, match="successor session and fence"):
+        classify_dispatch_event_type(
+            prepared,
+            same_session,
+            special_event_type="DispatchFenceRebound",
+        )
 
 
 def test_generic_dispatch_classifier_covers_all_five_precedence_branches() -> None:
@@ -501,6 +514,34 @@ def test_gap_divergent_retry_hash_and_source_revision_fail_closed() -> None:
         reduce_paper_execution_event(prepared_projection, skipped)
 
 
+def test_identity_keys_and_event_type_are_corruption_bound_to_the_payload() -> None:
+    events, states = _order_events()
+    claimed_projection = replay_paper_execution_events(events[:2])
+
+    missing_keys = PaperExecutionEvent.model_validate(
+        events[2].model_copy(update={"identity_keys": []}).model_dump()
+    )
+    with pytest.raises(PaperEventStreamCorruption, match="identity keys"):
+        reduce_paper_execution_event(claimed_projection, missing_keys)
+
+    partial_projection = replay_paper_execution_events(events[:3])
+    all_fill_keys = identity_keys_for_dispatch(None, states[3])
+    forged_old_key = next(
+        key for key in all_fill_keys if key.external_id == "exec-1"
+    )
+    forged_keys = PaperExecutionEvent.model_validate(
+        events[3].model_copy(update={"identity_keys": [forged_old_key]}).model_dump()
+    )
+    with pytest.raises(PaperEventStreamCorruption, match="identity keys"):
+        reduce_paper_execution_event(partial_projection, forged_keys)
+
+    wrong_type = PaperExecutionEvent.model_validate(
+        events[2].model_copy(update={"event_type": "DispatchEvidenceObserved"}).model_dump()
+    )
+    with pytest.raises(PaperEventStreamCorruption, match="event type"):
+        reduce_paper_execution_event(claimed_projection, wrong_type)
+
+
 def test_expected_provenance_and_closed_source_and_causation_are_enforced() -> None:
     prepared = _dispatch()
     event = build_paper_execution_event(
@@ -595,6 +636,177 @@ def test_process_recovery_and_local_submission_origins_have_closed_deltas() -> N
         reduce_paper_execution_event(claimed_projection, invalid_broker)
 
 
+def test_dispatch_sources_reject_cross_origin_fields_and_error_codes() -> None:
+    events, states = _order_events()
+    claimed_projection = replay_paper_execution_events(events[:2])
+    claimed = states[1]
+
+    recovered_at = claimed.updated_at + timedelta(seconds=1)
+    forged_recovery = PaperOrderDispatch.model_validate(
+        claimed.model_copy(
+            update={
+                "status": "outcome_unknown",
+                "reconciliation_status": "blocked",
+                "last_error_code": "process_interrupted",
+                "updated_at": recovered_at,
+                "revision": claimed.revision + 1,
+            }
+        ).model_dump()
+    )
+    recovery_event = build_paper_execution_event(
+        event_id="pevt-forged-recovery",
+        aggregate_version=3,
+        event_type="ReconciliationBlocked",
+        source="process_recovery",
+        after=forged_recovery,
+        before=claimed,
+        causation_id="pevt-claimed",
+    )
+    with pytest.raises(PaperEventStreamCorruption, match="process-recovery"):
+        reduce_paper_execution_event(claimed_projection, recovery_event)
+
+    rejected_at = claimed.updated_at + timedelta(seconds=1)
+    local_with_broker_identity = PaperOrderDispatch.model_validate(
+        claimed.model_copy(
+            update={
+                "status": "rejected",
+                "reconciliation_status": "reconciled",
+                "broker_order_reference": "0000012345",
+                "last_error_code": "local_configuration_error",
+                "updated_at": rejected_at,
+                "reconciled_at": rejected_at,
+                "revision": claimed.revision + 1,
+            }
+        ).model_dump()
+    )
+    local_event = build_paper_execution_event(
+        event_id="pevt-local-with-broker-identity",
+        aggregate_version=3,
+        event_type="OrderRejected",
+        source="local_submission_result",
+        after=local_with_broker_identity,
+        before=claimed,
+        causation_id="pevt-claimed",
+    )
+    with pytest.raises(PaperEventStreamCorruption, match="local submission guard"):
+        reduce_paper_execution_event(claimed_projection, local_event)
+
+    broker_acceptance = _accepted(claimed)
+    broker_acceptance_with_branch = PaperOrderDispatch.model_validate(
+        broker_acceptance.model_copy(
+            update={"broker_order_branch_number": "00123"}
+        ).model_dump()
+    )
+    broker_event = build_paper_execution_event(
+        event_id="pevt-broker-with-branch",
+        aggregate_version=3,
+        event_type="OrderAccepted",
+        source="broker_acceptance",
+        after=broker_acceptance_with_branch,
+        before=claimed,
+        causation_id="pevt-claimed",
+    )
+    with pytest.raises(PaperEventStreamCorruption, match="broker acceptance delta"):
+        reduce_paper_execution_event(claimed_projection, broker_event)
+
+    partial = states[2]
+    partial_with_local_error = PaperOrderDispatch.model_validate(
+        partial.model_copy(update={"last_error_code": "local_configuration_error"}).model_dump()
+    )
+    local_error_event = build_paper_execution_event(
+        event_id="pevt-reconciliation-local-error",
+        aggregate_version=3,
+        event_type="OrderPartiallyFilled",
+        source="broker_reconciliation",
+        after=partial_with_local_error,
+        before=claimed,
+        causation_id="pevt-claimed",
+    )
+    with pytest.raises(PaperEventStreamCorruption, match="reconciliation delta"):
+        reduce_paper_execution_event(claimed_projection, local_error_event)
+
+    accepted_event = build_paper_execution_event(
+        event_id="pevt-accepted-for-block",
+        aggregate_version=3,
+        event_type="OrderAccepted",
+        source="broker_acceptance",
+        after=broker_acceptance,
+        before=claimed,
+        causation_id="pevt-claimed",
+    )
+    accepted_projection = reduce_paper_execution_event(
+        claimed_projection,
+        accepted_event,
+    )
+    blocked_at = broker_acceptance.updated_at + timedelta(seconds=1)
+    blocked_with_new_broker_evidence = PaperOrderDispatch.model_validate(
+        broker_acceptance.model_copy(
+            update={
+                "reconciliation_status": "blocked",
+                "broker_order_branch_number": "00123",
+                "last_error_code": "broker_match_ambiguous",
+                "updated_at": blocked_at,
+                "revision": broker_acceptance.revision + 1,
+            }
+        ).model_dump()
+    )
+    blocked_event = build_paper_execution_event(
+        event_id="pevt-blocked-with-evidence",
+        aggregate_version=4,
+        event_type="ReconciliationBlocked",
+        source="broker_reconciliation",
+        after=blocked_with_new_broker_evidence,
+        before=broker_acceptance,
+        causation_id="pevt-accepted-for-block",
+    )
+    with pytest.raises(PaperEventStreamCorruption, match="blocked delta"):
+        reduce_paper_execution_event(accepted_projection, blocked_event)
+
+    partial_projection = replay_paper_execution_events(events[:3])
+    partial_with_new_fill = _partial(states[2], quantities=(1.0,))
+    blocked_with_new_fill = PaperOrderDispatch.model_validate(
+        partial_with_new_fill.model_copy(
+            update={
+                "reconciliation_status": "blocked",
+                "last_error_code": "broker_match_ambiguous",
+            }
+        ).model_dump()
+    )
+    blocked_fill_event = build_paper_execution_event(
+        event_id="pevt-blocked-with-fill",
+        aggregate_version=4,
+        event_type="ReconciliationBlocked",
+        source="broker_reconciliation",
+        after=blocked_with_new_fill,
+        before=states[2],
+        causation_id="pevt-partial",
+    )
+    with pytest.raises(PaperEventStreamCorruption, match="blocked delta"):
+        reduce_paper_execution_event(partial_projection, blocked_fill_event)
+
+    blocked_with_local_error = PaperOrderDispatch.model_validate(
+        broker_acceptance.model_copy(
+            update={
+                "reconciliation_status": "blocked",
+                "last_error_code": "local_configuration_error",
+                "updated_at": blocked_at,
+                "revision": broker_acceptance.revision + 1,
+            }
+        ).model_dump()
+    )
+    blocked_local_error_event = build_paper_execution_event(
+        event_id="pevt-blocked-local-error",
+        aggregate_version=4,
+        event_type="ReconciliationBlocked",
+        source="broker_reconciliation",
+        after=blocked_with_local_error,
+        before=broker_acceptance,
+        causation_id="pevt-accepted-for-block",
+    )
+    with pytest.raises(PaperEventStreamCorruption, match="block code"):
+        reduce_paper_execution_event(accepted_projection, blocked_local_error_event)
+
+
 def test_reservation_create_fence_and_release_are_closed() -> None:
     prepared = _dispatch()
     held = _reservation(prepared)
@@ -628,6 +840,20 @@ def test_reservation_create_fence_and_release_are_closed() -> None:
         causation_id="pevt-dispatch-rebound",
     )
     rebound_projection = reduce_paper_execution_event(projection, rebound_event)
+
+    same_session = PaperRiskReservation.model_validate(
+        rebound.model_copy(update={"session_id": held.session_id}).model_dump()
+    )
+    same_session_event = build_paper_execution_event(
+        event_id="pevt-risk-same-session",
+        aggregate_version=2,
+        event_type="RiskReservationFenceRebound",
+        source="local_session_takeover",
+        after=same_session,
+        causation_id="pevt-dispatch-rebound",
+    )
+    with pytest.raises(PaperEventStreamConflict):
+        reduce_paper_execution_event(projection, same_session_event)
 
     released_at = rebound.updated_at + timedelta(seconds=1)
     released = PaperRiskReservation.model_validate(
@@ -797,3 +1023,24 @@ def test_read_only_join_preserves_independent_aggregate_streams() -> None:
     assert joined[0].order_plan_id == prepared.order_plan_id
     assert joined[0].order_dispatch is not None
     assert joined[0].risk_reservation is not None
+
+    foreign_reservation = _reservation(
+        prepared,
+        store_id="foreign-store",
+        account_scope_fingerprint=OTHER_ACCOUNT,
+    )
+    foreign_event = build_paper_execution_event(
+        event_id="pevt-foreign-risk",
+        aggregate_version=1,
+        event_type="RiskReserved",
+        source="local_prepare",
+        after=foreign_reservation,
+        causation_id=None,
+    )
+    with pytest.raises(PaperEventStreamCorruption, match="mismatched provenance"):
+        join_correlated_execution_projections(
+            [
+                reduce_paper_execution_event(None, order_event),
+                reduce_paper_execution_event(None, foreign_event),
+            ]
+        )

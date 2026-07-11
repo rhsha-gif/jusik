@@ -18,7 +18,9 @@ from quantpilot.packages.core.operator.position_ledger import (
     ManagedPositionState,
     OperatorCycleClaim,
     OperatorSafetyState,
+    PaperCancelRequest,
     PaperExecutionSession,
+    PaperKillOperation,
     PaperOrderDispatch,
     PaperPortfolioLossBaseline,
     PaperRunCheckpoint,
@@ -53,9 +55,9 @@ class PaperStateProvenanceError(PaperStateError):
     pass
 
 
-PAPER_STATE_SCHEMA_VERSION = 8
-PAPER_STATE_PREVIOUS_SCHEMA_VERSION = 7
-PAPER_STATE_MIGRATABLE_SCHEMA_VERSIONS = frozenset({6, 7})
+PAPER_STATE_SCHEMA_VERSION = 9
+PAPER_STATE_PREVIOUS_SCHEMA_VERSION = 8
+PAPER_STATE_MIGRATABLE_SCHEMA_VERSIONS = frozenset({6, 7, 8})
 
 PAPER_DISPATCH_TRANSITIONS: dict[str, set[str]] = {
     "prepared": {"expired_pre_dispatch", "failed_pre_dispatch"},
@@ -77,10 +79,43 @@ PAPER_DISPATCH_TRANSITIONS: dict[str, set[str]] = {
     "accepted": {"accepted", "partially_filled", "filled", "rejected", "cancelled"},
     "partially_filled": {"partially_filled", "filled", "cancelled"},
     "filled": {"filled"},
-    "rejected": {"rejected"},
+    "rejected": {"rejected", "reconciled_cancelled", "reconciled_filled"},
     "cancelled": {"cancelled"},
     "expired_pre_dispatch": {"expired_pre_dispatch"},
     "failed_pre_dispatch": {"failed_pre_dispatch"},
+}
+
+PAPER_KILL_TRANSITIONS: dict[str, set[str]] = {
+    "killing": {"killing", "killed", "recovery_required"},
+    "recovery_required": {"killing", "recovery_required"},
+    "killed": {"killed", "recovery_required", "released"},
+    "released": {"released"},
+}
+
+PAPER_CANCEL_TRANSITIONS: dict[str, set[str]] = {
+    "prepared": {"reconciled_cancelled", "reconciled_filled"},
+    "cancel_claimed": {
+        "cancel_accepted",
+        "cancel_outcome_unknown",
+        "reconciled_cancelled",
+        "reconciled_filled",
+        "rejected",
+    },
+    "cancel_accepted": {
+        "cancel_accepted",
+        "reconciled_cancelled",
+        "reconciled_filled",
+        "rejected",
+    },
+    "cancel_outcome_unknown": {
+        "cancel_outcome_unknown",
+        "reconciled_cancelled",
+        "reconciled_filled",
+        "rejected",
+    },
+    "reconciled_cancelled": {"reconciled_cancelled"},
+    "reconciled_filled": {"reconciled_filled"},
+    "rejected": {"rejected"},
 }
 
 
@@ -398,6 +433,42 @@ class PaperStateStore:
                 ON paper_order_dispatches (store_id, status, updated_at)
                 """,
                 """
+                CREATE TABLE IF NOT EXISTS paper_kill_operations (
+                    kill_id TEXT PRIMARY KEY,
+                    store_id TEXT NOT NULL,
+                    status TEXT NOT NULL,
+                    revision INTEGER NOT NULL,
+                    state_json TEXT NOT NULL,
+                    updated_at TEXT NOT NULL,
+                    FOREIGN KEY (store_id) REFERENCES state_store_metadata(store_id)
+                ) WITHOUT ROWID
+                """,
+                """
+                CREATE UNIQUE INDEX IF NOT EXISTS uq_active_paper_kill
+                ON paper_kill_operations (store_id)
+                WHERE status <> 'released'
+                """,
+                """
+                CREATE TABLE IF NOT EXISTS paper_cancel_requests (
+                    cancel_id TEXT PRIMARY KEY,
+                    kill_id TEXT NOT NULL,
+                    order_plan_id TEXT NOT NULL,
+                    broker_order_reference TEXT NOT NULL,
+                    store_id TEXT NOT NULL,
+                    status TEXT NOT NULL,
+                    revision INTEGER NOT NULL,
+                    state_json TEXT NOT NULL,
+                    updated_at TEXT NOT NULL,
+                    UNIQUE (store_id, order_plan_id, broker_order_reference),
+                    FOREIGN KEY (kill_id) REFERENCES paper_kill_operations(kill_id),
+                    FOREIGN KEY (store_id) REFERENCES state_store_metadata(store_id)
+                ) WITHOUT ROWID
+                """,
+                """
+                CREATE INDEX IF NOT EXISTS ix_paper_cancel_status
+                ON paper_cancel_requests (store_id, status, updated_at)
+                """,
+                """
                 CREATE TABLE IF NOT EXISTS paper_portfolio_loss_baselines (
                     store_id TEXT NOT NULL,
                     business_date TEXT NOT NULL,
@@ -628,6 +699,64 @@ class PaperStateStore:
         if metadata != expected:
             raise PaperStateCorruptionError(
                 "paper-order dispatch identity does not match its metadata"
+            )
+        return model
+
+    @staticmethod
+    def _decode_paper_kill_operation(row: sqlite3.Row) -> PaperKillOperation:
+        try:
+            model = PaperKillOperation.model_validate_json(row["state_json"])
+        except ValueError as exc:
+            raise PaperStateCorruptionError("invalid paper-kill JSON") from exc
+        metadata = (
+            row["kill_id"],
+            row["store_id"],
+            row["status"],
+            row["revision"],
+            row["updated_at"],
+        )
+        expected = (
+            model.kill_id,
+            model.store_id,
+            model.status,
+            model.revision,
+            model.updated_at.isoformat(),
+        )
+        if metadata != expected:
+            raise PaperStateCorruptionError(
+                "paper-kill identity does not match its metadata"
+            )
+        return model
+
+    @staticmethod
+    def _decode_paper_cancel_request(row: sqlite3.Row) -> PaperCancelRequest:
+        try:
+            model = PaperCancelRequest.model_validate_json(row["state_json"])
+        except ValueError as exc:
+            raise PaperStateCorruptionError("invalid paper-cancel JSON") from exc
+        metadata = (
+            row["cancel_id"],
+            row["kill_id"],
+            row["order_plan_id"],
+            row["broker_order_reference"],
+            row["store_id"],
+            row["status"],
+            row["revision"],
+            row["updated_at"],
+        )
+        expected = (
+            model.cancel_id,
+            model.kill_id,
+            model.order_plan_id,
+            model.broker_order_reference,
+            model.store_id,
+            model.status,
+            model.revision,
+            model.updated_at.isoformat(),
+        )
+        if metadata != expected:
+            raise PaperStateCorruptionError(
+                "paper-cancel identity does not match its metadata"
             )
         return model
 
@@ -943,6 +1072,32 @@ class PaperStateStore:
         ):
             raise PaperStateProvenanceError(
                 "paper dispatch does not match its state-store provenance"
+            )
+
+    def _validate_kill_provenance(self, operation: PaperKillOperation) -> None:
+        provenance = self._require_paper_store()
+        if (
+            operation.store_id != provenance.store_id
+            or operation.data_mode != provenance.data_mode
+            or operation.broker_environment != provenance.broker_environment
+            or operation.account_scope_fingerprint
+            != provenance.account_scope_fingerprint
+        ):
+            raise PaperStateProvenanceError(
+                "paper kill does not match its state-store provenance"
+            )
+
+    def _validate_cancel_provenance(self, request: PaperCancelRequest) -> None:
+        provenance = self._require_paper_store()
+        if (
+            request.store_id != provenance.store_id
+            or request.data_mode != provenance.data_mode
+            or request.broker_environment != provenance.broker_environment
+            or request.account_scope_fingerprint
+            != provenance.account_scope_fingerprint
+        ):
+            raise PaperStateProvenanceError(
+                "paper cancel does not match its state-store provenance"
             )
 
     def _load_session_row(self, session_id: str) -> sqlite3.Row | None:
@@ -1794,6 +1949,433 @@ class PaperStateStore:
             for dispatch in self.list_paper_order_dispatches()
             if dispatch.reconciliation_status != "reconciled"
         ]
+
+    def _load_kill_row(self, kill_id: str) -> sqlite3.Row | None:
+        return self._connection.execute(
+            """
+            SELECT kill_id, store_id, status, revision, state_json, updated_at
+            FROM paper_kill_operations
+            WHERE kill_id = ?
+            """,
+            (kill_id.strip(),),
+        ).fetchone()
+
+    def load_active_paper_kill_operation(self) -> PaperKillOperation | None:
+        provenance = self._require_paper_store()
+        row = self._connection.execute(
+            """
+            SELECT kill_id, store_id, status, revision, state_json, updated_at
+            FROM paper_kill_operations
+            WHERE store_id = ? AND status <> 'released'
+            ORDER BY updated_at DESC
+            LIMIT 1
+            """,
+            (provenance.store_id,),
+        ).fetchone()
+        if row is None:
+            return None
+        operation = self._decode_paper_kill_operation(row)
+        self._validate_kill_provenance(operation)
+        return operation
+
+    def paper_kill_blocks_submission(self) -> bool:
+        return self.load_active_paper_kill_operation() is not None
+
+    def start_paper_kill_operation(
+        self,
+        *,
+        session: PaperExecutionSession,
+        reason: str,
+        started_at: datetime,
+    ) -> PaperKillOperation:
+        """Persist the kill fence before any broker inspection or mutation."""
+
+        _require_aware_timestamp(started_at, field_name="started_at")
+        normalized_reason = reason.strip()
+        if not normalized_reason:
+            raise ValueError("paper-kill reason must not be blank")
+        with self._transaction():
+            self._require_exact_active_session(session, checked_at=started_at)
+            active = self.load_active_paper_kill_operation()
+            if active is not None:
+                if active.status in {"killing", "killed"}:
+                    return active
+                if started_at <= active.updated_at:
+                    raise PaperStateConflictError(
+                        "paper-kill resume timestamp must advance durable state"
+                    )
+                resumed = PaperKillOperation.model_validate(
+                    active.model_copy(
+                        update={
+                            "status": "killing",
+                            "reason": normalized_reason,
+                            "unresolved_reason_codes": [],
+                            "updated_at": started_at,
+                            "revision": active.revision + 1,
+                        }
+                    ).model_dump()
+                )
+                cursor = self._connection.execute(
+                    """
+                    UPDATE paper_kill_operations
+                    SET status = ?, revision = ?, state_json = ?, updated_at = ?
+                    WHERE kill_id = ? AND status = 'recovery_required'
+                      AND revision = ?
+                    """,
+                    (
+                        resumed.status,
+                        resumed.revision,
+                        self._serialize(resumed),
+                        resumed.updated_at.isoformat(),
+                        active.kill_id,
+                        active.revision,
+                    ),
+                )
+                if cursor.rowcount != 1:
+                    raise PaperStateConflictError(
+                        "paper-kill state changed during resume"
+                    )
+                return resumed
+            provenance = self._require_paper_store()
+            operation = PaperKillOperation(
+                store_id=provenance.store_id,
+                account_scope_fingerprint=provenance.account_scope_fingerprint,
+                reason=normalized_reason,
+                requested_at=started_at,
+                updated_at=started_at,
+            )
+            self._connection.execute(
+                """
+                INSERT INTO paper_kill_operations (
+                    kill_id, store_id, status, revision, state_json, updated_at
+                ) VALUES (?, ?, ?, ?, ?, ?)
+                """,
+                (
+                    operation.kill_id,
+                    operation.store_id,
+                    operation.status,
+                    operation.revision,
+                    self._serialize(operation),
+                    operation.updated_at.isoformat(),
+                ),
+            )
+            return operation
+
+    @staticmethod
+    def _kill_immutable_identity(operation: PaperKillOperation) -> tuple[object, ...]:
+        return (
+            operation.kill_id,
+            operation.store_id,
+            operation.data_mode,
+            operation.broker_environment,
+            operation.account_scope_fingerprint,
+            operation.requested_at,
+        )
+
+    def update_paper_kill_operation(
+        self,
+        operation: PaperKillOperation,
+        *,
+        session: PaperExecutionSession,
+    ) -> PaperKillOperation:
+        operation = PaperKillOperation.model_validate(operation.model_dump())
+        self._validate_kill_provenance(operation)
+        with self._transaction():
+            self._require_exact_active_session(session, checked_at=operation.updated_at)
+            row = self._load_kill_row(operation.kill_id)
+            if row is None:
+                raise PaperStateNotFoundError(
+                    f"missing paper kill: {operation.kill_id}"
+                )
+            existing = self._decode_paper_kill_operation(row)
+            if operation == existing:
+                return existing
+            if self._kill_immutable_identity(operation) != self._kill_immutable_identity(existing):
+                raise PaperStateConflictError("paper-kill immutable identity changed")
+            if operation.revision != existing.revision + 1:
+                raise PaperStateConflictError(
+                    "paper-kill revision must advance by exactly one"
+                )
+            if operation.updated_at <= existing.updated_at:
+                raise PaperStateConflictError("paper-kill update timestamp must advance")
+            if operation.status not in PAPER_KILL_TRANSITIONS[existing.status]:
+                raise PaperStateConflictError(
+                    f"invalid paper-kill transition: {existing.status} -> {operation.status}"
+                )
+            cursor = self._connection.execute(
+                """
+                UPDATE paper_kill_operations
+                SET status = ?, revision = ?, state_json = ?, updated_at = ?
+                WHERE kill_id = ? AND status = ? AND revision = ?
+                """,
+                (
+                    operation.status,
+                    operation.revision,
+                    self._serialize(operation),
+                    operation.updated_at.isoformat(),
+                    operation.kill_id,
+                    existing.status,
+                    existing.revision,
+                ),
+            )
+            if cursor.rowcount != 1:
+                raise PaperStateConflictError(
+                    "paper-kill state changed before update"
+                )
+        return operation
+
+    @staticmethod
+    def _cancel_immutable_identity(request: PaperCancelRequest) -> tuple[object, ...]:
+        return (
+            request.kill_id,
+            request.order_plan_id,
+            request.broker_order_id,
+            request.broker_order_reference,
+            request.broker_forwarding_order_org_number,
+            request.symbol,
+            request.side,
+            request.cancelable_quantity,
+            request.original_limit_price,
+            request.exchange_id,
+            request.store_id,
+            request.data_mode,
+            request.broker_environment,
+            request.account_scope_fingerprint,
+        )
+
+    def create_paper_cancel_request(
+        self,
+        request: PaperCancelRequest,
+        *,
+        session: PaperExecutionSession,
+    ) -> PaperCancelRequest:
+        request = PaperCancelRequest.model_validate(request.model_dump())
+        self._validate_cancel_provenance(request)
+        with self._transaction():
+            self._require_exact_active_session(session, checked_at=request.created_at)
+            kill_row = self._load_kill_row(request.kill_id)
+            if kill_row is None:
+                raise PaperStateNotFoundError(
+                    f"missing paper kill: {request.kill_id}"
+                )
+            operation = self._decode_paper_kill_operation(kill_row)
+            if operation.status not in {"killing", "recovery_required"}:
+                raise PaperStateConflictError(
+                    "paper cancel requires an active blocking kill"
+                )
+            dispatch = self.load_paper_order_dispatch(request.order_plan_id)
+            if dispatch is None or dispatch.status not in {"accepted", "partially_filled"}:
+                raise PaperStateConflictError(
+                    "paper cancel requires a broker-identified working dispatch"
+                )
+            if (
+                dispatch.broker_order_id != request.broker_order_id
+                or dispatch.broker_order_reference != request.broker_order_reference
+                or dispatch.broker_forwarding_order_org_number
+                != request.broker_forwarding_order_org_number
+                or dispatch.symbol != request.symbol
+                or dispatch.side != request.side
+            ):
+                raise PaperStateConflictError(
+                    "paper cancel identity does not match its managed dispatch"
+                )
+            row = self._connection.execute(
+                """
+                SELECT cancel_id, kill_id, order_plan_id, broker_order_reference,
+                       store_id, status, revision, state_json, updated_at
+                FROM paper_cancel_requests
+                WHERE store_id = ? AND order_plan_id = ?
+                  AND broker_order_reference = ?
+                """,
+                (
+                    request.store_id,
+                    request.order_plan_id,
+                    request.broker_order_reference,
+                ),
+            ).fetchone()
+            if row is not None:
+                existing = self._decode_paper_cancel_request(row)
+                if self._cancel_immutable_identity(existing) != self._cancel_immutable_identity(request):
+                    raise PaperStateConflictError(
+                        "paper cancel target already exists with different evidence"
+                    )
+                return existing
+            self._connection.execute(
+                """
+                INSERT INTO paper_cancel_requests (
+                    cancel_id, kill_id, order_plan_id, broker_order_reference,
+                    store_id, status, revision, state_json, updated_at
+                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+                """,
+                (
+                    request.cancel_id,
+                    request.kill_id,
+                    request.order_plan_id,
+                    request.broker_order_reference,
+                    request.store_id,
+                    request.status,
+                    request.revision,
+                    self._serialize(request),
+                    request.updated_at.isoformat(),
+                ),
+            )
+        return request
+
+    def _load_cancel_row(self, cancel_id: str) -> sqlite3.Row | None:
+        return self._connection.execute(
+            """
+            SELECT cancel_id, kill_id, order_plan_id, broker_order_reference,
+                   store_id, status, revision, state_json, updated_at
+            FROM paper_cancel_requests
+            WHERE cancel_id = ?
+            """,
+            (cancel_id.strip(),),
+        ).fetchone()
+
+    def claim_paper_cancel_attempt(
+        self,
+        cancel_id: str,
+        *,
+        session: PaperExecutionSession,
+        claimed_at: datetime,
+    ) -> PaperCancelRequest:
+        _require_aware_timestamp(claimed_at, field_name="claimed_at")
+        with self._transaction():
+            self._require_exact_active_session(session, checked_at=claimed_at)
+            row = self._load_cancel_row(cancel_id)
+            if row is None:
+                raise PaperStateNotFoundError(
+                    f"missing paper cancel: {cancel_id.strip()}"
+                )
+            existing = self._decode_paper_cancel_request(row)
+            self._validate_cancel_provenance(existing)
+            if existing.status != "prepared" or existing.attempt_count != 0:
+                raise PaperStateConflictError(
+                    "paper cancel external attempt was already claimed"
+                )
+            if claimed_at <= existing.updated_at:
+                raise PaperStateConflictError(
+                    "paper cancel claim timestamp must advance durable state"
+                )
+            claimed = PaperCancelRequest.model_validate(
+                existing.model_copy(
+                    update={
+                        "status": "cancel_claimed",
+                        "attempt_count": 1,
+                        "claimed_at": claimed_at,
+                        "updated_at": claimed_at,
+                        "revision": existing.revision + 1,
+                    }
+                ).model_dump()
+            )
+            cursor = self._connection.execute(
+                """
+                UPDATE paper_cancel_requests
+                SET status = ?, revision = ?, state_json = ?, updated_at = ?
+                WHERE cancel_id = ? AND status = 'prepared' AND revision = ?
+                """,
+                (
+                    claimed.status,
+                    claimed.revision,
+                    self._serialize(claimed),
+                    claimed.updated_at.isoformat(),
+                    claimed.cancel_id,
+                    existing.revision,
+                ),
+            )
+            if cursor.rowcount != 1:
+                raise PaperStateConflictError(
+                    "paper cancel claim lost its compare-and-swap race"
+                )
+        return claimed
+
+    def update_paper_cancel_request(
+        self,
+        request: PaperCancelRequest,
+        *,
+        session: PaperExecutionSession,
+    ) -> PaperCancelRequest:
+        request = PaperCancelRequest.model_validate(request.model_dump())
+        self._validate_cancel_provenance(request)
+        with self._transaction():
+            self._require_exact_active_session(session, checked_at=request.updated_at)
+            row = self._load_cancel_row(request.cancel_id)
+            if row is None:
+                raise PaperStateNotFoundError(
+                    f"missing paper cancel: {request.cancel_id}"
+                )
+            existing = self._decode_paper_cancel_request(row)
+            if request == existing:
+                return existing
+            if self._cancel_immutable_identity(request) != self._cancel_immutable_identity(existing):
+                raise PaperStateConflictError("paper cancel immutable identity changed")
+            if request.revision != existing.revision + 1:
+                raise PaperStateConflictError(
+                    "paper cancel revision must advance by exactly one"
+                )
+            if request.updated_at <= existing.updated_at:
+                raise PaperStateConflictError("paper cancel update timestamp must advance")
+            if request.attempt_count != existing.attempt_count:
+                raise PaperStateConflictError(
+                    "only claim_paper_cancel_attempt may change attempt count"
+                )
+            if request.claimed_at != existing.claimed_at:
+                raise PaperStateConflictError("paper cancel claim evidence is immutable")
+            if request.status not in PAPER_CANCEL_TRANSITIONS[existing.status]:
+                raise PaperStateConflictError(
+                    f"invalid paper-cancel transition: {existing.status} -> {request.status}"
+                )
+            cursor = self._connection.execute(
+                """
+                UPDATE paper_cancel_requests
+                SET status = ?, revision = ?, state_json = ?, updated_at = ?
+                WHERE cancel_id = ? AND status = ? AND revision = ?
+                """,
+                (
+                    request.status,
+                    request.revision,
+                    self._serialize(request),
+                    request.updated_at.isoformat(),
+                    request.cancel_id,
+                    existing.status,
+                    existing.revision,
+                ),
+            )
+            if cursor.rowcount != 1:
+                raise PaperStateConflictError(
+                    "paper cancel state changed before update"
+                )
+        return request
+
+    def load_paper_cancel_request(self, cancel_id: str) -> PaperCancelRequest | None:
+        row = self._load_cancel_row(cancel_id)
+        if row is None:
+            return None
+        request = self._decode_paper_cancel_request(row)
+        self._validate_cancel_provenance(request)
+        return request
+
+    def list_paper_cancel_requests(
+        self,
+        *,
+        kill_id: str | None = None,
+    ) -> list[PaperCancelRequest]:
+        query = """
+            SELECT cancel_id, kill_id, order_plan_id, broker_order_reference,
+                   store_id, status, revision, state_json, updated_at
+            FROM paper_cancel_requests
+            WHERE store_id = ?
+        """
+        params: tuple[object, ...] = (self._require_paper_store().store_id,)
+        if kill_id is not None:
+            query += " AND kill_id = ?"
+            params += (kill_id.strip(),)
+        query += " ORDER BY updated_at, cancel_id"
+        rows = self._connection.execute(query, params).fetchall()
+        requests = [self._decode_paper_cancel_request(row) for row in rows]
+        for request in requests:
+            self._validate_cancel_provenance(request)
+        return requests
 
     def save_operator_safety_state(
         self,

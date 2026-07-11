@@ -373,6 +373,8 @@ def build_runtime(
             broker_environment="kis_paper",
             account_scope_fingerprint=client.account_scope_fingerprint,
         )
+        if store.paper_kill_blocks_submission():
+            raise PaperSessionError("paper_kill_blocks_session")
         session = store.start_paper_execution_session(
             started_at=evaluated_at,
             lease_expires_at=evaluated_at

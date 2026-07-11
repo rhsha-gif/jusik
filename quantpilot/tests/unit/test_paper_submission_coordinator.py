@@ -223,6 +223,86 @@ def _coordinator(
     )
 
 
+def test_durable_kill_fences_prepare_and_pre_post_submission(tmp_path) -> None:
+    client = FakePaperClient()
+    clock = MutableClock()
+    with PaperStateStore(
+        tmp_path / "kill-fence.sqlite3",
+        data_mode="paper_trading",
+        account_scope_fingerprint=FINGERPRINT,
+    ) as store:
+        coordinator = _coordinator(store, client, clock)
+        order = _order()
+        coordinator.prepare_order(
+            order,
+            run_id="run-kill-fence",
+            user_id="paper-user",
+            snapshot=_snapshot(),
+            quote=_quote(),
+            entry_atr14=1200,
+            quote_max_age_seconds=30,
+            snapshot_max_age_seconds=30,
+            minimum_cash_reserve=200000,
+        )
+        store.start_paper_kill_operation(
+            session=coordinator.session,
+            reason="operator_requested",
+            started_at=NOW + timedelta(microseconds=1),
+        )
+
+        with pytest.raises(PaperPreDispatchFailure, match="paper kill"):
+            coordinator.submit_prepared_order(order)
+        assert client.order_calls == 0
+        assert store.load_paper_order_dispatch(order.order_plan_id).status == (
+            "expired_pre_dispatch"
+        )
+
+        with pytest.raises(RuntimeError, match="paper_kill_blocks_submission"):
+            coordinator.prepare_order(
+                _order(order_plan_id="plan-002", idempotency_key="paper-order-key-002"),
+                run_id="run-kill-fence",
+                user_id="paper-user",
+                snapshot=_snapshot(),
+                quote=_quote(),
+                entry_atr14=1200,
+                quote_max_age_seconds=30,
+                snapshot_max_age_seconds=30,
+                minimum_cash_reserve=200000,
+            )
+
+
+def test_kill_terminalizes_prepared_dispatch_without_broker_post(tmp_path) -> None:
+    client = FakePaperClient()
+    clock = MutableClock()
+    with PaperStateStore(
+        tmp_path / "kill-terminalize.sqlite3",
+        data_mode="paper_trading",
+        account_scope_fingerprint=FINGERPRINT,
+    ) as store:
+        coordinator = _coordinator(store, client, clock)
+        coordinator.prepare_order(
+            _order(),
+            run_id="run-kill-terminalize",
+            user_id="paper-user",
+            snapshot=_snapshot(),
+            quote=_quote(),
+            entry_atr14=1200,
+            quote_max_age_seconds=30,
+            snapshot_max_age_seconds=30,
+            minimum_cash_reserve=200000,
+        )
+        store.start_paper_kill_operation(
+            session=coordinator.session,
+            reason="operator_requested",
+            started_at=NOW + timedelta(microseconds=1),
+        )
+        terminal = coordinator.terminalize_prepared_dispatches_for_kill()
+
+        assert [item.status for item in terminal] == ["expired_pre_dispatch"]
+        assert terminal[0].last_error_code == "paper_kill_engaged"
+        assert client.order_calls == 0
+
+
 def test_prepare_commits_exact_evidence_before_single_post_and_replays_without_post(
     tmp_path,
 ) -> None:

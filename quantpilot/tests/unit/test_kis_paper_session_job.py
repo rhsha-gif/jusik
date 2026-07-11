@@ -47,6 +47,7 @@ from quantpilot.packages.core.strategies.registry import (
     StrategyRegistryEntry,
 )
 from quantpilot.packages.db.repositories import RepositoryRegistry
+from quantpilot.packages.db.sqlite_repositories import PaperStateStore
 
 
 NOW = datetime(2026, 7, 10, 1, 0, tzinfo=timezone.utc)
@@ -653,3 +654,43 @@ def test_runtime_wiring_binds_one_fenced_store_without_network(tmp_path) -> None
             closed_at=NOW.replace(microsecond=1),
         )
         runtime.store.close()
+
+
+def test_normal_paper_runtime_is_blocked_by_durable_kill(tmp_path) -> None:
+    environment = _enabled_environment(tmp_path)
+    (tmp_path / "policy.json").write_text(
+        json.dumps(_policy().model_dump(mode="json")),
+        encoding="utf-8",
+    )
+    (tmp_path / "registry.json").write_text(
+        json.dumps(_registry_payload()),
+        encoding="utf-8",
+    )
+    with PaperStateStore(
+        environment["KIS_PAPER_STATE_DB"],
+        data_mode="paper_trading",
+        broker_environment="kis_paper",
+        account_scope_fingerprint=_BuildClient.account_scope_fingerprint,
+    ) as store:
+        session = store.start_paper_execution_session(
+            started_at=NOW.replace(minute=0),
+            lease_expires_at=NOW.replace(minute=10),
+        )
+        store.start_paper_kill_operation(
+            session=session,
+            reason="operator_requested",
+            started_at=NOW.replace(microsecond=1),
+        )
+        store.close_paper_execution_session(
+            session,
+            closed_at=NOW.replace(microsecond=2),
+        )
+
+    config = KisPaperSessionConfig.from_environment(environment)
+    with pytest.raises(PaperSessionError, match="paper_kill_blocks_session"):
+        build_runtime(
+            config,
+            evaluated_at=NOW.replace(microsecond=3),
+            provider_builder=lambda: (_SecurityProvider(), _Historical()),
+            client_builder=lambda _config: _BuildClient(),  # type: ignore[return-value]
+        )

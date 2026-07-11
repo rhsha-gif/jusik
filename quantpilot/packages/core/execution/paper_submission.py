@@ -80,6 +80,8 @@ class PaperDispatchStore(Protocol):
 
     def list_paper_order_dispatches(self) -> list[PaperOrderDispatch]: ...
 
+    def paper_kill_blocks_submission(self) -> bool: ...
+
     def takeover_prepared_paper_order_dispatch(
         self,
         order_plan_id: str,
@@ -198,6 +200,38 @@ class DurablePaperSubmissionCoordinator:
             )
         return tuple(expired)
 
+    def terminalize_prepared_dispatches_for_kill(
+        self,
+    ) -> tuple[PaperOrderDispatch, ...]:
+        """Discard every unattempted order after a durable paper kill fence."""
+
+        now = self._now()
+        terminal: list[PaperOrderDispatch] = []
+        for dispatch in self._store.list_paper_order_dispatches():
+            if dispatch.status != "prepared":
+                continue
+            current = dispatch
+            write_at = self._strictly_later(now, current.updated_at)
+            if (
+                current.session_id != self._session.session_id
+                or current.fencing_token != self._session.fencing_token
+            ):
+                current = self._store.takeover_prepared_paper_order_dispatch(
+                    current.order_plan_id,
+                    session=self._session,
+                    taken_over_at=write_at,
+                )
+                write_at = self._strictly_later(self._now(), current.updated_at)
+            terminal.append(
+                self._terminal_pre_dispatch(
+                    current,
+                    status="expired_pre_dispatch",
+                    error_code="paper_kill_engaged",
+                    at=write_at,
+                )
+            )
+        return tuple(terminal)
+
     def prepare_order(
         self,
         order_plan: OrderPlan,
@@ -211,6 +245,8 @@ class DurablePaperSubmissionCoordinator:
         snapshot_max_age_seconds: int,
         minimum_cash_reserve: float,
     ) -> PaperOrderDispatch:
+        if self._store.paper_kill_blocks_submission():
+            raise RuntimeError("paper_kill_blocks_submission")
         existing = self._store.find_paper_order_dispatch_by_idempotency_key(
             order_plan.idempotency_key
         )
@@ -358,6 +394,17 @@ class DurablePaperSubmissionCoordinator:
             return self._replay_without_post(dispatch)
 
         now = self._now()
+        if self._store.paper_kill_blocks_submission():
+            expired = self._terminal_pre_dispatch(
+                dispatch,
+                status="expired_pre_dispatch",
+                error_code="paper_kill_engaged",
+                at=now,
+            )
+            raise PaperPreDispatchFailure(
+                expired,
+                "paper kill blocks the external dispatch claim",
+            )
         if (
             dispatch.session_id != self._session.session_id
             or dispatch.fencing_token != self._session.fencing_token
@@ -411,6 +458,15 @@ class DurablePaperSubmissionCoordinator:
                 dispatch.updated_at,
             ),
         )
+        if self._store.paper_kill_blocks_submission():
+            rejected = self._definitive_rejection(
+                claimed,
+                error_code="paper_kill_engaged_after_claim",
+            )
+            raise PaperSubmissionRejected(
+                rejected,
+                "paper kill engaged after claim and before broker POST",
+            )
         post_claim_observed_at = self._now()
         try:
             post_claim_session_date = (

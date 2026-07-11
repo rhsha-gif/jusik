@@ -405,16 +405,14 @@ The evaluator applies these closed stages in order:
 8. broker capability compatibility; and
 9. return `eligible_for_legacy_submit` with declarative requirements only.
 
-All applicable failures within the first failing stage are returned as sorted
-reason codes. Later stages are not evaluated after a failed stage. Unknown
-enum values, missing required evidence, naive timestamps, fingerprint mismatch,
-or inconsistent policy/order identities fail closed.
+All applicable semantic failures within the first failing stage are returned
+as sorted reason codes. Later stages are not evaluated after a failed stage.
+Inconsistent policy/order identities fail closed as a decision. Structural
+schema errors are handled separately as described below.
 
-The v1 output reason vocabulary is closed:
+The v1 semantic decision reason vocabulary is closed:
 
 ```text
-invalid_evidence_schema
-naive_or_invalid_timestamp
 order_identity_mismatch
 policy_identity_mismatch
 policy_version_mismatch
@@ -422,7 +420,6 @@ order_not_user_approved
 order_expired
 authorization_denied
 authorization_evidence_mismatch
-risk_evidence_missing
 risk_check_mismatch
 risk_check_expired
 single_order_risk_failed
@@ -445,6 +442,45 @@ broker_capability_mismatch
 Adapters map existing check names and exceptions to this vocabulary for parity;
 arbitrary exception messages and human-readable authority details never become
 kernel reason codes.
+
+The separate structural validator error-code vocabulary is exactly:
+
+```text
+invalid_evidence_schema
+naive_or_invalid_timestamp
+```
+
+### 4.5 Structural validation and semantic decisions
+
+The pure API is deliberately split:
+
+```text
+validate_kernel_input_v1(raw_snapshot)
+  -> valid deeply immutable input
+  -> or KernelEvidenceValidationError
+
+evaluate_execution(input: KernelEvaluationInputV1)
+  -> KernelDecisionV1
+```
+
+Unknown enum values, extra fields, missing fields, non-finite numbers, naive
+timestamps, or secret-shaped extras fail during input construction. The public
+validator catches and sanitizes the underlying Pydantic error. Its exported
+error contains only a closed code (`invalid_evidence_schema` or
+`naive_or_invalid_timestamp`) and safe field locations; it must not echo the
+raw value, Pydantic `input_value`, or exception text. The evaluator is total
+for a successfully constructed input and does not raise for semantic
+allow/block conditions.
+
+The initial shadow runner maps a construction error to a structured
+non-authoritative `evidence_error` comparison. It neither changes nor suppresses
+the legacy verdict. A later cutover wrapper must convert the same error to a
+blocked result before the first submission-phase mutation.
+
+The input carries no caller-supplied evidence fingerprint. The evaluator
+computes the output fingerprint once. A later executor-envelope contract may
+recompute and compare that fingerprint, but v1 does not pretend to verify a
+nonexistent input fingerprint.
 
 ## 5. Mode and composition contract
 
@@ -591,6 +627,33 @@ The shadow-runner task additionally proves:
 - `outcome_unknown`, restart, kill, and reconciliation tests retain their
   existing no-rePOST counters; and
 - the static sole-POST-authority regression remains green.
+
+The minimum pure-model case matrix is binding:
+
+| Case | Expected result |
+|---|---|
+| valid Level 3 direct fixture/mock with `unverified_local` | `eligible_for_legacy_submit` |
+| same evidence with external `kis_paper` capability | `blocked/authorization_evidence_mismatch` |
+| valid ticket-attested Level 3 | eligible |
+| valid policy-authorized Level 4 | eligible |
+| valid operator-authorized Level 5 | eligible |
+| valid professional reduce-only evidence | eligible |
+| candidate policy/order identity disagreement | `blocked/identity` stage |
+| candidate not `user_approved` | `blocked/order_not_user_approved` |
+| current order expiry reached | `blocked/order_expired` |
+| denied or internally inconsistent authorization | `blocked/authorization` stage |
+| risk ID/policy/idempotency disagreement | `blocked/risk_check_mismatch` |
+| expired fresh-risk evidence | `blocked/risk_check_expired` |
+| failed single or batch risk | the corresponding closed risk reason |
+| current order absent from accepted batch IDs | `blocked/batch_order_not_accepted` |
+| live, either kill, pause, or unhealthy broker | matching `final_safety` reason |
+| market order with disabled context/capability | `blocked/market_order_disabled` |
+| external paper without snapshot/quote/run/provenance/fence evidence | matching closed paper reason |
+| valid external-paper evidence | eligible with both durable requirement flags, zero calls |
+| same valid input evaluated twice | byte-equivalent decision/fingerprint |
+| mapping order differs but semantic input is equal | identical fingerprint |
+| extra `api_key`/`account_number`/raw response field | sanitized structural error; secret absent from text |
+| naive timestamp or non-finite numeric | sanitized structural error |
 
 ## 8. Gate sequence
 

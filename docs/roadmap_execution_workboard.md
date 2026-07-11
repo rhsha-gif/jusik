@@ -42,7 +42,7 @@ Score: `domain*0.30 + tools*0.25 + track*0.25 + continuity*0.10 + coordination*0
 
 | Task ID | Owner/model | Reviewer/model | Depends on | Worktree/branch | Owned paths | Status | Acceptance | Evidence/commit |
 |---|---|---|---|---|---|---|---|---|
-| `QP-RM-00` | GPT-5 Codex lead | counterpart | none | `주식트레이더-roadmap-baseline` / `codex/qp-roadmap-baseline-v9` | baseline integration, this workboard | in_progress | Kill v1 is fast-forwarded from clean main, full backend and smoke pass, user dirty tree unchanged. | `216ff22`; checks pending |
+| `QP-RM-00` | GPT-5 Codex lead | counterpart | none | `주식트레이더-roadmap-baseline` / `codex/qp-roadmap-baseline-v9` | baseline integration, this workboard, baseline report | review | Kill v1 is fast-forwarded from clean main, full backend and smoke pass, user dirty tree unchanged. | `216ff22`; `819 passed, 2 skipped`; smoke mock/live=false; CLI disabled |
 | `QP-RM-00A` | Codex sub-agent | GPT-5 Codex lead | `QP-RM-00` baseline | separate sibling worktree / `codex/qp-roadmap-acceptance-audit` | `docs/roadmap_acceptance_matrix.md` | proposed | Repository-grounded gate dependencies, invariants, and exact acceptance evidence are decision-complete. | pending |
 | `QP-RISK-RES-V1` | GPT-5 Codex lead | independent auditor | `QP-RM-00`, `QP-RM-00A` | new sibling worktree / `codex/qp-risk-reservation-v1-core` | risk reservation contract/model/store/integration/tests/report | proposed | Schema v10 atomic cash/sell-quantity/gross-exposure reservation passes concurrency, crash, migration, full-suite, and smoke gates. | pending |
 | `QP-EXEC-EVENTS-V1` | best-fit routed per scorecard | independent auditor | `QP-RISK-RES-V1` contract stability | separate worktree | canonical events/reducer/shadow parity | proposed | Replay is deterministic; duplicates/out-of-order events cannot corrupt projections. | pending |
@@ -62,6 +62,7 @@ Score: `domain*0.30 + tools*0.25 + track*0.25 + continuity*0.10 + coordination*0
 ## Checkpoint log
 
 - `2026-07-11 KST` — GPT-5 Codex lead — created clean sibling worktree from `main` and fast-forwarded verified kill v1 through `216ff22`; original dirty worktree untouched.
+- `2026-07-11 KST` — GPT-5 Codex lead — baseline verification passed: backend `819 passed, 2 skipped`; smoke `broker=mock`, `live=false`, Level 5 blocked; kill CLI default `paper_kill_disabled`.
 
 ## Handoff record
 
@@ -80,9 +81,9 @@ integration_requests:
 
 | Task ID | Task class | Agent/model | First-pass | P0 | P1 | P2 | Rework cycles | Required checks | Elapsed | Rating |
 |---|---|---|---|---:|---:|---:|---:|---|---|---:|
-| `QP-RM-00` | baseline integration | GPT-5 Codex | pending | 0 | 0 | 0 | 0 | pending | pending | 0 |
+| `QP-RM-00` | baseline integration | GPT-5 Codex | yes | 0 | 0 | 0 | 0 | 819 tests + smoke + disabled CLI | pending | 5 |
 
 - Routing decision quality: `pending`
 - Capability scorecard update: `pending`
-- User-owned changes preserved: original worktree remains untouched; final status evidence pending
+- User-owned changes preserved: original worktree remains untouched; its pre-existing modified and untracked paths were not staged or copied
 - Remaining limitations: manual KIS paper validation and all post-baseline missions remain pending

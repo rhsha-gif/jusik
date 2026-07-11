@@ -68,7 +68,7 @@ gate of the roadmap (`docs/roadmap_execution_workboard.md`, Gate 1 of
 | Task ID | Owner/model | Reviewer/model | Depends on | Worktree/branch | Owned paths | Status | Acceptance | Evidence/commit |
 |---|---|---|---|---|---|---|---|---|
 | `QP-RISK-RES-V1-contract` | Claude Code Opus alias + `claude-fable-5` finalizer | GPT-5 Codex lead | `QP-RM-00`, `QP-RM-00A` | `주식트레이더-claude-roadmap-contracts` / `claude/qp-roadmap-contracts` | `docs/roadmap_acceptance_matrix.md`, `docs/contracts/atomic_risk_reservation_v1.md`, `docs/atomic_risk_reservation_v1_workboard.md` | integrated | Decision-complete v10 model/arithmetic/transaction/migration/tests; Codex review added integer gross reservation and corrected atomic store ownership. | Claude `215a4b9`, integrated `36d9a8a`; Codex hardening `5dff17a` |
-| `QP-RISK-RES-V1-impl` | GPT-5 Codex lead | Claude Code (independent audit) | `QP-RISK-RES-V1-contract` | `주식트레이더-risk-reservation-v1` / `codex/qp-risk-reservation-v1-core` | `operator/position_ledger.py` (reservation model), `db/sqlite_repositories.py` (table/migration/CAS methods), `execution/paper_submission.py` (reserve boundary), `harness_service.py` (durable guardrail projection), reservation tests | review | Contract §10 tests green in full suite; smoke safe-default; migration preserves v9; internal adversarial audit P0/P1 zero. | `884 passed, 2 skipped`; smoke mock/live=false; implementation commit pending |
+| `QP-RISK-RES-V1-impl` | GPT-5 Codex lead | Claude Code (independent audit) | `QP-RISK-RES-V1-contract` | `주식트레이더-risk-reservation-v1` / `codex/qp-risk-reservation-v1-core` | `operator/position_ledger.py` (reservation model), `db/sqlite_repositories.py` (table/migration/CAS methods), `execution/paper_submission.py` (reserve boundary), `harness_service.py` (durable guardrail projection), reservation tests | review | Contract §10 tests green in full suite; smoke safe-default; migration preserves v9; internal adversarial audit P0/P1 zero. | `ce075bf`; `884 passed, 2 skipped`; smoke mock/live=false |
 | `QP-RISK-RES-V1-audit` | Claude Code `claude-fable-5` | GPT-5 Codex lead | `QP-RISK-RES-V1-impl` | read-only over impl branch | audit report only (no code) | in_progress | Adversarial review of atomicity, conservative release, fencing, gross exposure, and migration; blocks integration on any P0/P1. | Claude request reached `claude-fable-5` but returned account `429 rate_limit_error` at 2026-07-11 11:53 KST; retry pending |
 
 Owned-path disjointness: the contract task owns only the three docs; the impl task
@@ -144,7 +144,7 @@ integration_requests:
 ```text
 task_id: QP-RISK-RES-V1-impl
 agent_and_model: GPT-5 Codex lead with independent Codex audit agent
-commit: pending on codex/qp-risk-reservation-v1-core
+commit: ce075bf on codex/qp-risk-reservation-v1-core
 owned_paths:
   - quantpilot/packages/core/operator/position_ledger.py
   - quantpilot/packages/core/execution/paper_submission.py

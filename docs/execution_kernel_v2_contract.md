@@ -278,6 +278,7 @@ reviewed identity-binding change.
 ```text
 single_order:
   risk_check_id
+  order_plan_id
   passed
   policy_version
   idempotency_key
@@ -287,7 +288,7 @@ single_order:
   failed_checks: tuple
 batch:
   passed
-  mode
+  mode: full_batch | partial_batch | rejected
   policy_version
   accepted_order_plan_ids: tuple
   failed_checks: tuple
@@ -305,7 +306,10 @@ the kernel cannot create it.
 
 The legacy adapter supplies already-computed risk results from the same
 submit-time evidence. The kernel does not recalculate portfolio arithmetic and
-does not generate a replacement risk-check ID.
+does not generate a replacement risk-check ID. The current submit-time batch
+gate constructs `BatchRiskConfig` without `partial_allow`, so an eligible
+submission must carry `mode=full_batch`; proposal-time partial selection is not
+authorization to submit a partial batch.
 
 #### `ExecutionContextSnapshotV1`
 
@@ -322,6 +326,9 @@ policy_kill_switch_engaged
 operator_kill_switch_engaged
 autopilot_paused
 broker_healthy
+policy_snapshot_current
+current_policy_id
+current_policy_version
 external_paper_enabled
 paper_run_id_present
 explicit_snapshot_present
@@ -346,6 +353,12 @@ professional_risk_reduction
 ```
 
 No caller may place an arbitrary route or endpoint string in the evidence.
+
+`policy_snapshot_current` is captured by the adapter using the same exact
+`UserPolicy` equality that the legacy final gate currently applies. The current
+policy ID/version are retained separately and must match the candidate and
+authorization evidence; a caller cannot satisfy the kernel with the boolean
+alone.
 
 Secrets, account IDs, tokens, request headers, and raw KIS payloads are
 forbidden.
@@ -402,8 +415,10 @@ The evaluator applies these closed stages in order:
 2. candidate state (`user_approved`) and non-expired order;
 3. authorization evidence and policy binding;
 4. single-order risk pass, policy/idempotency binding, and freshness;
-5. batch risk pass and membership of the current order;
-6. final safety snapshot (live off, kill off, not paused, healthy broker);
+5. batch risk pass, `full_batch` submit mode, and membership of the current
+   order;
+6. final safety snapshot (policy snapshot still current, live off, kill off,
+   not paused, healthy broker);
 7. required explicit paper evidence and provenance fields;
 8. broker capability compatibility; and
 9. return `eligible_for_legacy_submit` with declarative requirements only.
@@ -419,6 +434,7 @@ The v1 semantic decision reason vocabulary is closed:
 order_identity_mismatch
 policy_identity_mismatch
 policy_version_mismatch
+policy_snapshot_changed
 order_not_user_approved
 order_expired
 authorization_denied
@@ -428,6 +444,7 @@ risk_check_expired
 single_order_risk_failed
 batch_risk_failed
 batch_order_not_accepted
+partial_batch_not_allowed_at_submit
 live_trading_enabled
 policy_kill_switch_engaged
 operator_kill_switch_engaged
@@ -658,6 +675,8 @@ The minimum pure-model case matrix is binding:
 | expired fresh-risk evidence | `blocked/risk_check_expired` |
 | failed single or batch risk | the corresponding closed risk reason |
 | current order absent from accepted batch IDs | `blocked/batch_order_not_accepted` |
+| submit-time batch reports `partial_batch` | `blocked/partial_batch_not_allowed_at_submit` |
+| current policy snapshot changed before submission | `blocked/policy_snapshot_changed` |
 | live, either kill, pause, or unhealthy broker | matching `final_safety` reason |
 | market order with disabled context/capability | `blocked/market_order_disabled` |
 | external paper without snapshot/quote/run/provenance/fence evidence | matching closed paper reason |

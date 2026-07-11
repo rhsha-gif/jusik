@@ -73,8 +73,8 @@ Score formula: `domain*0.30 + tools*0.25 + track*0.25 + continuity*0.10 + coordi
 | `QP-EVT-020A` | GPT-5 Codex fallback implementer | independent reviewer + mission lead | `QP-EVT-010`, Gate 1 accepted | `주식트레이더-exec-events-domain-fallback` / `codex/qp-exec-events-v1-domain-fallback` | new `transitions.py`, `events.py`, `reducer.py`; new event-model/reducer tests | integrated | Deterministic pure replay; strict duplicate/gap/hash/provenance/precedence behavior; no DB or broker imports. | implementation `64cffd6`; audit repairs `cb10b15`, `7e9bd53`; final independent re-audit P0/P1/P2/P3=0; `37 passed`; full `922 passed, 2 skipped`; safe smoke |
 | `QP-EVT-020B` | GPT-5 Codex lead/sub-agent | independent read-only reviewer | `QP-EVT-020A` merged | event integration worktree | narrow SQLite transition import/re-export shim + equality regression only | done | SQLite and pure transition definitions are identical without concurrent ownership overlap. | `447b843`; focused `2 passed`; persistence audit `121 passed`; full `924 passed, 2 skipped`; P0/P1/P2/P3=0 |
 | `QP-EVT-030A` | GPT-5 Codex lead | independent read-only auditor | `QP-EVT-020B` | `주식트레이더-exec-events-store` / `codex/qp-exec-events-v1-store` | schema v11, exact DDL validation, deterministic import anchors, append primitive, typed mutation guard | integrated | Store substrate fails closed on schema/state tampering and preserves deterministic, contiguous, atomic event streams. | `def8cb0`, `e758c53`, `9220328`, `9c45390`; focused `32 passed`; full `956 passed, 2 skipped`; safe smoke; final P0/P1/P2=0 |
-| `QP-EVT-030B` | GPT-5 Codex lead | independent auditor | `QP-EVT-030A` | event integration worktree | exhaustive runtime dual-write and explicit mutation-origin call sites | in_progress | Every authoritative dispatch/reservation/cancel mutation advances its canonical event in the same transaction or rolls back both. | exact call-site map accepted; implementation starting |
-| `QP-EVT-040` | GPT-5 Codex lead | Claude/internally independent reviewer | `QP-EVT-030B` | integration worktree | parity corpus, race/fault/restart tests, report | proposed | Replay equals all authoritative observable fields; no broker side effects; full suite/smoke green. | pending |
+| `QP-EVT-030B` | GPT-5 Codex lead | three independent read-only auditors | `QP-EVT-030A` | `주식트레이더-exec-events-dual-write` / `codex/qp-exec-events-v1-dual-write` | exhaustive runtime dual-write and explicit mutation-origin call sites | integrated | Every authoritative dispatch/reservation/cancel mutation advances its canonical event in the same transaction or rolls back both. | `0c932ad`, `cf9ad49`, `9ed90a9`, `d52321b`, `9cece01`; focused `42 passed`; full `975 passed, 2 skipped`; safe smoke; final P0/P1/P2=0 |
+| `QP-EVT-040` | GPT-5 Codex lead | Claude/internally independent reviewer | `QP-EVT-030B` | dedicated parity worktree | parity corpus, race/fault/restart tests, report | in_progress | Replay equals all authoritative observable fields; no broker side effects; full suite/smoke green. | unblocked by accepted 030B |
 | `QP-EVT-050` | independent read-only auditor | GPT-5 Codex lead | `QP-EVT-040` | no-write audit | complete diff and safety invariants | proposed | P0/P1 zero; no missing dual-write path or widened broker authority. | pending |
 
 ## Ownership map
@@ -122,8 +122,9 @@ No later gate can be waived because an earlier test count is high.
 
 - Gate 1 is accepted and no longer blocks Gate 2.
 - The contract/decomposition review, QP-EVT-020A pure domain, QP-EVT-020B
-  transition shim, and QP-EVT-030A schema-v11 store substrate are accepted.
-  QP-EVT-030B runtime dual-write is the active slice.
+  transition shim, QP-EVT-030A schema-v11 store substrate, and QP-EVT-030B
+  exhaustive runtime dual-write are accepted. QP-EVT-040 parity/race/fault/
+  restart evidence is the active slice.
 - Real KIS paper validation remains manual and is not needed for this fake-only
   development gate.
 - No request for live, secrets, network access, or user-owned dirty-tree changes
@@ -214,6 +215,24 @@ No later gate can be waived because an earlier test count is high.
   Claude contract review `80e05d5` remains the counterpart authority for this
   mission. QP-EVT-030B exhaustive runtime dual-write is now active.
 
+- `2026-07-12 KST` — QP-EVT-030B dual-wrote every runtime authoritative
+  dispatch/reservation/cancel mutation under a typed `mutation_origin` and the
+  transaction-local event guard. Audit repairs tightened exact cancel-create
+  idempotency, legal terminal broker-evidence enrichment, and rejection
+  provenance so a local submission-guard terminal cannot be rewritten as
+  broker reconciliation. The executable rollback matrix covers prepare, claim,
+  paired takeover, interrupted multi-row recovery, terminal dispatch plus
+  reservation release, and cancel create/claim/update. Accepted commits are
+  `0c932ad`, `cf9ad49`, `9ed90a9`, `d52321b`, and `9cece01`; focused event
+  tests are `42 passed`, full backend is `975 passed, 2 skipped`, smoke is
+  mock/live=false/operator blocked, and three final independent re-audits report
+  P0/P1/P2 zero. Claude Code produced the mission's substantive accepted
+  contract review in `80e05d5`; a final diff-only retry raised a context-limited
+  terminal-enrichment concern, while the requested contextual retry hit the
+  Claude session limit. The concern was resolved against contract sections 6/9,
+  exact-copy validation, terminal self-transition rules, and passing valid/
+  invalid terminal regressions. QP-EVT-040 is now active.
+
 ## Handoff record
 
 ```text
@@ -249,3 +268,4 @@ integration_requests:
 | `QP-EVT-020A` | pure canonical event model/reducer | GPT-5 Codex fallback implementer | rework-required | 0 | 3 | 3 | 2 audited repair cycles | `37 passed`; full `922 passed, 2 skipped`; safe smoke; final P0/P1/P2/P3 zero | completed 2026-07-11 KST | 3 |
 | `QP-EVT-020B` | transition compatibility shim | GPT-5 Codex sub-agent | yes | 0 | 0 | 0 | 0 | focused `2 passed`; persistence `121 passed`; full `924 passed, 2 skipped`; safe smoke | completed 2026-07-11 KST | 5 |
 | `QP-EVT-030A` | schema-v11 event-store substrate | GPT-5 Codex lead + independent audit agents | rework-required | 0 | 8 | 1 | 3 audited repair cycles | focused `32 passed`; full `956 passed, 2 skipped`; safe smoke; final P0/P1/P2 zero | completed 2026-07-12 KST | 3 |
+| `QP-EVT-030B` | exhaustive runtime dual-write | GPT-5 Codex lead + three independent audit agents | rework-required | 0 | 4 | 2 | 3 audited repair cycles | focused `42 passed`; full `975 passed, 2 skipped`; safe smoke; final P0/P1/P2 zero | completed 2026-07-12 KST | 3 |

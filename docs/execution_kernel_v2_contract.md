@@ -23,8 +23,11 @@ preserved. Codex hardening commit `6bfdb5d` closes those findings with the
 exact definition-time grammar and runtime provenance rules below. Final
 audits report authorization/version P0/P1/P2=0, purity/decision P0/P1/P2=0,
 and KIS/durable P0/P1=0/P2=1 (the explicitly deferred Gate-070 flag/config
-ADR only). Runtime implementation remains held until this reviewed contract
-lineage is integrated by the mission lead.
+ADR only). The mission-lead integration commit `9fbf035` incorporates the
+reviewed lineage, and `61bccac` records the safe handoff: docs-only scope,
+mock broker, live disabled, and Level 5 blocked with zero submitted operator
+orders. `QP-KER-010` may therefore begin, but no runtime implementation is
+part of this contract gate.
 
 ## 1. Purpose and governing baseline
 

@@ -72,7 +72,7 @@
 | `QP-DD-00` | Claude Fable 5 | — | none | main tree | `docs/qp_drift_daily_workboard.md` | done | 미션·설계·라우팅 확정 | this file |
 | `QP-DD-01` | Claude Fable 5 | Codex (read-only) → fallback 검토자 | `QP-DD-00` | `주식트레이더-drift-daily` / `claude/qp-drift-daily-01` | `quantpilot/packages/core/harness_service.py`, `quantpilot/packages/core/schemas.py`, `quantpilot/tests/unit/test_strategy_drift.py`, `quantpilot/tests/unit/test_strategy_performance_feed.py`, `openapi.json`, `quantpilot/apps/web/src/lib/openapi.d.ts`, `docs/STATUS.md`, this workboard | done | 일별 종가 재평가 + 비용 반영 + 후방호환 스키마, 신규 테스트, 전체 검증 통과 | `6721d24` (main) |
 | `QP-DD-02` | Claude Fable 5 (lead) | — | `QP-DD-01` | main tree | mainline integration | done | 전체 검증 재실행 후 main 병합, STATUS/작업보드 갱신 | main = `6721d24` |
-| `QP-DD-03` | Codex GPT-5.x | Claude Fable 5 (독립 diff 검토) | `QP-DD-02` | `codex/qp-drift-daily-audit` | `harness_service.py`, `schemas.py`, `data/providers.py`, `data/external.py`, `operator/professional_cycle.py`, `services/api/dependencies.py`, `jobs/run_kis_paper_session.py`, `.env.example`, `openapi.json`, `openapi.d.ts`, 관련 unit tests | review | 드리프트 성과 증거 fail-closed 결속 (P0/P1 폐쇄), 안전 기본값 무변경, 테스트 약화 없음 | `f8bb594` → cherry-pick `25182df` |
+| `QP-DD-03` | Codex GPT-5.x | Claude Fable 5 (독립 diff 검토) | `QP-DD-02` | `codex/qp-drift-daily-audit` | `harness_service.py`, `schemas.py`, `data/providers.py`, `data/external.py`, `operator/professional_cycle.py`, `services/api/dependencies.py`, `jobs/run_kis_paper_session.py`, `.env.example`, `openapi.json`, `openapi.d.ts`, 관련 unit tests | done | 드리프트 성과 증거 fail-closed 결속 (P0/P1 폐쇄), 안전 기본값 무변경, 테스트 약화 없음 | `f8bb594` → cherry-pick `25182df` (리드 최종 검토 P0/P1=0, main 통합 완료) |
 | `QP-DD-04` | Claude Fable 5 (lead) | — | `QP-DD-03` | `주식트레이더-claude-drift-final` / `claude/qp-drift-daily-final-review` | cherry-pick + `docs/qp_drift_daily_workboard.md`, `docs/STATUS.md` | done | f8bb594 독립 검토·체리픽, 전체 검증(백엔드/스모크/openapi/프론트) 재실행, 문서 최종화 | 검증 출력은 Checkpoint log 참조 |
 
 ## Design summary (QP-DD-01)
@@ -131,5 +131,19 @@
     `npm run generate:api` 재생성 후 `openapi.d.ts` git diff 없음
   - 프론트 (`quantpilot/apps/web`, 임시 node_modules junction 사용 후 제거): vitest
     `23 passed (7 files)`, `npm run build` 성공 (17.65s)
-- `2026-07-12` — Claude Fable 5 (lead) — 워크보드·STATUS 최종화, 문서 lease 해제. main 통합은
-  사용자/리드 결정 대기 (integration recommendation: **통합 권고**).
+- `2026-07-12` — Claude Fable 5 (lead) — 워크보드·STATUS 최종화, 문서 lease 해제, 통합 권고 확정.
+- `2026-07-12` — Claude Fable 5 (lead) — **mainline 통합 완료**: 리드 최종 검토와 독립 Codex 통합
+  감사가 모두 P0=0, P1=0으로 fast-forward 통합을 권고 → main을
+  `claude/qp-drift-daily-final-review`로 fast-forward (merge commit 없음). 문서 후속 커밋 이전 기준
+  main = `2bbd833` (= `25182df` + 미션 문서 커밋, 조상 `6721d24` 확인). 사용자 untracked 백업 파일은
+  손대지 않음. 통합 후 전체 검증 증거는 아래 체크포인트 참조.
+- `2026-07-12` — Claude Fable 5 (lead) — **통합 후 main 전체 검증 (2bbd833 기준, 오프라인·mock 전용)**:
+  - `git diff --check`: 이상 없음
+  - 전체 백엔드 pytest (junit): `tests=830, failures=0, errors=0, skipped=2` (828 passed)
+  - `run_smoke`: OK — `"broker": "mock"`, `"live_trading_enabled": false`, operator
+    `"status": "blocked"` (`level5_flag_disabled`)
+  - OpenAPI 정확 동기화: 앱 재생성 `openapi.json`이 작업트리 파일과 바이트 단위 일치 (51 paths);
+    `npm run generate:api` 재생성 후 `openapi.d.ts` git diff 없음
+  - 프론트 (`quantpilot/apps/web`): vitest `23 passed (7 files)`, `npm run build` 성공 (26.16s)
+  - 후속 커밋은 문서 2건(`docs/qp_drift_daily_workboard.md`, `docs/STATUS.md`)만 포함 —
+    QP-DD-03 상태 done 반영 및 통합 체크포인트 기록. 미션 종결.

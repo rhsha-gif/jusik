@@ -103,7 +103,8 @@ Level 1~5 자율화 전 과정을 먼저 완성하고, 사람 승인 게이트�
 - **드리프트 성과 증거 fail-closed 결속 (2차, Codex 안전 검토 산출물)** —
   Codex가 `codex/qp-drift-daily-audit`에서 커밋 `f8bb594` 산출, Claude 리드가
   독립 diff 검토(P0/P1 없음) 후 `claude/qp-drift-daily-final-review`에 cherry-pick
-  (`25182df`). ① 정규화 분모를 누적 매수 명목가 → 첫 매수 제안 시점 계좌 equity
+  (`25182df`) → main에 fast-forward 통합 완료 (문서 후속 커밋 이전 기준 main = `2bbd833`).
+  ① 정규화 분모를 누적 매수 명목가 → 첫 매수 제안 시점 계좌 equity
   (`account_equity_at_proposal`+`portfolio_snapshot_id` 동반 증거)로 교체해 백테스트
   MDD와 동일 기준 비교 ② 증거 열화 시 티켓 만료 대신 `strategy_activation_allowed`가
   사유 코드로 실행 차단 (`valuation_status`, 체결 워터마크·시세·캘린더 fingerprint)

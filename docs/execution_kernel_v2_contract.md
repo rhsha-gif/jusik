@@ -19,10 +19,12 @@ and class headers remained open; documentation also needed the complete
 Unicode corpus, Gate-015 ownership/handoff, accurate audit evidence, and
 Gate-070 flag-P2 tracking. Claude Code began a follow-up but reached its session limit
 before producing a reviewed commit; that one-file partial worktree is
-preserved. This Codex hardening revision closes those findings with the exact
-definition-time grammar and runtime provenance rules below. Runtime
-implementation remains held until this revision receives independent P0/P1=0
-cross-checks and is integrated by the mission lead.
+preserved. Codex hardening commit `6bfdb5d` closes those findings with the
+exact definition-time grammar and runtime provenance rules below. Final
+audits report authorization/version P0/P1/P2=0, purity/decision P0/P1/P2=0,
+and KIS/durable P0/P1=0/P2=1 (the explicitly deferred Gate-070 flag/config
+ADR only). Runtime implementation remains held until this reviewed contract
+lineage is integrated by the mission lead.
 
 ## 1. Purpose and governing baseline
 

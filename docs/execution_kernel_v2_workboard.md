@@ -166,7 +166,7 @@ Statuses: `proposed`, `ready`, `in_progress`, `review`, `integrated`, `done`,
 | `QP-KER-000B` | Claude Code exact model to be recorded | GPT-5 Codex lead | `QP-KER-000A` | `주식트레이더-claude-kernel-v2-review` / `claude/qp-kernel-v2-review` | the same two docs in an isolated review branch only | blocked | Preserve partial file; do not claim completion or integrate without a reviewed commit. | one uncommitted contract file; account reset `2026-07-13 00:30 KST` |
 | `QP-KER-000C` | GPT-5 Codex lead | three read-only Codex audits | `QP-KER-000A`, Gate 2 mainline | `주식트레이더-kernel-v2-contract-hardening` / `codex/qp-kernel-v2-contract-hardening` | the same two docs only | done | Rebind to `70219d4`; close decision/auth/purity/durable/KIS findings; no runtime edits. | `2de0965`; auth P0/P1/P2=0, purity P0/P1/P2=0, KIS P0/P1=0/P2=1 |
 | `QP-KER-000D` | Claude Code CLI 2.1.205 / `claude-fable-5` | GPT-5 Codex lead | committed `QP-KER-000C` | `주식트레이더-claude-kernel-v2-final-review` / `claude/qp-kernel-v2-final-review` | the same two docs only | done | Independent final review/revision and first purity closure committed; only two docs changed. | `c74a491`; follow-up `0bbec72`; three post-fix axes consolidated P0=0/P1=2/P2=4 and rejected finality; third attempt stopped at session limit with one preserved uncommitted file |
-| `QP-KER-000E` | GPT-5 Codex lead | three independent read-only audits | `QP-KER-000D` | `주식트레이더-kernel-v2-final-hardening` / `codex/qp-kernel-v2-final-hardening` | the same two docs only | review | Close interpreter/import false positives and every definition-time/runtime escape; bind Gate-015/version and Gate-070 P2 tracking; exact two-doc allowlist; final P0/P1=0. | pre-commit audits: authorization/version P0/P1/P2=0; purity/decision P0/P1/P2=0; KIS/durable P0/P1=0/P2=1 (Gate-070 ADR only); commit pending |
+| `QP-KER-000E` | GPT-5 Codex lead | three independent read-only audits | `QP-KER-000D` | `주식트레이더-kernel-v2-final-hardening` / `codex/qp-kernel-v2-final-hardening` | the same two docs only | done | Close interpreter/import false positives and every definition-time/runtime escape; bind Gate-015/version and Gate-070 P2 tracking; exact two-doc allowlist; final P0/P1=0. | `6bfdb5d`; authorization/version P0/P1/P2=0; purity/decision P0/P1/P2=0; KIS/durable P0/P1=0/P2=1 (Gate-070 ADR only) |
 | `QP-KER-010` | GPT-5 Codex lead | Claude Code + independent read-only audit | accepted `QP-KER-000E` | new `주식트레이더-kernel-v2-pure` / `codex/qp-kernel-v2-pure` | `quantpilot/packages/core/execution/kernel.py`, `quantpilot/tests/unit/test_execution_kernel_v2.py` | proposed | Strict deeply frozen pure model, import allowlist, closed decision order, deterministic fingerprint, zero side effects. | pending |
 | `QP-KER-015` | GPT-5 Codex lead | independent safety audit | `QP-KER-010` | separate expiry-hardening worktree | `quantpilot/packages/core/harness_service.py`, `quantpilot/packages/core/execution/paper_submission.py`, `quantpilot/packages/core/execution/state_machine.py`, `quantpilot/packages/db/sqlite_repositories.py`, `quantpilot/jobs/run_kis_paper_session.py`, focused expiry/coordinator/session tests, and new `quantpilot/tests/unit/test_strategy_version_matching.py` only | proposed | Use existing v11 order payload (no migration), strict expiry parse/effective deadline/reopen test; both safety fences, preclaim/restart/pre-POST; no ambiguous retry/release; total fail-closed `strategy_versions_match` hardening with superscript/fullwidth Unicode regressions before any version parity. | pending |
 | `QP-KER-020` | GPT-5 Codex lead | independent audit | `QP-KER-015` | new isolated worktree / `codex/qp-kernel-v2-shadow` | `quantpilot/packages/core/execution/kernel_shadow.py`, focused tests, minimal stage-local adapters/config boundary | proposed | `off` default; unknown mode fails closed; real blocked-path evidence prefixes; zero authoritative mutation; no second broker callable. | pending |
@@ -444,6 +444,12 @@ Required invariant evidence:
   purity/decision P0/P1/P2=0; KIS/durable P0/P1=0/P2=1, where the sole P2 is
   the deliberately deferred Gate-070 flag/config ADR and does not block Gates
   010/015. All three axes approve integration after the two-doc commit checks.
+- `2026-07-13 KST` — QP-KER-000E committed as `6bfdb5d`
+  (`docs(kernel): close final static purity gate`). Post-commit status is clean;
+  `git diff --check` and the exact two-document allowlist pass. The unrelated
+  automatic Git maintenance attempt could not prune a stale administrative
+  worktree entry due to permissions; no worktree or user file was deleted or
+  modified.
 
 ## Handoff record
 
@@ -531,10 +537,10 @@ owned_paths:
   - docs/execution_kernel_v2_workboard.md
 acceptance_met: yes for contract content; authorization/version P0/P1/P2=0;
   purity/decision P0/P1/P2=0; KIS/durable P0/P1=0/P2=1 (Gate-070 ADR only);
-  exact two-doc allowlist; commit evidence pending
-exact_checks: pre-commit git diff --check and two-doc name allowlist passed;
-  pending commit-time status and
-  git diff --name-only 0bbec72..HEAD
+  exact two-doc allowlist
+commit: 6bfdb5d (`docs(kernel): close final static purity gate`)
+exact_checks: pre/post-commit git diff --check passed; clean status;
+  git diff --name-only 0bbec72..6bfdb5d returned exactly the two owned docs
 known_limits: docs-only; Gate-015 runtime expiry/version hardening and manual
   KIS Gate P remain open; Gate-070 flag/config P2 blocks Gate 070 only
 integration_requests: after P0/P1=0, mission lead integrates the full
@@ -550,7 +556,7 @@ integration_requests: after P0/P1=0, mission lead integrates the full
 | `QP-KER-000C` | contract hardening | GPT-5 Codex desktop + three read-only audits | accepted Codex gate | 0 | 0 | 1 | 3 | two-doc allowlist + diff check | complete | 4 |
 | `QP-KER-000D` | final independent binding review | Claude Code CLI 2.1.205 / `claude-fable-5` | review artifact accepted; later purity closure superseded | 0 | 2 found, 2 closed | 3 found, 3 closed | 0 | reviewed two-doc commit + diff/status/name-only checks | complete artifact; lineage continues through `QP-KER-000E` | 4 |
 | `QP-KER-000D` follow-up | purity-audit closure | Claude Code / `claude-fable-5` | closure committed, required cross-check rejected it | 0 | 1 initially targeted; 2 remained | 1 initially targeted; consolidated P2=4 remained | 0 | two-doc allowlist + three post-fix audit axes | rejected/superseded by `QP-KER-000E` | 2 |
-| `QP-KER-000E` | final static-purity closure | GPT-5 Codex desktop | accepted content | 0 | 0 after closure | 1 deferred Gate-070-only | 1 | two-doc allowlist + three read-only audits | commit pending | pending |
+| `QP-KER-000E` | final static-purity closure | GPT-5 Codex desktop | accepted | 0 | 0 after closure | 1 deferred Gate-070-only | 1 | two-doc allowlist + three read-only audits | complete `6bfdb5d` | 4 |
 
 - Routing decision quality: pending counterpart and implementation evidence.
 - Capability scorecard update: append only after an accepted task artifact.

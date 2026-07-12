@@ -57,6 +57,7 @@ from quantpilot.packages.core.operator.service import OperatorService
 from quantpilot.packages.core.risk.position_exit import PositionRiskInput
 from quantpilot.packages.core.schemas import (
     BrokerMode,
+    DataMode,
     ExecutionMode,
     OrderPlan,
     OrderType,
@@ -412,6 +413,7 @@ def build_runtime(
         harness = HarnessService(
             security_provider=security_provider,
             market_data_provider=historical_market_data,
+            data_mode=DataMode(config.historical_data_mode),
             pending_liquidation_provider=store,
             external_paper_broker=broker,
             paper_submission_coordinator=coordinator,

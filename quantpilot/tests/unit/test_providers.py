@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from datetime import date
 from pathlib import Path
 from typing import Any
 
@@ -20,6 +21,7 @@ from quantpilot.packages.core.harness_service import HarnessService
 from quantpilot.packages.core.schemas import DataMode, SignalAction
 from quantpilot.packages.core.universe.builder import FIXTURE_SECURITIES
 from quantpilot.packages.db.repositories import RepositoryRegistry
+from quantpilot.services.api import dependencies as api_dependencies
 
 LOCAL_DATA_DIR = Path(__file__).resolve().parents[1] / "fixtures" / "local_data"
 INVALID_DATA_DIR = LOCAL_DATA_DIR / "invalid"
@@ -228,6 +230,41 @@ def test_factory_from_env_builds_local_historical_providers(monkeypatch: pytest.
 
     assert isinstance(sp, CsvSecurityProvider)
     assert isinstance(mp, CsvMarketDataProvider)
+
+
+def test_factory_from_env_binds_configured_krx_holidays(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setenv("DATA_MODE", "local_historical")
+    monkeypatch.setenv("LOCAL_DATA_DIR", str(LOCAL_DATA_DIR))
+    monkeypatch.setenv("KRX_HOLIDAYS", "2026-01-01,2026-02-17")
+
+    _, market_data = build_providers_from_env()
+
+    assert market_data.exchange_calendar.is_trading_session(  # type: ignore[attr-defined]
+        date(2026, 1, 1)
+    ) is False
+
+
+def test_factory_from_env_rejects_invalid_krx_holiday(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setenv("DATA_MODE", "local_historical")
+    monkeypatch.setenv("LOCAL_DATA_DIR", str(LOCAL_DATA_DIR))
+    monkeypatch.setenv("KRX_HOLIDAYS", "not-a-date")
+
+    with pytest.raises(ProviderError, match="KRX_HOLIDAYS"):
+        build_providers_from_env()
+
+
+def test_api_service_config_key_tracks_krx_holiday_changes(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.delenv("KRX_HOLIDAYS", raising=False)
+    before = api_dependencies._current_service_config_key()
+    monkeypatch.setenv("KRX_HOLIDAYS", "2026-01-01")
+
+    assert api_dependencies._current_service_config_key() != before
 
 
 # --- HarnessService default construction & injection ------------------------

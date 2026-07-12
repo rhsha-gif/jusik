@@ -34,6 +34,7 @@ from pathlib import Path
 from typing import Any, Protocol, runtime_checkable
 
 from quantpilot.packages.core.data.mode import resolve_data_mode
+from quantpilot.packages.core.data.quality import ExchangeCalendar, SimpleKrxCalendar
 from quantpilot.packages.core.schemas import DataMode
 from quantpilot.packages.core.signals.service import load_fixture_ohlcv
 from quantpilot.packages.core.technical.indicators import (
@@ -94,6 +95,11 @@ class FixtureMarketDataProvider:
     def __init__(self) -> None:
         self._bars: list[dict[str, Any]] = load_fixture_ohlcv()
         self._price_history: list[dict[str, Any]] = fixture_price_history()
+        self._calendar: ExchangeCalendar = SimpleKrxCalendar()
+
+    @property
+    def exchange_calendar(self) -> ExchangeCalendar:
+        return self._calendar
 
     def get_bars(self) -> list[dict[str, Any]]:
         return [dict(bar) for bar in self._bars]
@@ -243,10 +249,20 @@ class CsvMarketDataProvider:
     :func:`calculate_technical_indicators`.
     """
 
-    def __init__(self, path: str | Path) -> None:
+    def __init__(
+        self,
+        path: str | Path,
+        *,
+        calendar: ExchangeCalendar | None = None,
+    ) -> None:
         self._path = Path(path)
+        self._calendar = calendar or SimpleKrxCalendar()
         self._price_history = self._load()
         self._signal_date = max(row["_date"] for row in self._price_history)
+
+    @property
+    def exchange_calendar(self) -> ExchangeCalendar:
+        return self._calendar
 
     def _load(self) -> list[dict[str, Any]]:
         header, rows = _read_rows(self._path)
@@ -360,6 +376,7 @@ def build_providers(
     mode: DataMode,
     *,
     data_dir: str | Path | None = None,
+    calendar: ExchangeCalendar | None = None,
     external_security_provider: SecurityProvider | None = None,
     external_market_data_provider: MarketDataProvider | None = None,
 ) -> tuple[SecurityProvider, MarketDataProvider]:
@@ -374,7 +391,10 @@ def build_providers(
     if mode == DataMode.local_historical:
         base = resolve_local_data_dir(data_dir)
         security_provider = CsvSecurityProvider(base / "securities.csv")
-        market_data_provider = CsvMarketDataProvider(base / "ohlcv.csv")
+        market_data_provider = CsvMarketDataProvider(
+            base / "ohlcv.csv",
+            calendar=calendar,
+        )
         _validate_local_symbol_coverage(security_provider, market_data_provider)
         return security_provider, market_data_provider
     if mode == DataMode.external_historical:
@@ -399,4 +419,27 @@ def build_providers_from_env(
     data_dir: str | Path | None = None,
 ) -> tuple[SecurityProvider, MarketDataProvider]:
     """Build providers from DATA_MODE/LOCAL_DATA_DIR, failing closed on bad config."""
-    return build_providers(resolve_data_mode(), data_dir=data_dir)
+    return build_providers(
+        resolve_data_mode(),
+        data_dir=data_dir,
+        calendar=_configured_krx_calendar_from_env(),
+    )
+
+
+def _configured_krx_calendar_from_env() -> ExchangeCalendar:
+    raw = os.environ.get(
+        "KRX_HOLIDAYS",
+        os.environ.get("EXTERNAL_HISTORICAL_HOLIDAYS", ""),
+    ).strip()
+    holidays: list[date] = []
+    for item in raw.split(","):
+        token = item.strip()
+        if not token:
+            continue
+        try:
+            holidays.append(date.fromisoformat(token))
+        except ValueError:
+            raise ProviderError(
+                "KRX_HOLIDAYS must contain comma-separated YYYY-MM-DD dates"
+            ) from None
+    return SimpleKrxCalendar(holidays=tuple(holidays))

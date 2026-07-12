@@ -229,6 +229,10 @@ class ExternalHistoricalMarketDataProvider:
         self._signal_date = max(row["_date"] for row in self._price_history)
         self._provenance = self._build_provenance(response)
 
+    @property
+    def exchange_calendar(self) -> ExchangeCalendar:
+        return self._calendar
+
     def _map_payloads(self, payloads: list[dict[str, Any]]) -> list[dict[str, Any]]:
         parsed: list[dict[str, Any]] = []
         for index, payload in enumerate(payloads, start=1):

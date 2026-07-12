@@ -462,6 +462,12 @@ class ProposalExplanation(HarnessModel):
     quote_age_seconds: float
     limit_price: float | None = None
     estimated_notional: float
+    account_equity_at_proposal: float | None = Field(
+        default=None,
+        gt=0,
+        allow_inf_nan=False,
+    )
+    portfolio_snapshot_id: str | None = None
     estimated_cost_bps: float = 0.0
     stop_price_hint: float | None = None
     take_profit_hint: float | None = None
@@ -472,6 +478,16 @@ class ProposalExplanation(HarnessModel):
     idempotency_key: str
     policy_version: int
     warnings: list[str] = Field(default_factory=list)
+
+    @model_validator(mode="after")
+    def equity_evidence_is_both_or_neither(self) -> "ProposalExplanation":
+        has_equity = self.account_equity_at_proposal is not None
+        has_snapshot = bool((self.portfolio_snapshot_id or "").strip())
+        if has_equity != has_snapshot:
+            raise ValueError(
+                "account equity evidence requires both equity and portfolio snapshot id"
+            )
+        return self
 
 
 class AuthorityCheckStep(HarnessModel):
@@ -644,6 +660,29 @@ class StrategyPerformanceRecord(HarnessModel):
     # Older records predate cost/valuation tracking; the defaults describe them.
     cost_basis: str = "none"
     valuation: str = "last_fill_price"
+    normalization_basis: str = "legacy_cumulative_buy_notional"
+    normalization_equity: float | None = Field(default=None, gt=0)
+    normalization_snapshot_id: str | None = None
+    valuation_status: Literal[
+        "legacy_unknown",
+        "complete",
+        "partial",
+        "stale",
+        "provider_error",
+        "fill_only",
+        "reconciliation_required",
+    ] = "legacy_unknown"
+    market_data_as_of_session: date | None = None
+    market_data_fingerprint: str | None = None
+    market_data_close_count: int = Field(default=0, ge=0)
+    data_mode: DataMode | None = None
+    has_open_positions: bool = False
+    included_fill_count: int = Field(default=0, ge=0)
+    included_fill_fingerprint: str | None = None
+    calendar_name: str | None = None
+    valuation_start_session: date | None = None
+    calendar_as_of_session: date | None = None
+    calendar_fingerprint: str | None = None
 
 
 class StrategyApprovalTicketStatus(str, Enum):

@@ -1,8 +1,9 @@
 from __future__ import annotations
 
 import hashlib
-from datetime import date, datetime, timedelta, timezone
-from math import isclose
+import json
+from datetime import date, datetime, time, timedelta, timezone
+from math import isclose, isfinite
 from typing import Callable
 from zoneinfo import ZoneInfo
 
@@ -42,6 +43,7 @@ from quantpilot.packages.core.risk.types import BatchRiskConfig
 from quantpilot.packages.core.schemas import (
     BrokerMode,
     BrokerOrder,
+    DataMode,
     ExecutionMode,
     Fill,
     GuardrailState,
@@ -82,6 +84,8 @@ from quantpilot.packages.core.data.providers import (
     SecurityProvider,
     build_providers_from_env,
 )
+from quantpilot.packages.core.data.mode import resolve_data_mode
+from quantpilot.packages.core.data.quality import ExchangeCalendar, SimpleKrxCalendar
 from quantpilot.packages.core.signals.service import generate_signals
 from quantpilot.packages.core.strategies.loader import load_default_strategy
 from quantpilot.packages.core.technical.indicators import calculate_technical_indicators
@@ -91,6 +95,29 @@ from quantpilot.packages.db.repositories import RepositoryRegistry
 
 
 _SAFETY_FIELD_UNSET = object()
+_PERFORMANCE_RECORD_UNSET = object()
+_KST = ZoneInfo("Asia/Seoul")
+_KRX_REGULAR_CLOSE = time(15, 30)
+_KRX_CLOSE_FINALITY_DELAY = timedelta(minutes=30)
+
+
+def _latest_completed_krx_session(
+    observed_at: datetime,
+    calendar: ExchangeCalendar,
+) -> date:
+    local = observed_at.astimezone(_KST)
+    session = local.date()
+    finalized_at = datetime.combine(
+        session,
+        _KRX_REGULAR_CLOSE,
+        tzinfo=_KST,
+    ) + _KRX_CLOSE_FINALITY_DELAY
+    if local < finalized_at:
+        session -= timedelta(days=1)
+    completed = calendar.previous_trading_session(session)
+    if completed is None:
+        raise RuntimeError("performance calendar has no completed KRX session")
+    return completed
 
 
 class HarnessService:
@@ -100,6 +127,9 @@ class HarnessService:
         *,
         security_provider: SecurityProvider | None = None,
         market_data_provider: MarketDataProvider | None = None,
+        data_mode: DataMode = DataMode.fixture,
+        performance_clock: Callable[[], datetime] = utc_now,
+        performance_calendar: ExchangeCalendar | None = None,
         pending_liquidation_provider: object | None = None,
         external_paper_broker: KisPaperBrokerAdapter | None = None,
         paper_submission_coordinator: DurablePaperSubmissionCoordinator | None = None,
@@ -126,6 +156,14 @@ class HarnessService:
         # Fixtures stay the default; local/historical providers are injected explicitly.
         self.security_provider: SecurityProvider = security_provider or FixtureSecurityProvider()
         self.market_data_provider: MarketDataProvider = market_data_provider or FixtureMarketDataProvider()
+        self.data_mode = data_mode
+        self.performance_clock = performance_clock
+        provider_calendar = getattr(self.market_data_provider, "exchange_calendar", None)
+        self.performance_calendar = (
+            performance_calendar
+            or provider_calendar
+            or SimpleKrxCalendar()
+        )
         self.pending_liquidation_provider = pending_liquidation_provider
         self.external_paper_broker = external_paper_broker
         self.paper_submission_coordinator = paper_submission_coordinator
@@ -145,11 +183,13 @@ class HarnessService:
 
     @classmethod
     def from_environment(cls, repositories: RepositoryRegistry | None = None) -> "HarnessService":
+        data_mode = resolve_data_mode()
         security_provider, market_data_provider = build_providers_from_env()
         return cls(
             repositories,
             security_provider=security_provider,
             market_data_provider=market_data_provider,
+            data_mode=data_mode,
         )
 
     def parse_policy(self, text: str = DEFAULT_POLICY_TEXT, *, user_id: str = "fixture-user") -> UserPolicy:
@@ -1130,6 +1170,8 @@ class HarnessService:
                 quote_age_seconds=round(max(0.0, quote_age), 3),
                 limit_price=intent.limit_price,
                 estimated_notional=intent.notional,
+                account_equity_at_proposal=portfolio_snapshot.equity,
+                portfolio_snapshot_id=portfolio_snapshot.snapshot_id,
                 stop_price_hint=signal.stop_price_hint if signal else None,
                 take_profit_hint=signal.take_profit_hint if signal else None,
                 risk_checks_passed=risk_check.passed_checks,
@@ -1730,71 +1772,221 @@ class HarnessService:
         )
         return record
 
-    def compute_strategy_performance(
-        self, strategy_id: str, strategy_version: str
-    ) -> StrategyPerformanceRecord | None:
-        """Accumulate a fee-aware, daily-revalued PnL curve for one strategy.
+    @staticmethod
+    def _performance_fill_time_utc(fill: Fill) -> datetime:
+        if fill.filled_at.tzinfo is None:
+            return fill.filled_at.replace(tzinfo=timezone.utc)
+        return fill.filled_at.astimezone(timezone.utc)
 
-        Fills attribute to a strategy through OrderPlan.explanation. Cash
-        flows apply the confirmed KIS retail cost basis (commission per side,
-        sell tax; no slippage term because actual fill prices already embed
-        it), and open positions are revalued at each session close from the
-        active market-data provider so drawdowns between fills are observed.
-        A symbol/day without a close keeps the last observed price — the feed
-        must never raise, or drift monitoring would stop on a data gap. MDD /
-        return are expressed against the cumulative buy notional. Returns
-        ``None`` when the strategy has no attributed buy fills yet.
-        """
-        plans_by_id = {plan.order_plan_id: plan for plan in self.repositories.order_plans.list()}
-        attributed: list[tuple[Fill, str]] = []
+    def _strategy_fill_evidence(
+        self,
+        strategy_id: str,
+        strategy_version: str,
+    ) -> list[tuple[Fill, str, ProposalExplanation]]:
+        plans_by_id = {
+            plan.order_plan_id: plan
+            for plan in self.repositories.order_plans.list()
+        }
+        evidence: list[tuple[Fill, str, ProposalExplanation]] = []
         for fill in self.repositories.fills.list():
             plan = plans_by_id.get(fill.order_plan_id)
             if plan is None or plan.explanation is None:
                 continue
+            explanation = plan.explanation
             if (
-                plan.explanation.strategy_id == strategy_id
-                and plan.explanation.strategy_version == strategy_version
+                explanation.strategy_id == strategy_id
+                and explanation.strategy_version == strategy_version
             ):
-                attributed.append((fill, plan.intent.side))
+                evidence.append((fill, plan.intent.side, explanation))
+        evidence.sort(key=lambda item: self._performance_fill_time_utc(item[0]))
+        return evidence
 
-        def fill_time_utc(fill: Fill) -> datetime:
-            # Naive timestamps would make the sort raise against aware ones,
-            # and non-UTC zones would shift the session-date grouping.
-            if fill.filled_at.tzinfo is None:
-                return fill.filled_at.replace(tzinfo=timezone.utc)
-            return fill.filled_at.astimezone(timezone.utc)
+    @staticmethod
+    def _strategy_fill_fingerprint(
+        evidence: list[tuple[Fill, str, ProposalExplanation]],
+    ) -> str:
+        payload = [
+            {
+                "fill": fill.model_dump(mode="json"),
+                "side": side,
+                "strategy_id": explanation.strategy_id,
+                "strategy_version": explanation.strategy_version,
+                "account_equity_at_proposal": explanation.account_equity_at_proposal,
+                "portfolio_snapshot_id": explanation.portfolio_snapshot_id,
+            }
+            for fill, side, explanation in evidence
+        ]
+        payload.sort(key=lambda item: str(item["fill"]["fill_id"]))
+        canonical = json.dumps(payload, sort_keys=True, separators=(",", ":"))
+        return "sha256:" + hashlib.sha256(canonical.encode("utf-8")).hexdigest()
 
-        attributed.sort(key=lambda item: fill_time_utc(item[0]))
-        if not attributed:
+    def _performance_calendar_fingerprint(
+        self,
+        start_session: date,
+        end_session: date,
+    ) -> str:
+        payload = {
+            "calendar_name": self.performance_calendar.name,
+            "start_session": start_session.isoformat(),
+            "end_session": end_session.isoformat(),
+            "trading_sessions": [
+                session.isoformat()
+                for session in self.performance_calendar.trading_sessions(
+                    start_session,
+                    end_session,
+                )
+            ],
+        }
+        canonical = json.dumps(payload, sort_keys=True, separators=(",", ":"))
+        return "sha256:" + hashlib.sha256(canonical.encode("utf-8")).hexdigest()
+
+    def _performance_close_snapshot(
+        self,
+        *,
+        symbols: set[str],
+        start_session: date,
+        end_session: date,
+    ) -> tuple[dict[tuple[str, date], float], bool]:
+        try:
+            price_history = list(self.market_data_provider.get_price_history())
+        except Exception:
+            return {}, True
+
+        closes: dict[tuple[str, date], float] = {}
+        for row in price_history:
+            try:
+                symbol = str(
+                    row.get("symbol") or row.get("ticker") or ""
+                ).strip().upper()
+                if symbol not in symbols:
+                    continue
+                session = date.fromisoformat(str(row.get("date")))
+                close = float(row["close"])
+            except (
+                AttributeError,
+                KeyError,
+                OverflowError,
+                TypeError,
+                ValueError,
+            ):
+                continue
+            if (
+                start_session <= session <= end_session
+                and self.performance_calendar.is_trading_session(session)
+                and close > 0
+                and isfinite(close)
+            ):
+                closes[(symbol, session)] = close
+        return closes, False
+
+    @staticmethod
+    def _performance_close_fingerprint(
+        closes: dict[tuple[str, date], float],
+    ) -> str:
+        payload = [
+            {
+                "symbol": symbol,
+                "session": session.isoformat(),
+                "close": close,
+            }
+            for (symbol, session), close in sorted(closes.items())
+        ]
+        canonical = json.dumps(payload, sort_keys=True, separators=(",", ":"))
+        return "sha256:" + hashlib.sha256(canonical.encode("utf-8")).hexdigest()
+
+    def compute_strategy_performance(
+        self, strategy_id: str, strategy_version: str
+    ) -> StrategyPerformanceRecord | None:
+        """Build fail-closed strategy PnL evidence from fills and daily closes."""
+        evaluated_at = self.performance_clock()
+        if evaluated_at.tzinfo is None:
+            evaluated_at = evaluated_at.replace(tzinfo=timezone.utc)
+        else:
+            evaluated_at = evaluated_at.astimezone(timezone.utc)
+
+        all_evidence = self._strategy_fill_evidence(strategy_id, strategy_version)
+        evidence = [
+            item
+            for item in all_evidence
+            if self._performance_fill_time_utc(item[0])
+            <= evaluated_at + timedelta(seconds=5)
+        ]
+        future_fill_detected = len(evidence) != len(all_evidence)
+        fill_fingerprint = self._strategy_fill_fingerprint(evidence)
+        if not evidence:
+            if future_fill_detected:
+                return StrategyPerformanceRecord(
+                    strategy_id=strategy_id,
+                    strategy_version=strategy_version,
+                    as_of=evaluated_at,
+                    realized_max_drawdown=0.0,
+                    realized_total_return=0.0,
+                    observation_days=1,
+                    source="auto_feed",
+                    cost_basis=KIS_RETAIL_COST_BASIS,
+                    valuation="last_fill_price",
+                    normalization_basis="reconciliation_required",
+                    valuation_status="reconciliation_required",
+                    data_mode=self.data_mode,
+                    included_fill_count=0,
+                    included_fill_fingerprint=fill_fingerprint,
+                    calendar_name=self.performance_calendar.name,
+                )
             return None
+
+        latest_completed_session = _latest_completed_krx_session(
+            evaluated_at,
+            self.performance_calendar,
+        )
+
+        def fill_session_date(fill: Fill) -> date:
+            return self._performance_fill_time_utc(fill).astimezone(_KST).date()
+
+        def fill_local_time(fill: Fill) -> time:
+            return self._performance_fill_time_utc(fill).astimezone(_KST).time()
+
+        def fill_symbol(fill: Fill) -> str:
+            return fill.symbol.strip().upper()
 
         fee_rate = KIS_BANKIS_ONLINE_FEE_BPS / 10_000.0
         sell_tax_rate = KRX_SELL_TAX_BPS_FROM_2026 / 10_000.0
-        first_day = fill_time_utc(attributed[0][0]).date()
-        symbols = {fill.symbol.upper() for fill, _ in attributed}
-        closes: dict[tuple[str, date], float] = {}
-        for row in self.market_data_provider.get_price_history():
-            symbol = str(row.get("symbol") or row.get("ticker") or "").upper()
-            if symbol not in symbols:
-                continue
-            try:
-                session = date.fromisoformat(str(row.get("date")))
-                close = float(row["close"])
-            except (KeyError, TypeError, ValueError):
-                continue
-            if session >= first_day and close > 0:
-                closes[(symbol, session)] = close
+        first_day = fill_session_date(evidence[0][0])
+        symbols = {fill_symbol(fill) for fill, _, _ in evidence}
+        closes, provider_failed = self._performance_close_snapshot(
+            symbols=symbols,
+            start_session=first_day,
+            end_session=latest_completed_session,
+        )
 
-        fills_by_day: dict[date, list[tuple[Fill, str]]] = {}
-        for fill, side in attributed:
-            fills_by_day.setdefault(fill_time_utc(fill).date(), []).append((fill, side))
+        fills_by_day: dict[
+            date,
+            list[tuple[Fill, str, ProposalExplanation]],
+        ] = {}
+        for item in evidence:
+            fills_by_day.setdefault(fill_session_date(item[0]), []).append(item)
 
+        completed_session_list = self.performance_calendar.trading_sessions(
+            first_day,
+            latest_completed_session,
+        )
+        completed_sessions = set(completed_session_list)
+        evaluation_days = set(fills_by_day) | completed_sessions
         cash = 0.0
-        invested = 0.0
         positions: dict[str, float] = {}
+        position_cost_basis: dict[str, float] = {}
+        fallback_capital_base = 0.0
+        fallback_capital_session: date | None = None
+        normalization_equity: float | None = None
+        normalization_snapshot_id: str | None = None
+        normalization_evidence_complete = True
+        inventory_consistent = not future_fill_detected
         last_price: dict[str, float] = {}
         curve: list[float] = []
         observed_days: set[date] = set()
+        any_daily_close_applied = False
+        missing_close_sessions: set[date] = set()
+        awaiting_close_symbols: set[str] = set()
+        market_data_as_of_session: date | None = None
 
         def mark_equity() -> float:
             return cash + sum(
@@ -1803,42 +1995,199 @@ class HarnessService:
                 if quantity > 0
             )
 
-        for day in sorted(set(fills_by_day) | {session for _, session in closes}):
-            for fill, side in fills_by_day.get(day, ()):
-                last_price[fill.symbol] = fill.price
-                if side == "buy":
-                    cash -= fill.notional * (1.0 + fee_rate)
-                    invested += fill.notional
-                    positions[fill.symbol] = positions.get(fill.symbol, 0.0) + fill.quantity
+        def apply_fill(
+            fill: Fill,
+            side: str,
+            explanation: ProposalExplanation,
+            day: date,
+        ) -> None:
+            nonlocal cash
+            nonlocal fallback_capital_base
+            nonlocal fallback_capital_session
+            nonlocal inventory_consistent
+            nonlocal normalization_evidence_complete
+            nonlocal normalization_equity
+            nonlocal normalization_snapshot_id
+
+            symbol = fill_symbol(fill)
+            last_price[symbol] = fill.price
+            if side == "buy":
+                account_equity = explanation.account_equity_at_proposal
+                snapshot_id = (explanation.portfolio_snapshot_id or "").strip()
+                if (
+                    account_equity is None
+                    or not isfinite(account_equity)
+                    or not snapshot_id
+                ):
+                    normalization_evidence_complete = False
+                elif normalization_equity is None:
+                    normalization_equity = account_equity
+                    normalization_snapshot_id = snapshot_id
+                cash -= fill.notional * (1.0 + fee_rate)
+                positions[symbol] = positions.get(symbol, 0.0) + fill.quantity
+                position_cost_basis[symbol] = (
+                    position_cost_basis.get(symbol, 0.0) + fill.notional
+                )
+            else:
+                available_quantity = max(0.0, positions.get(symbol, 0.0))
+                matched_quantity = min(available_quantity, fill.quantity)
+                if fill.quantity > available_quantity + 1e-9:
+                    inventory_consistent = False
+                matched_ratio = matched_quantity / fill.quantity
+                matched_notional = fill.notional * matched_ratio
+                cash += matched_notional * (1.0 - fee_rate - sell_tax_rate)
+                remaining_quantity = available_quantity - matched_quantity
+                if available_quantity > 0:
+                    remaining_fraction = remaining_quantity / available_quantity
+                    remaining_basis = (
+                        position_cost_basis.get(symbol, 0.0)
+                        * remaining_fraction
+                    )
                 else:
-                    cash += fill.notional * (1.0 - fee_rate - sell_tax_rate)
-                    positions[fill.symbol] = positions.get(fill.symbol, 0.0) - fill.quantity
-                curve.append(mark_equity())
-                observed_days.add(day)
-            if any(quantity > 0 for quantity in positions.values()):
-                for symbol in positions:
-                    close = closes.get((symbol.upper(), day))
-                    if close is not None:
+                    remaining_basis = 0.0
+                positions[symbol] = remaining_quantity
+                if remaining_quantity > 0:
+                    position_cost_basis[symbol] = remaining_basis
+                else:
+                    position_cost_basis.pop(symbol, None)
+                    awaiting_close_symbols.discard(symbol)
+
+            current_cost_basis = sum(position_cost_basis.values())
+            if fallback_capital_session is None and current_cost_basis > 0:
+                fallback_capital_session = day
+            if day == fallback_capital_session:
+                fallback_capital_base = max(
+                    fallback_capital_base,
+                    current_cost_basis,
+                )
+            curve.append(mark_equity())
+            observed_days.add(day)
+
+        for day in sorted(evaluation_days):
+            day_fills = fills_by_day.get(day, [])
+            if day in completed_sessions:
+                pre_close = [
+                    item
+                    for item in day_fills
+                    if fill_local_time(item[0]) < _KRX_REGULAR_CLOSE
+                ]
+                post_close = [
+                    item
+                    for item in day_fills
+                    if fill_local_time(item[0]) >= _KRX_REGULAR_CLOSE
+                ]
+            else:
+                pre_close = []
+                post_close = day_fills
+
+            for fill, side, explanation in pre_close:
+                apply_fill(fill, side, explanation, day)
+
+            if day in completed_sessions:
+                open_symbols = [
+                    symbol
+                    for symbol, quantity in positions.items()
+                    if quantity > 0
+                ]
+                if open_symbols:
+                    day_complete = True
+                    for symbol in open_symbols:
+                        close = closes.get((symbol, day))
+                        if close is None:
+                            day_complete = False
+                            continue
                         last_price[symbol] = close
-                curve.append(mark_equity())
-                observed_days.add(day)
-        if not curve or invested <= 0:
+                        awaiting_close_symbols.discard(symbol)
+                        any_daily_close_applied = True
+                    if day_complete:
+                        market_data_as_of_session = day
+                    else:
+                        missing_close_sessions.add(day)
+                    curve.append(mark_equity())
+                    observed_days.add(day)
+
+            for fill, side, explanation in post_close:
+                symbol = fill_symbol(fill)
+                apply_fill(fill, side, explanation, day)
+                if positions.get(symbol, 0.0) > 0:
+                    awaiting_close_symbols.add(symbol)
+
+        if not curve:
             return None
 
-        peak = 0.0
-        drawdown_abs = 0.0
-        for value in curve:
+        if not inventory_consistent:
+            normalization_basis = "reconciliation_required"
+        elif normalization_equity is None or not normalization_evidence_complete:
+            normalization_basis = "degraded_unbound_equity"
+        else:
+            normalization_basis = "first_order_account_equity"
+
+        capital_base = normalization_equity or fallback_capital_base or 1.0
+        peak = capital_base
+        max_drawdown = 0.0
+        for value in (capital_base + pnl for pnl in curve):
             peak = max(peak, value)
-            drawdown_abs = max(drawdown_abs, peak - value)
+            if peak > 0:
+                max_drawdown = max(max_drawdown, (peak - value) / peak)
+
+        has_open_positions = any(quantity > 0 for quantity in positions.values())
+        if not inventory_consistent:
+            valuation_status = "reconciliation_required"
+        elif provider_failed:
+            valuation_status = "provider_error"
+        elif missing_close_sessions:
+            if not any_daily_close_applied:
+                valuation_status = "fill_only"
+            elif latest_completed_session in missing_close_sessions:
+                valuation_status = "stale"
+            else:
+                valuation_status = "partial"
+        elif awaiting_close_symbols:
+            valuation_status = (
+                "stale" if any_daily_close_applied else "fill_only"
+            )
+        elif not any_daily_close_applied:
+            valuation_status = "fill_only"
+        elif (
+            has_open_positions
+            and market_data_as_of_session != latest_completed_session
+        ):
+            valuation_status = "stale"
+        else:
+            valuation_status = "complete"
+
         return StrategyPerformanceRecord(
             strategy_id=strategy_id,
             strategy_version=strategy_version,
-            realized_max_drawdown=drawdown_abs / invested,
-            realized_total_return=curve[-1] / invested,
+            as_of=evaluated_at,
+            realized_max_drawdown=max_drawdown,
+            realized_total_return=curve[-1] / capital_base,
             observation_days=len(observed_days),
             source="auto_feed",
             cost_basis=KIS_RETAIL_COST_BASIS,
-            valuation="daily_close",
+            valuation=(
+                "daily_close"
+                if valuation_status == "complete"
+                else "last_fill_price"
+            ),
+            normalization_basis=normalization_basis,
+            normalization_equity=normalization_equity,
+            normalization_snapshot_id=normalization_snapshot_id,
+            valuation_status=valuation_status,
+            market_data_as_of_session=market_data_as_of_session,
+            market_data_fingerprint=self._performance_close_fingerprint(closes),
+            market_data_close_count=len(closes),
+            data_mode=self.data_mode,
+            has_open_positions=has_open_positions,
+            included_fill_count=len(evidence),
+            included_fill_fingerprint=fill_fingerprint,
+            calendar_name=self.performance_calendar.name,
+            valuation_start_session=first_day,
+            calendar_as_of_session=latest_completed_session,
+            calendar_fingerprint=self._performance_calendar_fingerprint(
+                first_day,
+                latest_completed_session,
+            ),
         )
 
     def run_strategy_performance_feed(self) -> list[StrategyPerformanceRecord]:
@@ -1865,10 +2214,134 @@ class HarnessService:
         ]
         return max(records, key=lambda record: record.as_of) if records else None
 
-    def _drift_trigger_fired(self, ticket: StrategyApprovalTicket) -> str | None:
-        record = self._latest_strategy_performance(ticket.strategy_id, ticket.strategy_version)
+    def _latest_auto_strategy_performance(
+        self, strategy_id: str, strategy_version: str
+    ) -> StrategyPerformanceRecord | None:
+        records = [
+            record
+            for record in self.repositories.strategy_performance.list()
+            if record.strategy_id == strategy_id
+            and record.strategy_version == strategy_version
+            and record.source == "auto_feed"
+        ]
+        return max(records, key=lambda record: record.as_of) if records else None
+
+    def _auto_performance_readiness_reason(
+        self, record: StrategyPerformanceRecord
+    ) -> str | None:
+        if record.valuation_status == "reconciliation_required":
+            return "strategy_performance_reconciliation_required"
+        if record.valuation_status != "complete":
+            return "strategy_performance_valuation_degraded"
+        if (
+            record.normalization_basis != "first_order_account_equity"
+            or record.normalization_equity is None
+            or not (record.normalization_snapshot_id or "").strip()
+        ):
+            return "strategy_performance_normalization_degraded"
+        if record.data_mode != self.data_mode:
+            return "strategy_performance_data_mode_mismatch"
+        if record.calendar_name != self.performance_calendar.name:
+            return "strategy_performance_calendar_mismatch"
+        if (
+            record.valuation_start_session is None
+            or record.calendar_as_of_session is None
+            or record.calendar_fingerprint
+            != self._performance_calendar_fingerprint(
+                record.valuation_start_session,
+                record.calendar_as_of_session,
+            )
+        ):
+            return "strategy_performance_calendar_mismatch"
+        observed_at = self.performance_clock()
+        if observed_at.tzinfo is None:
+            observed_at = observed_at.replace(tzinfo=timezone.utc)
+        if (
+            record.has_open_positions
+            and record.market_data_as_of_session
+            != _latest_completed_krx_session(
+                observed_at,
+                self.performance_calendar,
+            )
+        ):
+            return "strategy_performance_stale"
+        return None
+
+    def _auto_performance_evidence_reason(
+        self,
+        record: StrategyPerformanceRecord,
+        *,
+        strategy_id: str,
+        strategy_version: str,
+    ) -> str | None:
+        readiness_reason = self._auto_performance_readiness_reason(record)
+        if readiness_reason is not None:
+            return readiness_reason
+        evidence = self._strategy_fill_evidence(strategy_id, strategy_version)
+        if (
+            record.included_fill_count != len(evidence)
+            or record.included_fill_fingerprint
+            != self._strategy_fill_fingerprint(evidence)
+        ):
+            return "strategy_performance_fill_watermark_stale"
+        if (
+            record.valuation_start_session is None
+            or record.calendar_as_of_session is None
+        ):
+            return "strategy_performance_market_data_mismatch"
+        symbols = {
+            fill.symbol.strip().upper()
+            for fill, _, _ in evidence
+        }
+        closes, provider_failed = self._performance_close_snapshot(
+            symbols=symbols,
+            start_session=record.valuation_start_session,
+            end_session=record.calendar_as_of_session,
+        )
+        if provider_failed:
+            return "strategy_performance_market_data_unavailable"
+        if (
+            record.market_data_close_count != len(closes)
+            or record.market_data_fingerprint
+            != self._performance_close_fingerprint(closes)
+        ):
+            return "strategy_performance_market_data_mismatch"
+        return None
+
+    def _drift_trigger_fired(
+        self,
+        ticket: StrategyApprovalTicket,
+        *,
+        validated_record: StrategyPerformanceRecord | None | object = (
+            _PERFORMANCE_RECORD_UNSET
+        ),
+    ) -> str | None:
+        if validated_record is _PERFORMANCE_RECORD_UNSET:
+            auto_record = self._latest_auto_strategy_performance(
+                ticket.strategy_id, ticket.strategy_version
+            )
+            if auto_record is not None:
+                if (
+                    self._auto_performance_evidence_reason(
+                        auto_record,
+                        strategy_id=ticket.strategy_id,
+                        strategy_version=ticket.strategy_version,
+                    )
+                    is not None
+                ):
+                    return None
+                record = auto_record
+            else:
+                record = self._latest_strategy_performance(
+                    ticket.strategy_id,
+                    ticket.strategy_version,
+                )
+        else:
+            record = validated_record
         if record is None:
             return None
+        if not isinstance(record, StrategyPerformanceRecord):
+            raise TypeError("validated performance record has an invalid type")
         evidence = self.repositories.backtest_results.get(ticket.backtest_report_id)
         if evidence is None:
             return "backtest_evidence_missing"
@@ -1883,10 +2356,20 @@ class HarnessService:
             return "mdd_exceeds_backtest_1_5x"
         return None
 
-    def _drift_expire_ticket_if_needed(self, ticket: StrategyApprovalTicket) -> StrategyApprovalTicket:
+    def _drift_expire_ticket_if_needed(
+        self,
+        ticket: StrategyApprovalTicket,
+        *,
+        validated_record: StrategyPerformanceRecord | None | object = (
+            _PERFORMANCE_RECORD_UNSET
+        ),
+    ) -> StrategyApprovalTicket:
         if ticket.status != StrategyApprovalTicketStatus.approved:
             return ticket
-        fired = self._drift_trigger_fired(ticket)
+        fired = self._drift_trigger_fired(
+            ticket,
+            validated_record=validated_record,
+        )
         if fired is None:
             return ticket
         before = ticket.model_copy(deep=True)
@@ -1916,8 +2399,18 @@ class HarnessService:
         )
         return ticket
 
-    def _expire_strategy_ticket_if_needed(self, ticket: StrategyApprovalTicket) -> StrategyApprovalTicket:
-        ticket = self._drift_expire_ticket_if_needed(ticket)
+    def _expire_strategy_ticket_if_needed(
+        self,
+        ticket: StrategyApprovalTicket,
+        *,
+        validated_record: StrategyPerformanceRecord | None | object = (
+            _PERFORMANCE_RECORD_UNSET
+        ),
+    ) -> StrategyApprovalTicket:
+        ticket = self._drift_expire_ticket_if_needed(
+            ticket,
+            validated_record=validated_record,
+        )
         active = {StrategyApprovalTicketStatus.pending, StrategyApprovalTicketStatus.approved}
         if ticket.status in active and ticket.valid_until <= utc_now():
             before = ticket.model_copy(deep=True)
@@ -2095,7 +2588,42 @@ class HarnessService:
         for ticket in self.repositories.strategy_approval_tickets.list():
             if ticket.strategy_id != strategy_id:
                 continue
-            refreshed = self._expire_strategy_ticket_if_needed(ticket)
+            if ticket.status != StrategyApprovalTicketStatus.approved:
+                self._expire_strategy_ticket_if_needed(ticket)
+                continue
+            if ticket.valid_until <= utc_now():
+                self._expire_strategy_ticket_if_needed(
+                    ticket,
+                    validated_record=None,
+                )
+                continue
+            auto_record = self._latest_auto_strategy_performance(
+                ticket.strategy_id, ticket.strategy_version
+            )
+            fill_evidence = self._strategy_fill_evidence(
+                ticket.strategy_id,
+                ticket.strategy_version,
+            )
+            if auto_record is None:
+                if fill_evidence:
+                    return False, "strategy_performance_missing"
+                validated_record = self._latest_strategy_performance(
+                    ticket.strategy_id,
+                    ticket.strategy_version,
+                )
+            else:
+                readiness_reason = self._auto_performance_evidence_reason(
+                    auto_record,
+                    strategy_id=ticket.strategy_id,
+                    strategy_version=ticket.strategy_version,
+                )
+                if readiness_reason is not None:
+                    return False, readiness_reason
+                validated_record = auto_record
+            refreshed = self._expire_strategy_ticket_if_needed(
+                ticket,
+                validated_record=validated_record,
+            )
             if refreshed.status != StrategyApprovalTicketStatus.approved:
                 continue
             if execution_level in covered_by_level.get(refreshed.requested_execution_level, set()):

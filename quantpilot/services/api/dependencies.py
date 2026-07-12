@@ -37,6 +37,7 @@ def _current_service_config_key() -> tuple[str | None, ...]:
         os.environ.get("EXTERNAL_HISTORICAL_START"),
         os.environ.get("EXTERNAL_HISTORICAL_END"),
         os.environ.get("EXTERNAL_HISTORICAL_HOLIDAYS"),
+        os.environ.get("KRX_HOLIDAYS"),
         os.environ.get("EXTERNAL_HISTORICAL_ADJUSTED"),
         os.environ.get("KIS_BASE_URL"),
     )

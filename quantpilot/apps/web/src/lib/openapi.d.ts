@@ -962,6 +962,11 @@ export interface components {
             /** Policy Id */
             policy_id?: string | null;
         };
+        /**
+         * DataMode
+         * @enum {string}
+         */
+        DataMode: "fixture" | "local_historical" | "external_historical" | "realtime_market_data" | "paper_trading" | "live_trading";
         /** EvidenceFreshness */
         EvidenceFreshness: {
             /**
@@ -1606,6 +1611,10 @@ export interface components {
             limit_price?: number | null;
             /** Estimated Notional */
             estimated_notional: number;
+            /** Account Equity At Proposal */
+            account_equity_at_proposal?: number | null;
+            /** Portfolio Snapshot Id */
+            portfolio_snapshot_id?: string | null;
             /**
              * Estimated Cost Bps
              * @default 0
@@ -2016,6 +2025,51 @@ export interface components {
              * @default last_fill_price
              */
             valuation: string;
+            /**
+             * Normalization Basis
+             * @default legacy_cumulative_buy_notional
+             */
+            normalization_basis: string;
+            /** Normalization Equity */
+            normalization_equity?: number | null;
+            /** Normalization Snapshot Id */
+            normalization_snapshot_id?: string | null;
+            /**
+             * Valuation Status
+             * @default legacy_unknown
+             * @enum {string}
+             */
+            valuation_status: "legacy_unknown" | "complete" | "partial" | "stale" | "provider_error" | "fill_only" | "reconciliation_required";
+            /** Market Data As Of Session */
+            market_data_as_of_session?: string | null;
+            /** Market Data Fingerprint */
+            market_data_fingerprint?: string | null;
+            /**
+             * Market Data Close Count
+             * @default 0
+             */
+            market_data_close_count: number;
+            data_mode?: components["schemas"]["DataMode"] | null;
+            /**
+             * Has Open Positions
+             * @default false
+             */
+            has_open_positions: boolean;
+            /**
+             * Included Fill Count
+             * @default 0
+             */
+            included_fill_count: number;
+            /** Included Fill Fingerprint */
+            included_fill_fingerprint?: string | null;
+            /** Calendar Name */
+            calendar_name?: string | null;
+            /** Valuation Start Session */
+            valuation_start_session?: string | null;
+            /** Calendar As Of Session */
+            calendar_as_of_session?: string | null;
+            /** Calendar Fingerprint */
+            calendar_fingerprint?: string | null;
         };
         /** StrategyPerformanceRequest */
         StrategyPerformanceRequest: {

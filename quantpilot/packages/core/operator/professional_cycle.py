@@ -1295,6 +1295,8 @@ class ProfessionalOperatorCoordinator:
                 quote_age_seconds=decision.quote_age_seconds or 0.0,
                 limit_price=decision.limit_price,
                 estimated_notional=decision.notional,
+                account_equity_at_proposal=snapshot.equity,
+                portfolio_snapshot_id=snapshot.snapshot_id,
                 idempotency_key=decision.idempotency_key,
                 policy_version=policy.version,
             ),

@@ -2074,6 +2074,18 @@
         "type": "object",
         "title": "DailyReportRequest"
       },
+      "DataMode": {
+        "type": "string",
+        "enum": [
+          "fixture",
+          "local_historical",
+          "external_historical",
+          "realtime_market_data",
+          "paper_trading",
+          "live_trading"
+        ],
+        "title": "DataMode"
+      },
       "EvidenceFreshness": {
         "properties": {
           "status": {
@@ -3639,6 +3651,29 @@
             "type": "number",
             "title": "Estimated Notional"
           },
+          "account_equity_at_proposal": {
+            "anyOf": [
+              {
+                "type": "number",
+                "exclusiveMinimum": 0.0
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Account Equity At Proposal"
+          },
+          "portfolio_snapshot_id": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Portfolio Snapshot Id"
+          },
           "estimated_cost_bps": {
             "type": "number",
             "title": "Estimated Cost Bps",
@@ -4654,6 +4689,155 @@
             "type": "string",
             "title": "Valuation",
             "default": "last_fill_price"
+          },
+          "normalization_basis": {
+            "type": "string",
+            "title": "Normalization Basis",
+            "default": "legacy_cumulative_buy_notional"
+          },
+          "normalization_equity": {
+            "anyOf": [
+              {
+                "type": "number",
+                "exclusiveMinimum": 0.0
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Normalization Equity"
+          },
+          "normalization_snapshot_id": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Normalization Snapshot Id"
+          },
+          "valuation_status": {
+            "type": "string",
+            "enum": [
+              "legacy_unknown",
+              "complete",
+              "partial",
+              "stale",
+              "provider_error",
+              "fill_only",
+              "reconciliation_required"
+            ],
+            "title": "Valuation Status",
+            "default": "legacy_unknown"
+          },
+          "market_data_as_of_session": {
+            "anyOf": [
+              {
+                "type": "string",
+                "format": "date"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Market Data As Of Session"
+          },
+          "market_data_fingerprint": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Market Data Fingerprint"
+          },
+          "market_data_close_count": {
+            "type": "integer",
+            "minimum": 0.0,
+            "title": "Market Data Close Count",
+            "default": 0
+          },
+          "data_mode": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/DataMode"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "has_open_positions": {
+            "type": "boolean",
+            "title": "Has Open Positions",
+            "default": false
+          },
+          "included_fill_count": {
+            "type": "integer",
+            "minimum": 0.0,
+            "title": "Included Fill Count",
+            "default": 0
+          },
+          "included_fill_fingerprint": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Included Fill Fingerprint"
+          },
+          "calendar_name": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Calendar Name"
+          },
+          "valuation_start_session": {
+            "anyOf": [
+              {
+                "type": "string",
+                "format": "date"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Valuation Start Session"
+          },
+          "calendar_as_of_session": {
+            "anyOf": [
+              {
+                "type": "string",
+                "format": "date"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Calendar As Of Session"
+          },
+          "calendar_fingerprint": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Calendar Fingerprint"
           }
         },
         "additionalProperties": false,

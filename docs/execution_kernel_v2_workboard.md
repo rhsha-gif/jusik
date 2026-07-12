@@ -2,10 +2,10 @@
 
 ## Document edit lease
 
-- Lease status: `held`
-- Document editor: `Codex mission lead`
-- Mission/task ID: `QP-KER-000C`
-- Acquired at: `2026-07-12 22:08 KST`
+- Lease status: `free`
+- Document editor: `none`
+- Mission/task ID: `QP-KERNEL-V2`
+- Acquired at: `none`
 
 ## Mission charter
 
@@ -78,8 +78,8 @@ Statuses: `proposed`, `ready`, `in_progress`, `review`, `integrated`, `done`,
 |---|---|---|---|---|---|---|---|---|
 | `QP-KER-000A` | GPT-5 Codex lead | Claude Code | Gate 2 | `주식트레이더-kernel-v2-contract` / `codex/qp-kernel-v2-contract` | `docs/execution_kernel_v2_contract.md`, `docs/execution_kernel_v2_workboard.md` | review | Repository inventory and decision-complete draft; no runtime edits; original main untouched. | draft `d3023a2` |
 | `QP-KER-000B` | Claude Code exact model to be recorded | GPT-5 Codex lead | `QP-KER-000A` | `주식트레이더-claude-kernel-v2-review` / `claude/qp-kernel-v2-review` | the same two docs in an isolated review branch only | blocked | Preserve partial file; do not claim completion or integrate without a reviewed commit. | one uncommitted contract file; account reset `2026-07-13 00:30 KST` |
-| `QP-KER-000C` | GPT-5 Codex lead | three read-only Codex audits | `QP-KER-000A`, Gate 2 mainline | `주식트레이더-kernel-v2-contract-hardening` / `codex/qp-kernel-v2-contract-hardening` | the same two docs only | in_progress | Rebind to `70219d4`; close decision/auth/purity/durable/KIS findings; no runtime edits. | pending commit |
-| `QP-KER-000D` | Claude Code exact model to be recorded | GPT-5 Codex lead | committed `QP-KER-000C` | fresh isolated Claude review worktree/branch | the same two docs only | proposed | Independent final review/revision committed; only two docs changed; lead cross-check P0/P1=0. | becomes ready only after 000C commit and `00:30 KST` reset |
+| `QP-KER-000C` | GPT-5 Codex lead | three read-only Codex audits | `QP-KER-000A`, Gate 2 mainline | `주식트레이더-kernel-v2-contract-hardening` / `codex/qp-kernel-v2-contract-hardening` | the same two docs only | done | Rebind to `70219d4`; close decision/auth/purity/durable/KIS findings; no runtime edits. | `2de0965`; auth P0/P1/P2=0, purity P0/P1/P2=0, KIS P0/P1=0/P2=1 |
+| `QP-KER-000D` | Claude Code exact model to be recorded | GPT-5 Codex lead | committed `QP-KER-000C` | fresh isolated Claude review worktree/branch | the same two docs only | ready | Independent final review/revision committed; only two docs changed; lead cross-check P0/P1=0. | dependency complete; wait for `00:30 KST` reset |
 | `QP-KER-010` | GPT-5 Codex lead | Claude Code + independent read-only audit | accepted `QP-KER-000D` | new `주식트레이더-kernel-v2-pure` / `codex/qp-kernel-v2-pure` | `quantpilot/packages/core/execution/kernel.py`, `quantpilot/tests/unit/test_execution_kernel_v2.py` | proposed | Strict deeply frozen pure model, import allowlist, closed decision order, deterministic fingerprint, zero side effects. | pending |
 | `QP-KER-015` | GPT-5 Codex lead | independent safety audit | `QP-KER-010` | separate expiry-hardening worktree | legacy submit/coordinator/store temporal checks and focused tests only | proposed | Use existing v11 order payload (no migration), strict expiry parse/effective deadline/reopen test; both safety fences, preclaim/restart/pre-POST; no ambiguous retry/release. | pending |
 | `QP-KER-020` | GPT-5 Codex lead | independent audit | `QP-KER-015` | new isolated worktree / `codex/qp-kernel-v2-shadow` | `quantpilot/packages/core/execution/kernel_shadow.py`, focused tests, minimal stage-local adapters/config boundary | proposed | `off` default; unknown mode fails closed; real blocked-path evidence prefixes; zero authoritative mutation; no second broker callable. | pending |
@@ -276,6 +276,9 @@ Required invariant evidence:
   worktree. The contract was rebound to `70219d4`, KIS rehearsal Gate 065 and
   temporal Gate 015 were added, and all runtime work remained held for Claude
   final review.
+- `2026-07-12 KST` — QP-KER-000C committed as `2de0965`. Final current-file
+  audits: authorization P0/P1/P2=0; purity/decision P0/P1/P2=0; KIS/durable
+  P0/P1=0 with one nonblocking Gate-070 flag-name P2. Only the two docs changed.
 
 ## Handoff record
 
@@ -295,11 +298,12 @@ integration_requests: Claude must revise/accept the binding contract before QP-K
 ```text
 task_id: QP-KER-000C
 agent_and_model: GPT-5 Codex desktop with three independent read-only audits
+commit: 2de0965
 base: 1bb6be4 contract branch; governing repository main 70219d4
 owned_paths:
   - docs/execution_kernel_v2_contract.md
   - docs/execution_kernel_v2_workboard.md
-acceptance_met: pending final diff/audit/commit
+acceptance_met: yes; three audit axes P0/P1=0; two-doc allowlist and diff check pass
 known_limits: Claude final acceptance waits for 2026-07-13 00:30 KST reset; no runtime work authorized
 integration_requests: fresh Claude review must commit P0/P1=0 acceptance before QP-KER-010
 ```
@@ -310,7 +314,7 @@ integration_requests: fresh Claude review must commit P0/P1=0 acceptance before 
 |---|---|---|---|---:|---:|---:|---:|---|---|---:|
 | `QP-KER-000A` | inventory/contract draft | GPT-5 Codex desktop | rework required | 0 | 11 consolidated | 3 consolidated | 1 | two-doc allowlist + diff check | complete draft | pending |
 | `QP-KER-000B` | independent binding review | Claude Code exact model pending | incomplete | 0 | not fully assessed | not fully assessed | 0 | reviewed two-doc commit | account reset pending | 0 |
-| `QP-KER-000C` | contract hardening | GPT-5 Codex desktop + three read-only audits | pending audit | 0 | pending | pending | 1 | two-doc allowlist + diff check | in progress | 0 |
+| `QP-KER-000C` | contract hardening | GPT-5 Codex desktop + three read-only audits | accepted Codex gate | 0 | 0 | 1 | 3 | two-doc allowlist + diff check | complete | 4 |
 | `QP-KER-000D` | final independent binding review | Claude Code exact model pending | not started | 0 | 0 required | 0 required | 0 | reviewed two-doc commit | waits for reset | 0 |
 
 - Routing decision quality: pending counterpart and implementation evidence.

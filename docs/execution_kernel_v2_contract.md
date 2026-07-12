@@ -1,9 +1,9 @@
 # Execution Kernel v2 Contract
 
-Status: contract hardening in progress. Three independent Codex read-only
-audits reported P0=0 and decision-completeness P1 findings. Runtime
-implementation remains held until those findings are closed and the required
-Claude Code counterpart review is committed and integrated.
+Status: Codex contract hardening completed at `2de0965`; three independent
+read-only audit axes now report P0=0/P1=0. Runtime implementation remains held
+until the required Claude Code final counterpart review is committed and
+integrated.
 
 ## 1. Purpose and governing baseline
 

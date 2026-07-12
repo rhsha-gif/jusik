@@ -35,7 +35,12 @@ reduced to 65.
 specified `RecursionError` containment form without permitting a broad catch,
 raw error payload, retry, mutation, or new trading authority. This correction
 must receive independent P0/P1=0 and Claude counterpart review before the
-runtime slice can be accepted.
+runtime slice can be accepted. The Claude Code (`claude-fable-5`)
+`QP-KER-010B` counterpart review independently reproduced the reduced-limit
+containment, the exact recursive-argument and handler forms, and the raw
+value/path mutation rejections against the frozen runtime candidate; it found
+P0=0/P1=0/P2=1 and closed the P2 here by binding the list/tuple recursive
+variant into the reduced-headroom fixture corpus below.
 
 ## 1. Purpose and governing baseline
 
@@ -516,7 +521,9 @@ _default_encoder`, an unapproved imported attribute read, and a tampered
 `__getitem__`, comparison, `__str__`, `__repr__`, `__format__`, and `__call__`
 all explode, plus an exact `datetime` carrying a hostile custom `tzinfo`;
 none is invoked and no attacker text appears. Self-referential dict/list,
-70-level acyclic input under deliberately reduced recursion headroom,
+70-level acyclic input under deliberately reduced recursion headroom — in
+both the exact-dict recursive variant and the exact-list/tuple recursive
+variant, under the same `sys.setrecursionlimit(65)` premise —
 depth/node/item/text overflow, and naive/non-finite values all
 return the same sanitized structural-error family without an uncaught
 exception. A source-mutation fixture replacing the recursion handler's

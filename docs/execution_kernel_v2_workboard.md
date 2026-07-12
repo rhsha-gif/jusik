@@ -3,8 +3,8 @@
 ## Document edit lease
 
 - Lease status: `free`
-- Document editor: `none` (last held by GPT-5 Codex mission lead for the
-  `QP-KER-010A` commit handoff)
+- Document editor: `none` (last held by Claude Code `claude-fable-5` for the
+  `QP-KER-010B` review commit)
 - Mission/task ID: `QP-KERNEL-V2`
 - Acquired at: `none`
 
@@ -136,6 +136,30 @@
   two-document safety correction. The runtime slice remains uncommittable for
   integration until this correction and the matching AST/runtime gates both
   report P0/P1=0.
+- `QP-KER-010B` completed (Claude Code CLI `2.1.205`, model `claude-fable-5`):
+  independent adversarial review of `b70d848` against the frozen runtime
+  candidate found P0=0, P1=0, P2=1. Accepted as verified: the 70-level acyclic
+  dict fixture under `sys.setrecursionlimit(65)` reproduces green with
+  `invalid_evidence_schema` and `__cause__ is None`; the exact six dict-variant
+  and list/tuple-variant recursive arguments in `kernel.py` match the contract
+  verbatim; both handlers are unnamed `except RecursionError` with exactly the
+  three sanitized assignments (`copied_item = None`, `remaining_budget = 0`,
+  one `("schema", <allowlisted path>)` finding) and no `else`/`finally`; the
+  AST gate accepts only the three exact try forms and rejects the raw-`value`
+  path substitution plus all three recursive-argument mutations (constant
+  budget, alternate path, ancestor drop); the kernel contains no broad catch,
+  no exception-object binding, no retry loop, no input mutation, the exact
+  import allowlist, and no trading-authority change. The support premise is
+  accepted as stated: containment is claimed only for a normally entered
+  validator/helper with headroom for the fixed handler and sanitized
+  return/error path, and absolute interpreter exhaustion is disclaimed. The
+  single P2: the candidate suite exercises reduced-headroom containment only
+  through the dict recursive variant; Claude reproduced the list/tuple and
+  mixed-nesting variants independently (contained, sanitized findings only, a
+  hostile secret leaf beyond the recursion ceiling never appears in findings
+  or the detached tree) and closed the gap by binding both variants into the
+  contract fixture corpus. Gate-010 acceptance therefore requires the runtime
+  candidate to add the same-premise list/tuple-variant regression.
 
 Three independent Codex read-only audits completed while Claude was capacity
 limited:
@@ -176,7 +200,7 @@ Statuses: `proposed`, `ready`, `in_progress`, `review`, `integrated`, `done`,
 | `QP-KER-000E` | GPT-5 Codex lead | three independent read-only audits | `QP-KER-000D` | `주식트레이더-kernel-v2-final-hardening` / `codex/qp-kernel-v2-final-hardening` | the same two docs only | integrated | Close interpreter/import false positives and every definition-time/runtime escape; bind Gate-015/version and Gate-070 P2 tracking; exact two-doc allowlist; final P0/P1=0. | `6bfdb5d`, acceptance `2f0ab85`, integration `9fbf035`; authorization/version P0/P1/P2=0; purity/decision P0/P1/P2=0; KIS/durable P0/P1=0/P2=1 (Gate-070 ADR only) |
 | `QP-KER-010` | GPT-5 Codex lead | Claude Code + independent read-only audit | accepted `QP-KER-000E` | `주식트레이더-kernel-v2-pure` / `codex/qp-kernel-v2-pure` | `quantpilot/packages/core/execution/kernel.py`, `quantpilot/tests/unit/test_execution_kernel_v2.py` | review | Strict deeply frozen pure model, import allowlist, closed decision order, deterministic fingerprint, zero side effects. | runtime candidate frozen for contract correction; Gate-010 acceptance waits on `QP-KER-010A/B` and fresh audits |
 | `QP-KER-010A` | GPT-5 Codex lead | independent purity audit | adversarial finding during `QP-KER-010` | `주식트레이더-kernel-v2-recursion-contract` / `codex/qp-kernel-v2-recursion-contract` | `docs/execution_kernel_v2_contract.md`, `docs/execution_kernel_v2_workboard.md` only | done | Bind exact recursive-call `RecursionError` handlers within the stated supported stack premise; raw values cannot enter findings; no broad catch or authority change; P0/P1=0. | `b70d848`; contract/purity P0/P1=0, workboard P0/P1/P2=0, exact two-doc diff |
-| `QP-KER-010B` | Claude Code CLI 2.1.205 / `claude-fable-5` | GPT-5 Codex lead | committed `QP-KER-010A` | `주식트레이더-claude-kernel-v2-recursion-review` / `claude/qp-kernel-v2-recursion-review` | the same two docs only, in Claude's isolated branch | ready | Reproduce low-recursion and raw-path mutations; accept or revise the exact support premise/try grammar; commit a substantive two-doc review artifact directly. | clean Claude worktree may now open from `b70d848` |
+| `QP-KER-010B` | Claude Code CLI 2.1.205 / `claude-fable-5` | GPT-5 Codex lead | committed `QP-KER-010A` | `주식트레이더-claude-kernel-v2-recursion-review` / `claude/qp-kernel-v2-recursion-review` | the same two docs only, in Claude's isolated branch | review | Reproduce low-recursion and raw-path mutations; accept or revise the exact support premise/try grammar; commit a substantive two-doc review artifact directly. | direct review commit on this branch from base `0419707`; P0=0/P1=0/P2=1 closed in-contract; focused 7/7, full kernel file 172/172, independent list/tuple probe 3/3; lead re-audit of final hashes pending |
 | `QP-KER-015` | GPT-5 Codex lead | independent safety audit | `QP-KER-010` | separate expiry-hardening worktree | `quantpilot/packages/core/harness_service.py`, `quantpilot/packages/core/execution/paper_submission.py`, `quantpilot/packages/core/execution/state_machine.py`, `quantpilot/packages/db/sqlite_repositories.py`, `quantpilot/jobs/run_kis_paper_session.py`, focused expiry/coordinator/session tests, and new `quantpilot/tests/unit/test_strategy_version_matching.py` only | proposed | Use existing v11 order payload (no migration), strict expiry parse/effective deadline/reopen test; both safety fences, preclaim/restart/pre-POST; no ambiguous retry/release; total fail-closed `strategy_versions_match` hardening with superscript/fullwidth Unicode regressions before any version parity. | pending |
 | `QP-KER-020` | GPT-5 Codex lead | independent audit | `QP-KER-015` | new isolated worktree / `codex/qp-kernel-v2-shadow` | `quantpilot/packages/core/execution/kernel_shadow.py`, focused tests, minimal stage-local adapters/config boundary | proposed | `off` default; unknown mode fails closed; real blocked-path evidence prefixes; zero authoritative mutation; no second broker callable. | pending |
 | `QP-KER-030` | best-fit test owner | independent auditor | `QP-KER-020` | separate parity worktree | kernel parity tests only | proposed | L1-2, mock/sim L3, L4 blocked/success, L5 blocked/success, dry-run zero-call; professional closed; all shadow counters zero. | pending |
@@ -510,8 +534,62 @@ Required invariant evidence:
   workboard. Automatic Git maintenance again reported only the preserved
   stale-worktree permission warning. `QP-KER-010B` is now `ready`; Gate 010
   remains in review and runtime code is not integrated.
+- `2026-07-13 06:20 KST` — Claude Code (CLI `2.1.205`, `claude-fable-5`)
+  executed `QP-KER-010B` on the clean isolated worktree
+  `주식트레이더-claude-kernel-v2-recursion-review`, branch
+  `claude/qp-kernel-v2-recursion-review` at base `0419707` (includes
+  `b70d848`). The frozen runtime candidate was read from the read-only
+  `주식트레이더-kernel-v2-pure` worktree and never edited. Reproduced
+  evidence: focused recursion/hostile/deep-acyclic selection 7 passed, 0
+  failed; the full `test_execution_kernel_v2.py` file 172 passed, 0 failed, 0
+  skipped (junit-verified); an independent scratch probe proved the
+  list/tuple recursive branch and mixed dict/list nesting are contained under
+  `sys.setrecursionlimit(65)` with sanitized findings only and no secret
+  leakage past the recursion ceiling (3 passed; probe deleted before commit,
+  and the single pytest bytecode cache file the run created in the read-only
+  candidate worktree was removed to restore its pre-review state). Source
+  inspection confirmed exact contract/code agreement for the six recursive
+  arguments, unnamed handler, three sanitized assignments, allowlisted path
+  expressions, three-try-form AST gate, and absence of broad catch, raw error
+  payload, mutation, retry, or authority change. Verdict P0=0/P1=0/P2=1; the
+  P2 (dict-only reduced-headroom regression in the candidate suite) is closed
+  by binding both recursive variants in the contract fixture corpus.
+  `QP-KER-010` runtime remains `review`; nothing was merged.
 
 ## Handoff record
+
+```text
+task_id: QP-KER-010B
+agent_and_model: Claude Code CLI 2.1.205, model claude-fable-5
+commit: single direct review commit on claude/qp-kernel-v2-recursion-review
+  from base 0419707 (hash reported in the mission handoff message; lead
+  re-audits the final hash)
+owned_paths:
+  - docs/execution_kernel_v2_contract.md
+  - docs/execution_kernel_v2_workboard.md
+acceptance_met: yes for the counterpart review artifact; P0=0/P1=0/P2=1 with
+  the P2 closed in-contract (list/tuple reduced-headroom fixture binding)
+exact_checks:
+  - python -m pytest <pure worktree>/quantpilot/tests/unit/
+    test_execution_kernel_v2.py -k "recursion or hostile or deep_acyclic"
+    -p no:cacheprovider -> 7 passed, 0 failed (junit tests=7 failures=0)
+  - same file, full run -> 172 passed, 0 failed, 0 skipped in 11.58s
+  - independent scratch probe (list/tuple 70-level, mixed nesting, hostile
+    secret leaf past the ceiling, all at sys.setrecursionlimit(65))
+    -> 3 passed; probe and its junit scratch files deleted before commit
+  - git diff --check (clean); branch name-only diff contains exactly the two
+    owned docs
+known_limits: docs-only review; the runtime candidate itself is unchanged and
+  still lacks the now-required list/tuple-variant regression; the containment
+  guarantee remains bounded by the stated supported-stack premise (no claim at
+  absolute interpreter recursion exhaustion); no full-backend/smoke run was
+  required for this docs artifact; KIS Gate P remains manual
+integration_requests: Codex mission lead re-audits the final commit hash,
+  requires the list/tuple-variant regression in the runtime candidate, and
+  only then closes Gate-010 acceptance with fresh P0/P1=0 audits; QP-KER-010
+  stays in review until then; do not merge this branch into main before that
+  cross-check
+```
 
 ```text
 task_id: QP-KER-010A
@@ -635,6 +713,7 @@ integration_requests: after P0/P1=0, mission lead integrates the full
 | `QP-KER-000D` | final independent binding review | Claude Code CLI 2.1.205 / `claude-fable-5` | review artifact accepted; later purity closure superseded | 0 | 2 found, 2 closed | 3 found, 3 closed | 0 | reviewed two-doc commit + diff/status/name-only checks | complete artifact; lineage continues through `QP-KER-000E` | 4 |
 | `QP-KER-000D` follow-up | purity-audit closure | Claude Code / `claude-fable-5` | closure committed, required cross-check rejected it | 0 | 1 initially targeted; 2 remained | 1 initially targeted; consolidated P2=4 remained | 0 | two-doc allowlist + three post-fix audit axes | rejected/superseded by `QP-KER-000E` | 2 |
 | `QP-KER-000E` | final static-purity closure | GPT-5 Codex desktop | accepted | 0 | 0 after closure | 1 deferred Gate-070-only | 1 | two-doc allowlist + three read-only audits | complete `6bfdb5d` | 4 |
+| `QP-KER-010B` | recursion counterpart review | Claude Code CLI 2.1.205 / `claude-fable-5` | review artifact committed; lead cross-check pending | 0 | 0 | 1 found, 1 closed in-contract | 0 | reproduce 65-limit/mutation fixtures + two-doc allowlist + diff/status checks | complete single-commit artifact | pending |
 
 - Routing decision quality: pending counterpart and implementation evidence.
 - Capability scorecard update: append only after an accepted task artifact.

@@ -3,8 +3,8 @@
 ## Document edit lease
 
 - Lease status: `free`
-- Document editor: `none` (last held by GPT-5 Codex mission lead for
-  `QP-KER-010A` in `codex/qp-kernel-v2-recursion-contract`)
+- Document editor: `none` (last held by GPT-5 Codex mission lead for the
+  `QP-KER-010A` commit handoff)
 - Mission/task ID: `QP-KERNEL-V2`
 - Acquired at: `none`
 
@@ -175,8 +175,8 @@ Statuses: `proposed`, `ready`, `in_progress`, `review`, `integrated`, `done`,
 | `QP-KER-000D` | Claude Code CLI 2.1.205 / `claude-fable-5` | GPT-5 Codex lead | committed `QP-KER-000C` | `주식트레이더-claude-kernel-v2-final-review` / `claude/qp-kernel-v2-final-review` | the same two docs only | done | Independent final review/revision and first purity closure committed; only two docs changed. | `c74a491`; follow-up `0bbec72`; three post-fix axes consolidated P0=0/P1=2/P2=4 and rejected finality; third attempt stopped at session limit with one preserved uncommitted file |
 | `QP-KER-000E` | GPT-5 Codex lead | three independent read-only audits | `QP-KER-000D` | `주식트레이더-kernel-v2-final-hardening` / `codex/qp-kernel-v2-final-hardening` | the same two docs only | integrated | Close interpreter/import false positives and every definition-time/runtime escape; bind Gate-015/version and Gate-070 P2 tracking; exact two-doc allowlist; final P0/P1=0. | `6bfdb5d`, acceptance `2f0ab85`, integration `9fbf035`; authorization/version P0/P1/P2=0; purity/decision P0/P1/P2=0; KIS/durable P0/P1=0/P2=1 (Gate-070 ADR only) |
 | `QP-KER-010` | GPT-5 Codex lead | Claude Code + independent read-only audit | accepted `QP-KER-000E` | `주식트레이더-kernel-v2-pure` / `codex/qp-kernel-v2-pure` | `quantpilot/packages/core/execution/kernel.py`, `quantpilot/tests/unit/test_execution_kernel_v2.py` | review | Strict deeply frozen pure model, import allowlist, closed decision order, deterministic fingerprint, zero side effects. | runtime candidate frozen for contract correction; Gate-010 acceptance waits on `QP-KER-010A/B` and fresh audits |
-| `QP-KER-010A` | GPT-5 Codex lead | independent purity audit | adversarial finding during `QP-KER-010` | `주식트레이더-kernel-v2-recursion-contract` / `codex/qp-kernel-v2-recursion-contract` | `docs/execution_kernel_v2_contract.md`, `docs/execution_kernel_v2_workboard.md` only | review | Bind exact recursive-call `RecursionError` handlers within the stated supported stack premise; raw values cannot enter findings; no broad catch or authority change; P0/P1=0. | independent contract/purity P0/P1=0 and workboard P0/P1/P2=0; Codex draft commit pending |
-| `QP-KER-010B` | Claude Code CLI 2.1.205 / `claude-fable-5` | GPT-5 Codex lead | committed `QP-KER-010A` | `주식트레이더-claude-kernel-v2-recursion-review` / `claude/qp-kernel-v2-recursion-review` | the same two docs only, in Claude's isolated branch | proposed | Reproduce low-recursion and raw-path mutations; accept or revise the exact support premise/try grammar; commit a substantive two-doc review artifact directly. | pending clean worktree after `QP-KER-010A` commit |
+| `QP-KER-010A` | GPT-5 Codex lead | independent purity audit | adversarial finding during `QP-KER-010` | `주식트레이더-kernel-v2-recursion-contract` / `codex/qp-kernel-v2-recursion-contract` | `docs/execution_kernel_v2_contract.md`, `docs/execution_kernel_v2_workboard.md` only | done | Bind exact recursive-call `RecursionError` handlers within the stated supported stack premise; raw values cannot enter findings; no broad catch or authority change; P0/P1=0. | `b70d848`; contract/purity P0/P1=0, workboard P0/P1/P2=0, exact two-doc diff |
+| `QP-KER-010B` | Claude Code CLI 2.1.205 / `claude-fable-5` | GPT-5 Codex lead | committed `QP-KER-010A` | `주식트레이더-claude-kernel-v2-recursion-review` / `claude/qp-kernel-v2-recursion-review` | the same two docs only, in Claude's isolated branch | ready | Reproduce low-recursion and raw-path mutations; accept or revise the exact support premise/try grammar; commit a substantive two-doc review artifact directly. | clean Claude worktree may now open from `b70d848` |
 | `QP-KER-015` | GPT-5 Codex lead | independent safety audit | `QP-KER-010` | separate expiry-hardening worktree | `quantpilot/packages/core/harness_service.py`, `quantpilot/packages/core/execution/paper_submission.py`, `quantpilot/packages/core/execution/state_machine.py`, `quantpilot/packages/db/sqlite_repositories.py`, `quantpilot/jobs/run_kis_paper_session.py`, focused expiry/coordinator/session tests, and new `quantpilot/tests/unit/test_strategy_version_matching.py` only | proposed | Use existing v11 order payload (no migration), strict expiry parse/effective deadline/reopen test; both safety fences, preclaim/restart/pre-POST; no ambiguous retry/release; total fail-closed `strategy_versions_match` hardening with superscript/fullwidth Unicode regressions before any version parity. | pending |
 | `QP-KER-020` | GPT-5 Codex lead | independent audit | `QP-KER-015` | new isolated worktree / `codex/qp-kernel-v2-shadow` | `quantpilot/packages/core/execution/kernel_shadow.py`, focused tests, minimal stage-local adapters/config boundary | proposed | `off` default; unknown mode fails closed; real blocked-path evidence prefixes; zero authoritative mutation; no second broker callable. | pending |
 | `QP-KER-030` | best-fit test owner | independent auditor | `QP-KER-020` | separate parity worktree | kernel parity tests only | proposed | L1-2, mock/sim L3, L4 blocked/success, L5 blocked/success, dry-run zero-call; professional closed; all shadow counters zero. | pending |
@@ -503,8 +503,33 @@ Required invariant evidence:
   list/tuple recursive arguments, unnamed handler, three assignments, and
   path variant are binding. `git diff --check` and the two-document allowlist
   pass. Claude `QP-KER-010B` remains required before Gate-010 acceptance.
+- `2026-07-13 KST` — Codex committed the exact two-document `QP-KER-010A`
+  artifact as `b70d848` (`docs(kernel): bind low-recursion containment`).
+  Post-commit status is clean; `git show --check` and
+  `git diff --name-only f8162e2..b70d848` return only the contract and
+  workboard. Automatic Git maintenance again reported only the preserved
+  stale-worktree permission warning. `QP-KER-010B` is now `ready`; Gate 010
+  remains in review and runtime code is not integrated.
 
 ## Handoff record
+
+```text
+task_id: QP-KER-010A
+agent_and_model: GPT-5 Codex desktop mission lead
+commit: b70d848 (`docs(kernel): bind low-recursion containment`)
+base: f8162e2 on codex/qp-kernel-v2-recursion-contract
+owned_paths:
+  - docs/execution_kernel_v2_contract.md
+  - docs/execution_kernel_v2_workboard.md
+acceptance_met: yes for the Codex correction artifact; independent
+  contract/purity P0/P1=0 and workboard P0/P1/P2=0
+exact_checks: git diff --check; git show --check; clean post-commit status;
+  exact two-document name-only diff
+known_limits: Claude QP-KER-010B is still required; Gate-010 runtime red-team
+  findings remain open and no implementation is integrated
+integration_requests: Claude reproduces/revises/accepts the correction in its
+  own worktree and commits directly; mission lead then re-audits final hashes
+```
 
 ```text
 task_id: QP-KER-000A

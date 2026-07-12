@@ -2,10 +2,10 @@
 
 ## Document edit lease
 
-- Lease status: `held`
-- Document editor: `Codex GPT-5`
+- Lease status: `released`
+- Document editor: `none` (마지막 편집: Codex GPT-5)
 - Mission/task ID: `QP-GATE2-MAINLINE-INTEGRATION`
-- Acquired at: `2026-07-12 KST`
+- Acquired at: `2026-07-12 KST` / Released at: `2026-07-12 KST`
 
 한 번에 한 에이전트만 이 문서를 수정한다. 최종 검증과 상대 감사까지 끝나면 lease를 즉시 해제한다.
 
@@ -52,7 +52,7 @@
 | `QP-G2I-020` | Codex GPT-5 lead | independent read-only agents | `QP-G2I-010` | same | tests/verification + cross-feature regression assertions | done | 전체 backend, smoke, kill-disabled, OpenAPI, frontend, diff checks 통과 | targeted `234/103/84`, cross `44`, full `1046 passed, 2 skipped`; safe smoke/kill; OpenAPI 51; frontend 23 + build |
 | `QP-G2I-030` | Claude Fable 5 시도 → three independent Codex fallback auditors | Codex mission lead | `QP-G2I-020` | read-only candidate audit | 전체 runtime/test/docs/Git diff | done | 전체 merge diff P0/P1=0, main 통합 권고 | runtime ACCEPT P2=1; test/docs ACCEPT P2=2; Git safety READY P2=0 |
 | `QP-G2I-035` | Claude Fable 5 | Codex mission lead | Claude reset | 기존 Claude review worktree | post-reset read-only audit artifact | ready | 통합 main의 전체 Gate 2 diff를 재감사해 P0/P1=0; Kernel runtime 시작 전 완료 | reset 00:30 KST 대기 |
-| `QP-G2I-040` | Codex mission lead | fallback audit quorum | `QP-G2I-030` | main | mainline integration + 종결 기록 | ready | 검증된 후보만 main에 통합, 사용자 변경 보존 | candidate `377a5d6` + docs closeout |
+| `QP-G2I-040` | Codex mission lead | fallback audit quorum | `QP-G2I-030` | main | mainline integration + 종결 기록 | done | 검증된 후보만 main에 통합, 사용자 변경 보존 | main fast-forward `2d34275`; post-main `1046 passed, 2 skipped`, safe smoke/kill, OpenAPI/frontend green |
 
 ## Integration requests
 
@@ -79,6 +79,9 @@
 - `2026-07-12 KST` — Codex lead — 후보 검증 완료: state/migration/no-rePOST/kill `234 passed`; canonical event/reducer/store/parity `103 passed`; Drift/env `84 passed`; 전체 backend `1046 passed, 2 skipped`; smoke mock/live=false/operator blocked/submitted IDs empty; kill CLI `paper_kill_disabled`; OpenAPI 51 paths byte-exact + d.ts sync; frontend `23 passed (7 files)` + build. `git diff --check`/부모/allowlist 최종 확인은 merge commit 직전 수행.
 - `2026-07-12 KST` — candidate merge `377a5d6` — exact parents `9769d98`/`8eaf15a`; first-parent ancestry includes Drift main `b7cd4b1`, second-parent ancestry includes Gate 1 `0a9b644`; clean worktree, user backup absent.
 - `2026-07-12 KST` — three independent final audits — runtime ACCEPT P0=0/P1=0/P2=1 (documented policy-scope conservative over-block only), test/docs ACCEPT P0=0/P1=0/P2=2 (SHA/command documentation fixed in this closeout), Git safety READY P0/P1/P2=0. Mainline integration recommended under recorded Claude availability deviation; `QP-G2I-035` remains mandatory before Kernel runtime.
+- `2026-07-12 KST` — Codex mission lead — main에 `codex/qp-gate2-mainline-integration`을 fast-forward해 main=`2d34275`; 사용자 `CLAUDE.md.20260705.bak`는 유일한 untracked 파일로 미접촉. 조상 확인: Drift `b7cd4b1`, Gate 2 `8eaf15a`, merge candidate `377a5d6` 모두 main 조상.
+- `2026-07-12 KST` — post-main verification — backend `1046 passed, 2 skipped`; frontend `23 passed (7 files)` + build; smoke broker=mock/live=false/operator blocked/submitted IDs empty; kill CLI `paper_kill_disabled`; OpenAPI 51 paths byte-exact + d.ts sync; `git diff --check` clean. 첫 병렬 검증 wrapper는 도구 timeout으로 결과를 회수하지 못했으나 잔존 프로세스 없이 종료됐고, 각 명령을 분리 재실행해 위 결과를 얻었다.
+- `2026-07-12 KST` — mission closeout — QP-G2I-000/010/020/030/040 done, document lease released. QP-G2I-035 post-reset Claude audit는 이 통합 종결과 분리된 Kernel runtime 선행 게이트로 유지한다.
 
 ## Verification commands
 
@@ -125,8 +128,8 @@ task_id: QP-GATE2-MAINLINE-INTEGRATION
 agent_and_model: Codex GPT-5 lead + Claude Gate 2/Drift artifacts + three fallback final auditors
 commit: 377a5d6dbfb27df7430fbf0cd7bbc473bfc9230d
 owned_paths: merge integration, .env.example, docs/STATUS.md, this workboard
-acceptance_met: candidate checks/fallback audits passed; main integration ready;
-  post-reset Claude audit blocks Kernel runtime, not this mainline preservation merge
+acceptance_met: candidate checks/fallback audits and main integration passed;
+  post-reset Claude audit remains a separate Kernel-runtime prerequisite
 exact_checks: exact commands are recorded in `Verification commands`; results targeted
   234/103/84, cross-feature 44, full 1046 passed/2 skipped, smoke mock/live=false/
   operator blocked, kill paper_kill_disabled, OpenAPI 51 byte-exact + d.ts sync,
@@ -139,10 +142,11 @@ integration_requests: main integrate after fallback P0/P1=0 quorum; complete QP-
 
 | Task ID | Task class | Agent/model | First-pass | P0 | P1 | P2 | Rework cycles | Required checks | Elapsed | Rating |
 |---|---|---|---|---:|---:|---:|---:|---|---|---:|
-| `QP-G2I-010` | stateful release integration | Codex GPT-5 | pending | 0 | 0 | 0 | 0 | pending | pending | 0 |
-| `QP-G2I-030` | independent merge audit | Claude Fable 5 | pending | 0 | 0 | 0 | 0 | pending | pending | 0 |
+| `QP-G2I-010` | stateful release integration | Codex GPT-5 | no | 0 | 1 | 2 | 2 | targeted/full/smoke/kill/OpenAPI/frontend + three audits | 2026-07-12 | 2 |
+| `QP-G2I-030` | independent merge audit | three Codex fallback reviewers | yes | 0 | 0 | 3 | 0 | runtime/test-docs/Git complete-diff audits | 2026-07-12 | 5 |
+| `QP-G2I-040` | mainline integration | Codex GPT-5 mission lead | yes | 0 | 0 | 0 | 1 tooling retry | full backend/frontend/smoke/kill/OpenAPI after fast-forward | 2026-07-12 | 4 |
 
-- Routing decision quality: pending
-- Capability scorecard update: pending
-- User-owned changes preserved: main backup remains untracked and untouched; integration worktree starts clean.
-- Remaining limitations: Gate P manual KIS evidence, Kernel v2, ledger/runtime, and live-candidate gates remain pending.
+- Routing decision quality: stateful merge를 Codex, 독립 감사를 분리한 결정은 정확했다. Claude session-limit은 품질 증거가 아니라 가용성 편차로 기록했다.
+- Capability scorecard update: QP-G2I-035 post-reset Claude 감사와 함께 기록한다. 단일 통합 표본이므로 현재 선호는 변경하지 않는다.
+- User-owned changes preserved: main의 `CLAUDE.md.20260705.bak`는 계속 untracked이며 읽기·수정·stage·commit하지 않았다.
+- Remaining limitations: QP-G2I-035, Gate P manual KIS evidence, Kernel v2, ledger/runtime, and live-candidate gates remain pending.

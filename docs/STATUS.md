@@ -110,13 +110,14 @@ Level 1~5 자율화 전 과정을 먼저 완성하고, 사람 승인 게이트�
 
 ## 최근 완료 (2026-07-12, Roadmap Gate 2)
 
-- **Atomic Risk Reservation v1 + Canonical Execution Events v1 통합 후보** —
+- **Atomic Risk Reservation v1 + Canonical Execution Events v1 mainline 통합 완료** —
   schema v10 reservation은 주문 prepare와 현금·매도수량·incremental long-gross를
   한 transaction으로 묶고, schema v11 append-only event journal은 dispatch/reservation/
   cancel의 모든 authoritative mutation과 같은 transaction으로 shadow dual-write한다.
 - schema v10 row는 계속 source of truth다. reducer/replay는 broker를 호출하거나 row를
   수리하지 않으며, ambiguous POST no-retry와 단일 submission authority를 유지한다.
-  Gate 2 accepted head `8eaf15a`와 Drift 기준선 계보의 mainline 통합 후보 검증:
+  Gate 2 accepted head `8eaf15a`와 Drift 기준선 계보를 main `2d34275`까지
+  fast-forward한 뒤 재검증:
   상태/마이그레이션 `234 passed`, event/reducer/parity `103 passed`, Drift/env
   `84 passed`, 교차 기능 `44 passed`, 전체 backend `1046 passed, 2 skipped`.
   smoke는 broker mock/live=false/operator blocked, kill CLI는 `paper_kill_disabled`,

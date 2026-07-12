@@ -212,6 +212,7 @@ risk_check_id
 risk_check_expires_at
 approved_by
 order_expires_at
+strategy_binding: optional KernelStrategyBindingV1
 ```
 
 `KernelIntentSnapshotV1` contains the existing intent ID, normalized symbol,
@@ -222,6 +223,20 @@ strings; the evaluator does not perform portfolio arithmetic on them. It must
 retain the existing IDs rather than generate new ones. The adapter validates
 that the intent, policy identity, and idempotency key came from one `OrderPlan`
 snapshot.
+
+`KernelStrategyBindingV1` is projected from `OrderPlan.explanation`:
+
+```text
+strategy_id
+strategy_version
+symbol
+side
+policy_version
+```
+
+The adapter rejects a binding whose symbol, side, or policy version differs
+from the candidate. External KIS paper requires this binding because
+`prepare_order()` already requires matching explanation evidence.
 
 #### `AuthorizationEvidenceV1`
 
@@ -239,6 +254,11 @@ policy_id
 policy_version
 actor_id: optional string
 approval_reference: optional ticket/run/claim reference
+strategy_id: optional string
+strategy_version: optional string
+strategy_spec_hash: optional string
+registry_status: optional string
+position_binding_fingerprint: optional opaque value
 assurance:
   simulated
   unverified_local
@@ -265,6 +285,13 @@ Level adapters bind current evidence as follows:
   registry/recipe identity evidence;
 - professional risk reduction: Level 5 evidence plus position binding,
   purpose, and reduce-only verification reference.
+
+Kind-specific validators require strategy ID/version for Level 4, Level 5, and
+professional evidence; Level 5/professional also require the accepted registry
+status/spec evidence. Existing `AuthorityCheckStep.detail` prose is not copied
+into the pure input. `detail_code` is a closed mapping derived from the check
+name so arbitrary exception/detail text cannot enter the fingerprinted
+evidence.
 
 The kernel does not perform authentication or call `authorize_level4()` /
 `authorize_level5()`. It verifies internal consistency of supplied evidence.
@@ -448,6 +475,8 @@ order_not_user_approved
 order_expired
 authorization_denied
 authorization_evidence_mismatch
+strategy_binding_missing
+strategy_binding_mismatch
 risk_check_mismatch
 risk_check_expired
 single_order_risk_failed
@@ -712,6 +741,7 @@ The minimum pure-model case matrix is binding:
 | candidate not `user_approved` | `blocked/candidate/order_not_user_approved` |
 | current order expiry reached | `blocked/candidate/order_expired` |
 | denied or internally inconsistent authorization | `blocked/authorization` stage |
+| Level 4/5 authorization and candidate strategy bindings disagree | `blocked/strategy_binding_mismatch` |
 | risk ID/policy/idempotency disagreement | `blocked/risk_check_mismatch` |
 | expired fresh-risk evidence | `blocked/risk_check_expired` |
 | failed single or batch risk | the corresponding closed risk reason |
@@ -721,6 +751,7 @@ The minimum pure-model case matrix is binding:
 | live, either kill, pause, or unhealthy broker | matching `final_safety` reason |
 | market order with disabled context/capability | `blocked/market_order_disabled` |
 | external paper without snapshot/quote/run/provenance/fence evidence | matching `paper_evidence` reason |
+| external paper without a matching strategy explanation binding | `blocked/paper_evidence/strategy_binding_missing` |
 | valid external-paper evidence | eligible with both durable requirement flags, zero calls |
 | same valid input evaluated twice | byte-equivalent decision/fingerprint |
 | mapping order differs but semantic input is equal | identical fingerprint |

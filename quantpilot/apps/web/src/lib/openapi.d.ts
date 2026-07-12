@@ -602,6 +602,23 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/execution/strategy-tickets/activation-allowed": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Strategy Activation Allowed */
+        get: operations["strategy_activation_allowed_api_execution_strategy_tickets_activation_allowed_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/execution/strategy-tickets/{ticket_id}/approve": {
         parameters: {
             query?: never;
@@ -690,40 +707,6 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
-    "/api/notifications": {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        /** List Notifications */
-        get: operations["list_notifications_api_notifications_get"];
-        put?: never;
-        post?: never;
-        delete?: never;
-        options?: never;
-        head?: never;
-        patch?: never;
-        trace?: never;
-    };
-    "/api/notifications/{notification_id}/acknowledge": {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        get?: never;
-        put?: never;
-        /** Acknowledge Notification */
-        post: operations["acknowledge_notification_api_notifications__notification_id__acknowledge_post"];
-        delete?: never;
-        options?: never;
-        head?: never;
-        patch?: never;
-        trace?: never;
-    };
     "/api/strategy-studio/draft": {
         parameters: {
             query?: never;
@@ -775,17 +758,34 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
-    "/api/execution/strategy-tickets/activation-allowed": {
+    "/api/notifications": {
         parameters: {
             query?: never;
             header?: never;
             path?: never;
             cookie?: never;
         };
-        /** Strategy Activation Allowed */
-        get: operations["strategy_activation_allowed_api_execution_strategy_tickets_activation_allowed_get"];
+        /** List Notifications */
+        get: operations["list_notifications_api_notifications_get"];
         put?: never;
         post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/notifications/{notification_id}/acknowledge": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Acknowledge Notification */
+        post: operations["acknowledge_notification_api_notifications__notification_id__acknowledge_post"];
         delete?: never;
         options?: never;
         head?: never;
@@ -818,6 +818,23 @@ export interface paths {
         };
         /** Operator Status */
         get: operations["operator_status_api_operator_status_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/operator/professional-status": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Professional Operator Status */
+        get: operations["professional_operator_status_api_operator_professional_status_get"];
         put?: never;
         post?: never;
         delete?: never;
@@ -944,6 +961,20 @@ export interface components {
         DailyReportRequest: {
             /** Policy Id */
             policy_id?: string | null;
+        };
+        /** EvidenceFreshness */
+        EvidenceFreshness: {
+            /**
+             * Status
+             * @enum {string}
+             */
+            status: "fresh" | "stale" | "unavailable";
+            /** Latest Evidence At */
+            latest_evidence_at?: string | null;
+            /** Stale After Seconds */
+            stale_after_seconds: number;
+            /** Reason Codes */
+            reason_codes?: string[];
         };
         /**
          * ExecutionMode
@@ -1275,6 +1306,12 @@ export interface components {
             /** Policy Version */
             policy_version: number;
             intent: components["schemas"]["OrderIntent"];
+            /**
+             * Purpose
+             * @default rebalance
+             * @enum {string}
+             */
+            purpose: "rebalance" | "protective_exit" | "strategy_retirement";
             /** @default draft */
             status: components["schemas"]["OrderStatus"];
             /** Idempotency Key */
@@ -1325,6 +1362,25 @@ export interface components {
          * @enum {string}
          */
         OrderType: "limit" | "market";
+        /** PaperSessionStatus */
+        PaperSessionStatus: {
+            /**
+             * Status
+             * @enum {string}
+             */
+            status: "active" | "closed" | "abandoned" | "none";
+            /** Started At */
+            started_at?: string | null;
+            /** Lease Expires At */
+            lease_expires_at?: string | null;
+            /** Updated At */
+            updated_at?: string | null;
+            /**
+             * Lease Valid
+             * @default false
+             */
+            lease_valid: boolean;
+        };
         /** ParsePolicyRequest */
         ParsePolicyRequest: {
             /**
@@ -1337,6 +1393,39 @@ export interface components {
              * @default fixture-user
              */
             user_id: string;
+        };
+        /** PendingLiquidationStatusView */
+        PendingLiquidationStatusView: {
+            /** Order Plan Id */
+            order_plan_id: string;
+            /** Policy Id */
+            policy_id: string;
+            /** Strategy Id */
+            strategy_id: string;
+            /** Strategy Version */
+            strategy_version: string;
+            /** Symbol */
+            symbol: string;
+            /**
+             * Purpose
+             * @enum {string}
+             */
+            purpose: "protective_exit" | "strategy_retirement";
+            /** Status */
+            status: string;
+            /** Quantity Requested */
+            quantity_requested: number;
+            /** Cumulative Filled Quantity */
+            cumulative_filled_quantity: number;
+            /** Remaining Quantity */
+            remaining_quantity: number;
+            /**
+             * Updated At
+             * Format: date-time
+             */
+            updated_at: string;
+            /** Last Error Code */
+            last_error_code?: string | null;
         };
         /** PortfolioPlan */
         PortfolioPlan: {
@@ -1364,6 +1453,119 @@ export interface components {
         PortfolioPlanRequest: {
             /** Policy Id */
             policy_id?: string | null;
+        };
+        /** PositionRiskStatus */
+        PositionRiskStatus: {
+            /** Policy Id */
+            policy_id: string;
+            /** Policy Version */
+            policy_version: number;
+            /** Strategy Id */
+            strategy_id: string;
+            /** Strategy Version */
+            strategy_version: string;
+            /** Symbol */
+            symbol: string;
+            /** Quantity */
+            quantity: number;
+            /** Average Entry Price */
+            average_entry_price: number;
+            /** Atr14 */
+            atr14: number;
+            /** Active Stop */
+            active_stop: number;
+            /**
+             * Attribution Status
+             * @enum {string}
+             */
+            attribution_status: "active" | "conflicted";
+            /**
+             * Reconciled At
+             * Format: date-time
+             */
+            reconciled_at: string;
+            /**
+             * Status
+             * @enum {string}
+             */
+            status: "safe" | "attention" | "critical" | "unavailable";
+            /** Stale */
+            stale: boolean;
+            /** Reason Codes */
+            reason_codes?: string[];
+        };
+        /** ProfessionalOperatorStatusSnapshot */
+        ProfessionalOperatorStatusSnapshot: {
+            /** Available */
+            available: boolean;
+            /**
+             * Overall Status
+             * @enum {string}
+             */
+            overall_status: "safe" | "attention" | "critical" | "unavailable";
+            /** Reason Code */
+            reason_code?: string | null;
+            /**
+             * Source
+             * @default paper_state_sqlite
+             * @constant
+             */
+            source: "paper_state_sqlite";
+            /**
+             * Observed At
+             * Format: date-time
+             */
+            observed_at: string;
+            /**
+             * Live Trading Enabled
+             * @default false
+             * @constant
+             */
+            live_trading_enabled: false;
+            /** Schema Version */
+            schema_version?: number | null;
+            freshness: components["schemas"]["EvidenceFreshness"];
+            safety: components["schemas"]["ProfessionalSafetyStatus"];
+            /** Positions */
+            positions?: components["schemas"]["PositionRiskStatus"][];
+            /** Strategy Health */
+            strategy_health?: components["schemas"]["StrategyHealthStatusView"][];
+            /** Rebalance */
+            rebalance?: components["schemas"]["RebalanceStatusView"][];
+            reconciliation: components["schemas"]["ProfessionalReconciliationStatus"];
+        };
+        /** ProfessionalReconciliationStatus */
+        ProfessionalReconciliationStatus: {
+            /**
+             * Status
+             * @enum {string}
+             */
+            status: "safe" | "attention" | "critical" | "unavailable";
+            /** Unresolved Count */
+            unresolved_count: number;
+            /** Blocked Count */
+            blocked_count: number;
+            /** Outcome Unknown Count */
+            outcome_unknown_count: number;
+            /** Dispatches */
+            dispatches?: components["schemas"]["ReconciliationDispatchStatus"][];
+            /** Pending Liquidations */
+            pending_liquidations?: components["schemas"]["PendingLiquidationStatusView"][];
+            /** Reason Codes */
+            reason_codes?: string[];
+        };
+        /** ProfessionalSafetyStatus */
+        ProfessionalSafetyStatus: {
+            /**
+             * Status
+             * @enum {string}
+             */
+            status: "safe" | "attention" | "critical" | "unavailable";
+            /** Policies */
+            policies?: components["schemas"]["SafetyPolicyStatus"][];
+            latest_session: components["schemas"]["PaperSessionStatus"];
+            /** Reason Codes */
+            reason_codes?: string[];
         };
         /** ProposalExplanation */
         ProposalExplanation: {
@@ -1428,6 +1630,78 @@ export interface components {
             /** Warnings */
             warnings?: string[];
         };
+        /** RebalanceStatusView */
+        RebalanceStatusView: {
+            /** Policy Id */
+            policy_id: string;
+            /** Strategy Id */
+            strategy_id: string;
+            /** Strategy Version */
+            strategy_version: string;
+            /** Current Week */
+            current_week: string;
+            /** Last Rebalance Session */
+            last_rebalance_session?: string | null;
+            /**
+             * Claim Status
+             * @enum {string}
+             */
+            claim_status: "completed" | "in_progress" | "expired" | "evidence_mismatch" | "not_recorded";
+            /** Claimed At */
+            claimed_at?: string | null;
+            /** Completed At */
+            completed_at?: string | null;
+            /**
+             * Status
+             * @enum {string}
+             */
+            status: "safe" | "attention" | "critical" | "unavailable";
+            /** Reason Codes */
+            reason_codes?: string[];
+        };
+        /** ReconciliationDispatchStatus */
+        ReconciliationDispatchStatus: {
+            /** Order Plan Id */
+            order_plan_id: string;
+            /** Policy Id */
+            policy_id: string;
+            /** Strategy Id */
+            strategy_id: string;
+            /** Strategy Version */
+            strategy_version: string;
+            /** Symbol */
+            symbol: string;
+            /**
+             * Side
+             * @enum {string}
+             */
+            side: "buy" | "sell";
+            /**
+             * Purpose
+             * @enum {string}
+             */
+            purpose: "rebalance" | "protective_exit" | "strategy_retirement";
+            /** Status */
+            status: string;
+            /**
+             * Reconciliation Status
+             * @enum {string}
+             */
+            reconciliation_status: "pending" | "reconciled" | "blocked";
+            /** Quantity */
+            quantity: number;
+            /** Cumulative Filled Quantity */
+            cumulative_filled_quantity: number;
+            /** Remaining Quantity */
+            remaining_quantity: number;
+            /**
+             * Updated At
+             * Format: date-time
+             */
+            updated_at: string;
+            /** Last Error Code */
+            last_error_code?: string | null;
+        };
         /** RejectOrderRequest */
         RejectOrderRequest: {
             /**
@@ -1442,6 +1716,29 @@ export interface components {
             policy_id?: string | null;
             /** Confirmation */
             confirmation: string;
+        };
+        /** SafetyPolicyStatus */
+        SafetyPolicyStatus: {
+            /** Policy Id */
+            policy_id: string;
+            /**
+             * Status
+             * @enum {string}
+             */
+            status: "safe" | "attention" | "critical" | "unavailable";
+            /** Autopilot Paused */
+            autopilot_paused: boolean;
+            /** Broker Healthy */
+            broker_healthy: boolean;
+            /**
+             * Updated At
+             * Format: date-time
+             */
+            updated_at: string;
+            /** Stale */
+            stale: boolean;
+            /** Reason Codes */
+            reason_codes?: string[];
         };
         /** Signal */
         Signal: {
@@ -1476,6 +1773,8 @@ export interface components {
             stop_price_hint?: number | null;
             /** Take Profit Hint */
             take_profit_hint?: number | null;
+            /** Entry Atr14 */
+            entry_atr14?: number | null;
             /** Valid Until */
             valid_until?: string | null;
             /** Policy Version */
@@ -1639,6 +1938,43 @@ export interface components {
          * @enum {string}
          */
         StrategyDraftStatus: "drafted" | "validated" | "validation_failed";
+        /** StrategyHealthStatusView */
+        StrategyHealthStatusView: {
+            /** Policy Id */
+            policy_id: string;
+            /** Strategy Id */
+            strategy_id: string;
+            /** Strategy Version */
+            strategy_version: string;
+            /**
+             * Health Status
+             * @enum {string}
+             */
+            health_status: "active" | "review_unavailable" | "paused_reapproval" | "disabled";
+            /**
+             * Retirement Phase
+             * @enum {string}
+             */
+            retirement_phase: "none" | "risk_first" | "remaining" | "awaiting_reconciliation" | "complete";
+            /** Pending Order Count */
+            pending_order_count: number;
+            /** Last Risk Evaluated At */
+            last_risk_evaluated_at?: string | null;
+            /**
+             * Updated At
+             * Format: date-time
+             */
+            updated_at: string;
+            /**
+             * Status
+             * @enum {string}
+             */
+            status: "safe" | "attention" | "critical" | "unavailable";
+            /** Stale */
+            stale: boolean;
+            /** Reason Codes */
+            reason_codes?: string[];
+        };
         /**
          * StrategyPerformanceRecord
          * @description Point-in-time realized performance snapshot for an armed strategy.
@@ -1670,6 +2006,16 @@ export interface components {
              * @default mock_execution
              */
             source: string;
+            /**
+             * Cost Basis
+             * @default none
+             */
+            cost_basis: string;
+            /**
+             * Valuation
+             * @default last_fill_price
+             */
+            valuation: string;
         };
         /** StrategyPerformanceRequest */
         StrategyPerformanceRequest: {
@@ -3072,6 +3418,40 @@ export interface operations {
             };
         };
     };
+    strategy_activation_allowed_api_execution_strategy_tickets_activation_allowed_get: {
+        parameters: {
+            query: {
+                strategy_id: string;
+                execution_level?: "level_3" | "level_4";
+            };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        [key: string]: unknown;
+                    };
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
     approve_strategy_ticket_api_execution_strategy_tickets__ticket_id__approve_post: {
         parameters: {
             query?: never;
@@ -3230,68 +3610,6 @@ export interface operations {
             };
         };
     };
-    list_notifications_api_notifications_get: {
-        parameters: {
-            query?: {
-                unacknowledged_only?: boolean;
-            };
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        requestBody?: never;
-        responses: {
-            /** @description Successful Response */
-            200: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["OperatorNotification"][];
-                };
-            };
-            /** @description Validation Error */
-            422: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["HTTPValidationError"];
-                };
-            };
-        };
-    };
-    acknowledge_notification_api_notifications__notification_id__acknowledge_post: {
-        parameters: {
-            query?: never;
-            header?: never;
-            path: {
-                notification_id: string;
-            };
-            cookie?: never;
-        };
-        requestBody?: never;
-        responses: {
-            /** @description Successful Response */
-            200: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["OperatorNotification"];
-                };
-            };
-            /** @description Validation Error */
-            422: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["HTTPValidationError"];
-                };
-            };
-        };
-    };
     create_strategy_draft_api_strategy_studio_draft_post: {
         parameters: {
             query?: never;
@@ -3389,11 +3707,10 @@ export interface operations {
             };
         };
     };
-    strategy_activation_allowed_api_execution_strategy_tickets_activation_allowed_get: {
+    list_notifications_api_notifications_get: {
         parameters: {
-            query: {
-                strategy_id: string;
-                execution_level?: "level_3" | "level_4";
+            query?: {
+                unacknowledged_only?: boolean;
             };
             header?: never;
             path?: never;
@@ -3407,9 +3724,38 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": {
-                        [key: string]: unknown;
-                    };
+                    "application/json": components["schemas"]["OperatorNotification"][];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    acknowledge_notification_api_notifications__notification_id__acknowledge_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                notification_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["OperatorNotification"];
                 };
             };
             /** @description Validation Error */
@@ -3474,6 +3820,26 @@ export interface operations {
                     "application/json": {
                         [key: string]: unknown;
                     };
+                };
+            };
+        };
+    };
+    professional_operator_status_api_operator_professional_status_get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ProfessionalOperatorStatusSnapshot"];
                 };
             };
         };

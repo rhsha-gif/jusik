@@ -102,7 +102,9 @@ Level 1~5 자율화 전 과정을 먼저 완성하고, 사람 승인 게이트�
 1. 승인 기준(acceptance thresholds) 확정 — 표본이 생겼으므로 이제 논의 가능 (사람 입력)
 2. §4.4 잔여: 동일 종목 충돌 규칙(`conflict_rule`)·상관 예산 — 다중 전략 동시
    운용 시작 시 (예산 게이트 자체는 ✅ 제출 경로에서 강제됨)
-3. DriftMonitor 개선: 일별 종가 재평가·수수료 반영 (통지 인박스 UI는 ✅ 완료)
+3. ~~DriftMonitor 개선: 일별 종가 재평가·수수료 반영~~ ✅ (2026-07-12, QP-DRIFT-DAILY —
+   auto_feed가 KIS 비용 반영 + 현 데이터 모드 종가로 보유 포지션 일별 재평가;
+   `cost_basis`/`valuation` 필드로 레코드에 산정 기준 명시, 임계 로직(×1.5)은 무변경)
 4. ~~라우터 분리 부채~~ ✅ strategy-studio·strategy-tickets·notifications를
    전용 라우터로 분리하고 기존 50개 OpenAPI 경로·스키마 계약을 유지함
 5. KIS 앱키 확보 시: `RUN_KIS_MANUAL_INTEGRATION=1` 수동 통합 테스트 (토큰 헬퍼는 ✅ 준비됨)

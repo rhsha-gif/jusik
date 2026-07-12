@@ -641,6 +641,9 @@ class StrategyPerformanceRecord(HarnessModel):
     realized_total_return: float
     observation_days: int = Field(gt=0)
     source: str = "mock_execution"
+    # Older records predate cost/valuation tracking; the defaults describe them.
+    cost_basis: str = "none"
+    valuation: str = "last_fill_price"
 
 
 class StrategyApprovalTicketStatus(str, Enum):

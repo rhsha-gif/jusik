@@ -1293,6 +1293,61 @@
         }
       }
     },
+    "/api/execution/strategy-tickets/activation-allowed": {
+      "get": {
+        "summary": "Strategy Activation Allowed",
+        "operationId": "strategy_activation_allowed_api_execution_strategy_tickets_activation_allowed_get",
+        "parameters": [
+          {
+            "name": "strategy_id",
+            "in": "query",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Strategy Id"
+            }
+          },
+          {
+            "name": "execution_level",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "enum": [
+                "level_3",
+                "level_4"
+              ],
+              "type": "string",
+              "default": "level_3",
+              "title": "Execution Level"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "additionalProperties": true,
+                  "title": "Response Strategy Activation Allowed Api Execution Strategy Tickets Activation Allowed Get"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
     "/api/execution/strategy-tickets/{ticket_id}/approve": {
       "post": {
         "summary": "Approve Strategy Ticket",
@@ -1501,89 +1556,6 @@
         }
       }
     },
-    "/api/notifications": {
-      "get": {
-        "summary": "List Notifications",
-        "operationId": "list_notifications_api_notifications_get",
-        "parameters": [
-          {
-            "name": "unacknowledged_only",
-            "in": "query",
-            "required": false,
-            "schema": {
-              "type": "boolean",
-              "default": false,
-              "title": "Unacknowledged Only"
-            }
-          }
-        ],
-        "responses": {
-          "200": {
-            "description": "Successful Response",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "type": "array",
-                  "items": {
-                    "$ref": "#/components/schemas/OperatorNotification"
-                  },
-                  "title": "Response List Notifications Api Notifications Get"
-                }
-              }
-            }
-          },
-          "422": {
-            "description": "Validation Error",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/HTTPValidationError"
-                }
-              }
-            }
-          }
-        }
-      }
-    },
-    "/api/notifications/{notification_id}/acknowledge": {
-      "post": {
-        "summary": "Acknowledge Notification",
-        "operationId": "acknowledge_notification_api_notifications__notification_id__acknowledge_post",
-        "parameters": [
-          {
-            "name": "notification_id",
-            "in": "path",
-            "required": true,
-            "schema": {
-              "type": "string",
-              "title": "Notification Id"
-            }
-          }
-        ],
-        "responses": {
-          "200": {
-            "description": "Successful Response",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/OperatorNotification"
-                }
-              }
-            }
-          },
-          "422": {
-            "description": "Validation Error",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/HTTPValidationError"
-                }
-              }
-            }
-          }
-        }
-      }
-    },
     "/api/strategy-studio/draft": {
       "post": {
         "summary": "Create Strategy Draft",
@@ -1702,32 +1674,19 @@
         }
       }
     },
-    "/api/execution/strategy-tickets/activation-allowed": {
+    "/api/notifications": {
       "get": {
-        "summary": "Strategy Activation Allowed",
-        "operationId": "strategy_activation_allowed_api_execution_strategy_tickets_activation_allowed_get",
+        "summary": "List Notifications",
+        "operationId": "list_notifications_api_notifications_get",
         "parameters": [
           {
-            "name": "strategy_id",
-            "in": "query",
-            "required": true,
-            "schema": {
-              "type": "string",
-              "title": "Strategy Id"
-            }
-          },
-          {
-            "name": "execution_level",
+            "name": "unacknowledged_only",
             "in": "query",
             "required": false,
             "schema": {
-              "enum": [
-                "level_3",
-                "level_4"
-              ],
-              "type": "string",
-              "default": "level_3",
-              "title": "Execution Level"
+              "type": "boolean",
+              "default": false,
+              "title": "Unacknowledged Only"
             }
           }
         ],
@@ -1737,9 +1696,50 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "type": "object",
-                  "additionalProperties": true,
-                  "title": "Response Strategy Activation Allowed Api Execution Strategy Tickets Activation Allowed Get"
+                  "type": "array",
+                  "items": {
+                    "$ref": "#/components/schemas/OperatorNotification"
+                  },
+                  "title": "Response List Notifications Api Notifications Get"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/notifications/{notification_id}/acknowledge": {
+      "post": {
+        "summary": "Acknowledge Notification",
+        "operationId": "acknowledge_notification_api_notifications__notification_id__acknowledge_post",
+        "parameters": [
+          {
+            "name": "notification_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Notification Id"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/OperatorNotification"
                 }
               }
             }
@@ -1808,6 +1808,24 @@
                   "additionalProperties": true,
                   "type": "object",
                   "title": "Response Operator Status Api Operator Status Get"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/operator/professional-status": {
+      "get": {
+        "summary": "Professional Operator Status",
+        "operationId": "professional_operator_status_api_operator_professional_status_get",
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProfessionalOperatorStatusSnapshot"
                 }
               }
             }
@@ -2055,6 +2073,50 @@
         },
         "type": "object",
         "title": "DailyReportRequest"
+      },
+      "EvidenceFreshness": {
+        "properties": {
+          "status": {
+            "type": "string",
+            "enum": [
+              "fresh",
+              "stale",
+              "unavailable"
+            ],
+            "title": "Status"
+          },
+          "latest_evidence_at": {
+            "anyOf": [
+              {
+                "type": "string",
+                "format": "date-time"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Latest Evidence At"
+          },
+          "stale_after_seconds": {
+            "type": "integer",
+            "minimum": 1.0,
+            "title": "Stale After Seconds"
+          },
+          "reason_codes": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array",
+            "title": "Reason Codes"
+          }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "required": [
+          "status",
+          "stale_after_seconds"
+        ],
+        "title": "EvidenceFreshness"
       },
       "ExecutionMode": {
         "type": "string",
@@ -2803,6 +2865,16 @@
           "intent": {
             "$ref": "#/components/schemas/OrderIntent"
           },
+          "purpose": {
+            "type": "string",
+            "enum": [
+              "rebalance",
+              "protective_exit",
+              "strategy_retirement"
+            ],
+            "title": "Purpose",
+            "default": "rebalance"
+          },
           "status": {
             "$ref": "#/components/schemas/OrderStatus",
             "default": "draft"
@@ -2970,6 +3042,67 @@
         ],
         "title": "OrderType"
       },
+      "PaperSessionStatus": {
+        "properties": {
+          "status": {
+            "type": "string",
+            "enum": [
+              "active",
+              "closed",
+              "abandoned",
+              "none"
+            ],
+            "title": "Status"
+          },
+          "started_at": {
+            "anyOf": [
+              {
+                "type": "string",
+                "format": "date-time"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Started At"
+          },
+          "lease_expires_at": {
+            "anyOf": [
+              {
+                "type": "string",
+                "format": "date-time"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Lease Expires At"
+          },
+          "updated_at": {
+            "anyOf": [
+              {
+                "type": "string",
+                "format": "date-time"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Updated At"
+          },
+          "lease_valid": {
+            "type": "boolean",
+            "title": "Lease Valid",
+            "default": false
+          }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "required": [
+          "status"
+        ],
+        "title": "PaperSessionStatus"
+      },
       "ParsePolicyRequest": {
         "properties": {
           "text": {
@@ -2985,6 +3118,86 @@
         },
         "type": "object",
         "title": "ParsePolicyRequest"
+      },
+      "PendingLiquidationStatusView": {
+        "properties": {
+          "order_plan_id": {
+            "type": "string",
+            "title": "Order Plan Id"
+          },
+          "policy_id": {
+            "type": "string",
+            "title": "Policy Id"
+          },
+          "strategy_id": {
+            "type": "string",
+            "title": "Strategy Id"
+          },
+          "strategy_version": {
+            "type": "string",
+            "title": "Strategy Version"
+          },
+          "symbol": {
+            "type": "string",
+            "title": "Symbol"
+          },
+          "purpose": {
+            "type": "string",
+            "enum": [
+              "protective_exit",
+              "strategy_retirement"
+            ],
+            "title": "Purpose"
+          },
+          "status": {
+            "type": "string",
+            "title": "Status"
+          },
+          "quantity_requested": {
+            "type": "number",
+            "title": "Quantity Requested"
+          },
+          "cumulative_filled_quantity": {
+            "type": "number",
+            "title": "Cumulative Filled Quantity"
+          },
+          "remaining_quantity": {
+            "type": "number",
+            "title": "Remaining Quantity"
+          },
+          "updated_at": {
+            "type": "string",
+            "format": "date-time",
+            "title": "Updated At"
+          },
+          "last_error_code": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Last Error Code"
+          }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "required": [
+          "order_plan_id",
+          "policy_id",
+          "strategy_id",
+          "strategy_version",
+          "symbol",
+          "purpose",
+          "status",
+          "quantity_requested",
+          "cumulative_filled_quantity",
+          "remaining_quantity",
+          "updated_at"
+        ],
+        "title": "PendingLiquidationStatusView"
       },
       "PortfolioPlan": {
         "properties": {
@@ -3053,6 +3266,294 @@
         },
         "type": "object",
         "title": "PortfolioPlanRequest"
+      },
+      "PositionRiskStatus": {
+        "properties": {
+          "policy_id": {
+            "type": "string",
+            "title": "Policy Id"
+          },
+          "policy_version": {
+            "type": "integer",
+            "title": "Policy Version"
+          },
+          "strategy_id": {
+            "type": "string",
+            "title": "Strategy Id"
+          },
+          "strategy_version": {
+            "type": "string",
+            "title": "Strategy Version"
+          },
+          "symbol": {
+            "type": "string",
+            "title": "Symbol"
+          },
+          "quantity": {
+            "type": "number",
+            "title": "Quantity"
+          },
+          "average_entry_price": {
+            "type": "number",
+            "title": "Average Entry Price"
+          },
+          "atr14": {
+            "type": "number",
+            "title": "Atr14"
+          },
+          "active_stop": {
+            "type": "number",
+            "title": "Active Stop"
+          },
+          "attribution_status": {
+            "type": "string",
+            "enum": [
+              "active",
+              "conflicted"
+            ],
+            "title": "Attribution Status"
+          },
+          "reconciled_at": {
+            "type": "string",
+            "format": "date-time",
+            "title": "Reconciled At"
+          },
+          "status": {
+            "type": "string",
+            "enum": [
+              "safe",
+              "attention",
+              "critical",
+              "unavailable"
+            ],
+            "title": "Status"
+          },
+          "stale": {
+            "type": "boolean",
+            "title": "Stale"
+          },
+          "reason_codes": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array",
+            "title": "Reason Codes"
+          }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "required": [
+          "policy_id",
+          "policy_version",
+          "strategy_id",
+          "strategy_version",
+          "symbol",
+          "quantity",
+          "average_entry_price",
+          "atr14",
+          "active_stop",
+          "attribution_status",
+          "reconciled_at",
+          "status",
+          "stale"
+        ],
+        "title": "PositionRiskStatus"
+      },
+      "ProfessionalOperatorStatusSnapshot": {
+        "properties": {
+          "available": {
+            "type": "boolean",
+            "title": "Available"
+          },
+          "overall_status": {
+            "type": "string",
+            "enum": [
+              "safe",
+              "attention",
+              "critical",
+              "unavailable"
+            ],
+            "title": "Overall Status"
+          },
+          "reason_code": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Reason Code"
+          },
+          "source": {
+            "type": "string",
+            "const": "paper_state_sqlite",
+            "title": "Source",
+            "default": "paper_state_sqlite"
+          },
+          "observed_at": {
+            "type": "string",
+            "format": "date-time",
+            "title": "Observed At"
+          },
+          "live_trading_enabled": {
+            "type": "boolean",
+            "const": false,
+            "title": "Live Trading Enabled",
+            "default": false
+          },
+          "schema_version": {
+            "anyOf": [
+              {
+                "type": "integer",
+                "minimum": 1.0
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Schema Version"
+          },
+          "freshness": {
+            "$ref": "#/components/schemas/EvidenceFreshness"
+          },
+          "safety": {
+            "$ref": "#/components/schemas/ProfessionalSafetyStatus"
+          },
+          "positions": {
+            "items": {
+              "$ref": "#/components/schemas/PositionRiskStatus"
+            },
+            "type": "array",
+            "title": "Positions"
+          },
+          "strategy_health": {
+            "items": {
+              "$ref": "#/components/schemas/StrategyHealthStatusView"
+            },
+            "type": "array",
+            "title": "Strategy Health"
+          },
+          "rebalance": {
+            "items": {
+              "$ref": "#/components/schemas/RebalanceStatusView"
+            },
+            "type": "array",
+            "title": "Rebalance"
+          },
+          "reconciliation": {
+            "$ref": "#/components/schemas/ProfessionalReconciliationStatus"
+          }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "required": [
+          "available",
+          "overall_status",
+          "observed_at",
+          "freshness",
+          "safety",
+          "reconciliation"
+        ],
+        "title": "ProfessionalOperatorStatusSnapshot"
+      },
+      "ProfessionalReconciliationStatus": {
+        "properties": {
+          "status": {
+            "type": "string",
+            "enum": [
+              "safe",
+              "attention",
+              "critical",
+              "unavailable"
+            ],
+            "title": "Status"
+          },
+          "unresolved_count": {
+            "type": "integer",
+            "minimum": 0.0,
+            "title": "Unresolved Count"
+          },
+          "blocked_count": {
+            "type": "integer",
+            "minimum": 0.0,
+            "title": "Blocked Count"
+          },
+          "outcome_unknown_count": {
+            "type": "integer",
+            "minimum": 0.0,
+            "title": "Outcome Unknown Count"
+          },
+          "dispatches": {
+            "items": {
+              "$ref": "#/components/schemas/ReconciliationDispatchStatus"
+            },
+            "type": "array",
+            "title": "Dispatches"
+          },
+          "pending_liquidations": {
+            "items": {
+              "$ref": "#/components/schemas/PendingLiquidationStatusView"
+            },
+            "type": "array",
+            "title": "Pending Liquidations"
+          },
+          "reason_codes": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array",
+            "title": "Reason Codes"
+          }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "required": [
+          "status",
+          "unresolved_count",
+          "blocked_count",
+          "outcome_unknown_count"
+        ],
+        "title": "ProfessionalReconciliationStatus"
+      },
+      "ProfessionalSafetyStatus": {
+        "properties": {
+          "status": {
+            "type": "string",
+            "enum": [
+              "safe",
+              "attention",
+              "critical",
+              "unavailable"
+            ],
+            "title": "Status"
+          },
+          "policies": {
+            "items": {
+              "$ref": "#/components/schemas/SafetyPolicyStatus"
+            },
+            "type": "array",
+            "title": "Policies"
+          },
+          "latest_session": {
+            "$ref": "#/components/schemas/PaperSessionStatus"
+          },
+          "reason_codes": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array",
+            "title": "Reason Codes"
+          }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "required": [
+          "status",
+          "latest_session"
+        ],
+        "title": "ProfessionalSafetyStatus"
       },
       "ProposalExplanation": {
         "properties": {
@@ -3241,6 +3742,200 @@
         ],
         "title": "ProposalExplanation"
       },
+      "RebalanceStatusView": {
+        "properties": {
+          "policy_id": {
+            "type": "string",
+            "title": "Policy Id"
+          },
+          "strategy_id": {
+            "type": "string",
+            "title": "Strategy Id"
+          },
+          "strategy_version": {
+            "type": "string",
+            "title": "Strategy Version"
+          },
+          "current_week": {
+            "type": "string",
+            "title": "Current Week"
+          },
+          "last_rebalance_session": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Last Rebalance Session"
+          },
+          "claim_status": {
+            "type": "string",
+            "enum": [
+              "completed",
+              "in_progress",
+              "expired",
+              "evidence_mismatch",
+              "not_recorded"
+            ],
+            "title": "Claim Status"
+          },
+          "claimed_at": {
+            "anyOf": [
+              {
+                "type": "string",
+                "format": "date-time"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Claimed At"
+          },
+          "completed_at": {
+            "anyOf": [
+              {
+                "type": "string",
+                "format": "date-time"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Completed At"
+          },
+          "status": {
+            "type": "string",
+            "enum": [
+              "safe",
+              "attention",
+              "critical",
+              "unavailable"
+            ],
+            "title": "Status"
+          },
+          "reason_codes": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array",
+            "title": "Reason Codes"
+          }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "required": [
+          "policy_id",
+          "strategy_id",
+          "strategy_version",
+          "current_week",
+          "claim_status",
+          "status"
+        ],
+        "title": "RebalanceStatusView"
+      },
+      "ReconciliationDispatchStatus": {
+        "properties": {
+          "order_plan_id": {
+            "type": "string",
+            "title": "Order Plan Id"
+          },
+          "policy_id": {
+            "type": "string",
+            "title": "Policy Id"
+          },
+          "strategy_id": {
+            "type": "string",
+            "title": "Strategy Id"
+          },
+          "strategy_version": {
+            "type": "string",
+            "title": "Strategy Version"
+          },
+          "symbol": {
+            "type": "string",
+            "title": "Symbol"
+          },
+          "side": {
+            "type": "string",
+            "enum": [
+              "buy",
+              "sell"
+            ],
+            "title": "Side"
+          },
+          "purpose": {
+            "type": "string",
+            "enum": [
+              "rebalance",
+              "protective_exit",
+              "strategy_retirement"
+            ],
+            "title": "Purpose"
+          },
+          "status": {
+            "type": "string",
+            "title": "Status"
+          },
+          "reconciliation_status": {
+            "type": "string",
+            "enum": [
+              "pending",
+              "reconciled",
+              "blocked"
+            ],
+            "title": "Reconciliation Status"
+          },
+          "quantity": {
+            "type": "number",
+            "title": "Quantity"
+          },
+          "cumulative_filled_quantity": {
+            "type": "number",
+            "title": "Cumulative Filled Quantity"
+          },
+          "remaining_quantity": {
+            "type": "number",
+            "title": "Remaining Quantity"
+          },
+          "updated_at": {
+            "type": "string",
+            "format": "date-time",
+            "title": "Updated At"
+          },
+          "last_error_code": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Last Error Code"
+          }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "required": [
+          "order_plan_id",
+          "policy_id",
+          "strategy_id",
+          "strategy_version",
+          "symbol",
+          "side",
+          "purpose",
+          "status",
+          "reconciliation_status",
+          "quantity",
+          "cumulative_filled_quantity",
+          "remaining_quantity",
+          "updated_at"
+        ],
+        "title": "ReconciliationDispatchStatus"
+      },
       "RejectOrderRequest": {
         "properties": {
           "reason": {
@@ -3275,6 +3970,59 @@
           "confirmation"
         ],
         "title": "ReleaseKillSwitchRequest"
+      },
+      "SafetyPolicyStatus": {
+        "properties": {
+          "policy_id": {
+            "type": "string",
+            "title": "Policy Id"
+          },
+          "status": {
+            "type": "string",
+            "enum": [
+              "safe",
+              "attention",
+              "critical",
+              "unavailable"
+            ],
+            "title": "Status"
+          },
+          "autopilot_paused": {
+            "type": "boolean",
+            "title": "Autopilot Paused"
+          },
+          "broker_healthy": {
+            "type": "boolean",
+            "title": "Broker Healthy"
+          },
+          "updated_at": {
+            "type": "string",
+            "format": "date-time",
+            "title": "Updated At"
+          },
+          "stale": {
+            "type": "boolean",
+            "title": "Stale"
+          },
+          "reason_codes": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array",
+            "title": "Reason Codes"
+          }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "required": [
+          "policy_id",
+          "status",
+          "autopilot_paused",
+          "broker_healthy",
+          "updated_at",
+          "stale"
+        ],
+        "title": "SafetyPolicyStatus"
       },
       "Signal": {
         "properties": {
@@ -3382,6 +4130,18 @@
               }
             ],
             "title": "Take Profit Hint"
+          },
+          "entry_atr14": {
+            "anyOf": [
+              {
+                "type": "number",
+                "minimum": 0.0
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Entry Atr14"
           },
           "valid_until": {
             "anyOf": [
@@ -3753,6 +4513,100 @@
         ],
         "title": "StrategyDraftStatus"
       },
+      "StrategyHealthStatusView": {
+        "properties": {
+          "policy_id": {
+            "type": "string",
+            "title": "Policy Id"
+          },
+          "strategy_id": {
+            "type": "string",
+            "title": "Strategy Id"
+          },
+          "strategy_version": {
+            "type": "string",
+            "title": "Strategy Version"
+          },
+          "health_status": {
+            "type": "string",
+            "enum": [
+              "active",
+              "review_unavailable",
+              "paused_reapproval",
+              "disabled"
+            ],
+            "title": "Health Status"
+          },
+          "retirement_phase": {
+            "type": "string",
+            "enum": [
+              "none",
+              "risk_first",
+              "remaining",
+              "awaiting_reconciliation",
+              "complete"
+            ],
+            "title": "Retirement Phase"
+          },
+          "pending_order_count": {
+            "type": "integer",
+            "minimum": 0.0,
+            "title": "Pending Order Count"
+          },
+          "last_risk_evaluated_at": {
+            "anyOf": [
+              {
+                "type": "string",
+                "format": "date-time"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Last Risk Evaluated At"
+          },
+          "updated_at": {
+            "type": "string",
+            "format": "date-time",
+            "title": "Updated At"
+          },
+          "status": {
+            "type": "string",
+            "enum": [
+              "safe",
+              "attention",
+              "critical",
+              "unavailable"
+            ],
+            "title": "Status"
+          },
+          "stale": {
+            "type": "boolean",
+            "title": "Stale"
+          },
+          "reason_codes": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array",
+            "title": "Reason Codes"
+          }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "required": [
+          "policy_id",
+          "strategy_id",
+          "strategy_version",
+          "health_status",
+          "retirement_phase",
+          "pending_order_count",
+          "updated_at",
+          "status",
+          "stale"
+        ],
+        "title": "StrategyHealthStatusView"
+      },
       "StrategyPerformanceRecord": {
         "properties": {
           "record_id": {
@@ -3790,6 +4644,16 @@
             "type": "string",
             "title": "Source",
             "default": "mock_execution"
+          },
+          "cost_basis": {
+            "type": "string",
+            "title": "Cost Basis",
+            "default": "none"
+          },
+          "valuation": {
+            "type": "string",
+            "title": "Valuation",
+            "default": "last_fill_price"
           }
         },
         "additionalProperties": false,

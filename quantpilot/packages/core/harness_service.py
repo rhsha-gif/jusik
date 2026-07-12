@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 import hashlib
-from datetime import datetime, timedelta
+from datetime import date, datetime, timedelta, timezone
 from math import isclose
 from typing import Callable
 from zoneinfo import ZoneInfo
@@ -66,7 +66,12 @@ from quantpilot.packages.core.schemas import (
     new_id,
     utc_now,
 )
-from quantpilot.packages.core.backtest.costs import kis_retail_assumptions
+from quantpilot.packages.core.backtest.costs import (
+    KIS_BANKIS_ONLINE_FEE_BPS,
+    KIS_RETAIL_COST_BASIS,
+    KRX_SELL_TAX_BPS_FROM_2026,
+    kis_retail_assumptions,
+)
 from quantpilot.packages.core.backtest.engine import run_backtest
 from quantpilot.packages.core.backtest.replay import replay_signals
 from quantpilot.packages.core.backtest.schemas import BacktestRequest, BacktestResult
@@ -1728,11 +1733,15 @@ class HarnessService:
     def compute_strategy_performance(
         self, strategy_id: str, strategy_version: str
     ) -> StrategyPerformanceRecord | None:
-        """Accumulate a fill-sequence PnL curve for one strategy.
+        """Accumulate a fee-aware, daily-revalued PnL curve for one strategy.
 
-        Fills attribute to a strategy through OrderPlan.explanation. The curve
-        marks open positions at each fill's trade price (research-only
-        approximation: fees excluded, no daily close revaluation), and MDD /
+        Fills attribute to a strategy through OrderPlan.explanation. Cash
+        flows apply the confirmed KIS retail cost basis (commission per side,
+        sell tax; no slippage term because actual fill prices already embed
+        it), and open positions are revalued at each session close from the
+        active market-data provider so drawdowns between fills are observed.
+        A symbol/day without a close keeps the last observed price — the feed
+        must never raise, or drift monitoring would stop on a data gap. MDD /
         return are expressed against the cumulative buy notional. Returns
         ``None`` when the strategy has no attributed buy fills yet.
         """
@@ -1747,28 +1756,72 @@ class HarnessService:
                 and plan.explanation.strategy_version == strategy_version
             ):
                 attributed.append((fill, plan.intent.side))
-        attributed.sort(key=lambda item: item[0].filled_at)
+
+        def fill_time_utc(fill: Fill) -> datetime:
+            # Naive timestamps would make the sort raise against aware ones,
+            # and non-UTC zones would shift the session-date grouping.
+            if fill.filled_at.tzinfo is None:
+                return fill.filled_at.replace(tzinfo=timezone.utc)
+            return fill.filled_at.astimezone(timezone.utc)
+
+        attributed.sort(key=lambda item: fill_time_utc(item[0]))
+        if not attributed:
+            return None
+
+        fee_rate = KIS_BANKIS_ONLINE_FEE_BPS / 10_000.0
+        sell_tax_rate = KRX_SELL_TAX_BPS_FROM_2026 / 10_000.0
+        first_day = fill_time_utc(attributed[0][0]).date()
+        symbols = {fill.symbol.upper() for fill, _ in attributed}
+        closes: dict[tuple[str, date], float] = {}
+        for row in self.market_data_provider.get_price_history():
+            symbol = str(row.get("symbol") or row.get("ticker") or "").upper()
+            if symbol not in symbols:
+                continue
+            try:
+                session = date.fromisoformat(str(row.get("date")))
+                close = float(row["close"])
+            except (KeyError, TypeError, ValueError):
+                continue
+            if session >= first_day and close > 0:
+                closes[(symbol, session)] = close
+
+        fills_by_day: dict[date, list[tuple[Fill, str]]] = {}
+        for fill, side in attributed:
+            fills_by_day.setdefault(fill_time_utc(fill).date(), []).append((fill, side))
 
         cash = 0.0
         invested = 0.0
         positions: dict[str, float] = {}
         last_price: dict[str, float] = {}
         curve: list[float] = []
-        for fill, side in attributed:
-            last_price[fill.symbol] = fill.price
-            if side == "buy":
-                cash -= fill.notional
-                invested += fill.notional
-                positions[fill.symbol] = positions.get(fill.symbol, 0.0) + fill.quantity
-            else:
-                cash += fill.notional
-                positions[fill.symbol] = positions.get(fill.symbol, 0.0) - fill.quantity
-            equity = cash + sum(
+        observed_days: set[date] = set()
+
+        def mark_equity() -> float:
+            return cash + sum(
                 quantity * last_price[symbol]
                 for symbol, quantity in positions.items()
                 if quantity > 0
             )
-            curve.append(equity)
+
+        for day in sorted(set(fills_by_day) | {session for _, session in closes}):
+            for fill, side in fills_by_day.get(day, ()):
+                last_price[fill.symbol] = fill.price
+                if side == "buy":
+                    cash -= fill.notional * (1.0 + fee_rate)
+                    invested += fill.notional
+                    positions[fill.symbol] = positions.get(fill.symbol, 0.0) + fill.quantity
+                else:
+                    cash += fill.notional * (1.0 - fee_rate - sell_tax_rate)
+                    positions[fill.symbol] = positions.get(fill.symbol, 0.0) - fill.quantity
+                curve.append(mark_equity())
+                observed_days.add(day)
+            if any(quantity > 0 for quantity in positions.values()):
+                for symbol in positions:
+                    close = closes.get((symbol.upper(), day))
+                    if close is not None:
+                        last_price[symbol] = close
+                curve.append(mark_equity())
+                observed_days.add(day)
         if not curve or invested <= 0:
             return None
 
@@ -1777,14 +1830,15 @@ class HarnessService:
         for value in curve:
             peak = max(peak, value)
             drawdown_abs = max(drawdown_abs, peak - value)
-        observation_days = len({fill.filled_at.date() for fill, _ in attributed})
         return StrategyPerformanceRecord(
             strategy_id=strategy_id,
             strategy_version=strategy_version,
             realized_max_drawdown=drawdown_abs / invested,
             realized_total_return=curve[-1] / invested,
-            observation_days=observation_days,
+            observation_days=len(observed_days),
             source="auto_feed",
+            cost_basis=KIS_RETAIL_COST_BASIS,
+            valuation="daily_close",
         )
 
     def run_strategy_performance_feed(self) -> list[StrategyPerformanceRecord]:
@@ -1820,6 +1874,10 @@ class HarnessService:
             return "backtest_evidence_missing"
         # Zero-MDD evidence means the backtest never drew down, so ANY realized
         # drawdown exceeds the tolerated multiple — fail closed by design.
+        # Since the auto feed prices in transaction costs, the first buy fill
+        # already realizes a fee-sized drawdown: a zero-MDD-evidence ticket
+        # therefore expires on its first fill. Intended — such evidence gives
+        # the monitor no tolerable drawdown budget to operate within.
         limit = evidence.metrics.max_drawdown * self.DRIFT_MDD_MULTIPLIER
         if record.realized_max_drawdown > limit:
             return "mdd_exceeds_backtest_1_5x"

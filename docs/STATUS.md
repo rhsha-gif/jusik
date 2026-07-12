@@ -107,7 +107,8 @@ Level 1~5 자율화 전 과정을 먼저 완성하고, 사람 승인 게이트�
    전용 라우터로 분리하고 기존 50개 OpenAPI 경로·스키마 계약을 유지함
 5. KIS 앱키 확보 시: `RUN_KIS_MANUAL_INTEGRATION=1` 수동 통합 테스트 (토큰 헬퍼는 ✅ 준비됨)
 6. 소소한 부채: ~~`MARKET_ORDERS_ENABLED` 판독 중복 제거~~ ✅ (gatekeeper 단일화),
-   `.env.example` 동기화 코드 가드 (라우터/CORS 변경 커밋됨 — 보류 해제, 착수 가능)
+   ~~`.env.example` 동기화 코드 가드~~ ✅ (`test_env_example_sync.py` — 런타임 env 읽기
+   전수 스캔 + 카나리; 누락이던 `OPERATOR_KILL_SWITCH`·`KIS_PAPER_STATE_DB` 문서화)
 
 ## 사람 입력 대기
 

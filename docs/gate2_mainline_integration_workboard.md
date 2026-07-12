@@ -21,13 +21,13 @@
 | In scope | 두 계보의 merge, 충돌 파일 `.env.example`/`docs/STATUS.md`의 보수적 합집합 해결, 기존 Gate 문서·schema v10/v11·테스트 보존, 전체 검증, 독립 Codex 감사, Claude Code 최종 감사, mainline 통합 기록. |
 | Out of scope | 새 runtime 기능, Kernel v2 구현, event source-of-truth cutover, 실제 KIS 호출, live/market 주문 활성화, ledger/flatten/Postgres/Kafka, 사용자 백업 파일. |
 | Safety constraints | `LIVE_TRADING_ENABLED=false`, `GUARDED_AUTOPILOT_ENABLED=false`, `FULLY_AUTOMATED_OPERATOR_ENABLED=false`, `MARKET_ORDERS_ENABLED=false`, `BROKER_MODE=mock`; fake/offline 검증만 허용; ambiguous POST no-retry, 단일 broker POST authority, reservation/event same-transaction 불변조건 유지. |
-| Completion criteria | merge 부모가 정확히 `b7cd4b1`와 `8eaf15a`; 충돌 해결이 양쪽 의미를 보존; backend 전체·smoke·OpenAPI/frontend checks 통과; P0/P1=0; Claude Code가 최종 통합을 권고; 사용자 소유 `CLAUDE.md.20260705.bak` 미접촉. |
+| Completion criteria | merge 부모가 정확히 `1c24985`와 `8eaf15a`이고 `1c24985^ = b7cd4b1`; 충돌 해결이 양쪽 의미를 보존; backend 전체·smoke·OpenAPI/frontend checks 통과; P0/P1=0; Claude Code가 최종 통합을 권고; 사용자 소유 `CLAUDE.md.20260705.bak` 미접촉. |
 
 ## Counterpart plan review
 
-- Reviewer/model: `Claude Code / claude-fable-5`
-- Review status: `pending`
-- Decomposition findings: 사전 `merge-tree`에서 실제 내용 충돌은 `.env.example`과 `docs/STATUS.md` 두 파일로 한정됐다. Gate 2 브랜치는 Gate 1을 조상으로 포함하므로 Gate 1을 별도 병합하지 않는다. Kernel v2 계약/runtime은 이 통합이 끝날 때까지 시작하지 않는다.
+- Reviewer/model: `Claude Code / claude-fable-5` 시도 → session-limit 429로 산출물 없이 종료; 독립 Codex fallback reviewer가 초기 분해 검토 완료
+- Review status: `changes_accepted` — P0=0, P1=1(작업보드 부모 기준 오류), P2=1(`.env.example` 예시 경로의 literal tab). P1은 병합 전에 이 커밋에서 수정했고 P2는 충돌 해결에 포함한다. Claude 최종 감사 의무는 유지한다.
+- Decomposition findings: 사전 `merge-tree`에서 실제 내용 충돌은 `.env.example`과 `docs/STATUS.md` 두 파일로 한정됐다. Gate 2 브랜치는 Gate 1을 조상으로 포함하므로 Gate 1을 별도 병합하지 않는다. 자동 병합되는 `run_kis_paper_session.py`는 kill fence와 Drift data-mode 결속을, `harness_service.py`는 durable reservation 집계와 Drift 성과 증거 결속을 각각 보존해야 한다. Kernel v2 계약/runtime은 이 통합이 끝날 때까지 시작하지 않는다.
 - Required substantive counterpart role: 병합 결과 전체 diff, 충돌 해결, schema-v11/event parity, Drift 증거 결속, 안전 기본값을 독립 감사하고 P0/P1 판정과 main 통합 권고를 커밋 가능한 문서 산출물로 남긴다.
 
 ## Routing assessment
@@ -47,8 +47,8 @@
 
 | Task ID | Owner/model | Reviewer/model | Depends on | Worktree/branch | Owned paths | Status | Acceptance | Evidence/commit |
 |---|---|---|---|---|---|---|---|---|
-| `QP-G2I-000` | Codex GPT-5 lead | Claude Fable 5 | none | `주식트레이더-gate2-mainline-integration` / `codex/qp-gate2-mainline-integration` | 이 workboard, merge preflight | in_progress | 범위·부모·충돌·라우팅·검증 게이트 확정 | pending |
-| `QP-G2I-010` | Codex GPT-5 lead | independent read-only agents | `QP-G2I-000` | same | merge commit, `.env.example`, `docs/STATUS.md` | pending | 양쪽 계보 보수적 합집합, runtime 수동 재작성 없음, 안전 기본값 불변 | pending |
+| `QP-G2I-000` | Codex GPT-5 lead | Claude Fable 5 시도 → independent Codex fallback | none | `주식트레이더-gate2-mainline-integration` / `codex/qp-gate2-mainline-integration` | 이 workboard, merge preflight | done | 범위·부모·충돌·라우팅·검증 게이트 확정 | `1c24985` + fallback CHANGES 반영 커밋 |
+| `QP-G2I-010` | Codex GPT-5 lead | independent read-only agents | `QP-G2I-000` | same | merge commit, `.env.example`, `docs/STATUS.md` | in_progress | 양쪽 계보 보수적 합집합, runtime 수동 재작성 없음, 안전 기본값 불변 | pending |
 | `QP-G2I-020` | Codex GPT-5 lead | independent read-only agents | `QP-G2I-010` | same | tests/verification only | pending | 전체 backend, smoke, kill-disabled, OpenAPI, frontend, diff checks 통과 | pending |
 | `QP-G2I-030` | Claude Fable 5 | Codex mission lead | `QP-G2I-020` | 별도 Claude review worktree/branch | 최종 감사 보고서 + workboard 감사 필드만 | pending | 전체 merge diff P0/P1=0, main 통합 권고 | pending |
 | `QP-G2I-040` | Codex mission lead | Claude Fable 5 | `QP-G2I-030` | main | mainline integration + 종결 기록 | pending | 검증된 후보만 main에 통합, 사용자 변경 보존 | pending |
@@ -69,6 +69,8 @@
 - `2026-07-12 KST` — Codex lead — QP-DRIFT-DAILY를 main `b7cd4b1`에 통합하고 Claude/Codex 양쪽 검증 완료: backend `828 passed, 2 skipped`, smoke mock/live=false/operator blocked, frontend `23 passed` + build, OpenAPI 51 paths byte-exact.
 - `2026-07-12 KST` — Codex lead — accepted Gate 2 head `8eaf15a`가 accepted Gate 1 `0a9b644`를 포함함을 확인. 별도 Gate 1 병합은 생략하며, 사전 merge-tree 실제 충돌은 `.env.example`/`docs/STATUS.md` 두 파일.
 - `2026-07-12 KST` — Codex lead — main `b7cd4b1`에서 격리 worktree/branch 생성, 사용자 백업 제외 확인, workboard lease 획득.
+- `2026-07-12 20:10 KST` — Claude Code `claude-fable-5` — 초기 계획 검토 중 session-limit 429 (reset 00:30 KST)로 종료; 파일 변경·커밋 0건. 프로토콜 availability fallback 적용, Claude 최종 감사 슬롯은 유지.
+- `2026-07-12 KST` — independent Codex fallback reviewer — initial plan verdict CHANGES, P0=0/P1=1/P2=1. 이미 workboard 커밋 `1c24985`가 있으므로 정확한 merge 부모 조건을 `1c24985 + 8eaf15a` 및 `1c24985^ = b7cd4b1`로 수정. `.env.example`의 `C:\path<TAB>o\...` P2는 충돌 해결에서 `C:\path\to\...`로 교정. 이 수정 후 후보 병합 승인; main 통합은 Claude 최종 감사 대기.
 
 ## Handoff record
 

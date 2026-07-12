@@ -2,7 +2,7 @@
 
 > 이 문서는 시점별 보고서가 아니라 **갱신형 현황판**입니다.
 > 스테이지가 끝날 때마다 이 파일을 덮어쓰고, 상세 근거는 기존 `docs/*_report.md`에 남깁니다.
-> 마지막 갱신: **2026-07-12**
+> 마지막 갱신: **2026-07-13**
 
 ## 목적 (한 줄)
 
@@ -28,6 +28,7 @@ Level 1~5 자율화 전 과정을 먼저 완성하고, 사람 승인 게이트�
 | KIS paper managed-order kill v1 | 🟡 schema v9 개발 검증 완료, 운영 미승인 | fake-client cancel journal/kill 검증 완료; `VTTC0084R`와 cancel POST는 Gate P 수동 검증 대기 |
 | KIS paper atomic reservation v1 | ✅ schema v10 Gate 1 개발 완료 | baseline `5eb70a9`; Gate P buying-power/실서버 semantics는 미검증 |
 | KIS paper canonical execution events v1 | ✅ schema v11 Gate 2 fake-only 개발 완료 | schema v10 row가 계속 authoritative; append-only shadow journal/replay parity 완료, 실제 KIS Gate P는 미검증 |
+| Execution Kernel v2 계약 Gate | ✅ 계약·교차감사 완료, runtime 미착수 | Claude Code `c74a491`/`0bbec72` + Codex `6bfdb5d`/`2f0ab85`; 다음은 side-effect 없는 `QP-KER-010` 순수 모델, broker/store 권한 없음 |
 | 라이브 트레이딩 | ❌ 의도적 미구현 | `docs/live_trading_enablement_checklist.md` 12항목 전부 사람 체크 필요 (현재 0/12) |
 
 ## 안전 불변식 (변경 금지 기본값)
@@ -125,6 +126,20 @@ Level 1~5 자율화 전 과정을 먼저 완성하고, 사람 승인 게이트�
 - 실제 KIS paper buying-power/cancel TR, 계좌 round trip, 세션 캘린더는 Gate P 수동
   증거이며 이 fake-only 개발 완료에 포함되지 않는다.
 
+## 최근 완료 (2026-07-13, Execution Kernel v2 계약 Gate)
+
+- Level 1~5와 KIS paper의 공통 typed execution handoff를 위한
+  `docs/execution_kernel_v2_contract.md` 및 전용 workboard를 승인했다.
+- Claude Code `claude-fable-5`가 독립 소스 대조와 두 차례 계약 보완을 커밋했고,
+  Codex가 후속 정적 순수성 결함을 별도 branch에서 닫았다. 최종 감사 결과는
+  authorization/version P0/P1/P2=0, purity/decision P0/P1/P2=0,
+  KIS/durable P0/P1=0/P2=1이다. 유일한 P2는 Gate 070 전 확정할 default-false
+  KIS cutover flag/config ADR이며 QP-KER-010/015를 차단하지 않는다.
+- 계약 Gate는 권한을 추가하지 않는다. runtime 파일, broker 호출, 저장소,
+  reservation/event row, API/UI는 변경하지 않았고 safe defaults와 ambiguous POST
+  no-retry를 유지한다. 다음 허용 작업은 `QP-KER-010` 두 파일의 순수 frozen
+  evaluator와 unit tests뿐이다.
+
 ## 최근 완료 (2026-07-12, QP-DRIFT-DAILY)
 
 - **DriftMonitor 성과 피드 개선 (1차, Claude)** — auto_feed가 KIS 실거래 비용
@@ -156,8 +171,8 @@ Level 1~5 자율화 전 과정을 먼저 완성하고, 사람 승인 게이트�
 > 제품 구상(대화형 전략 수립 → 전략 단위 승인 → 자동 운용)과의 정렬 설계 및
 > 전체 로드맵: `docs/product_vision_alignment_design.md`
 
-1. `QP-KERNEL-V2`: Claude 계약 최종 검토를 먼저 완료한 뒤 Level 3/4/5 공통
-   execution kernel을 side-effect 없는 shadow부터 점진 전환
+1. `QP-KER-010`: 승인된 Kernel v2 계약대로 broker/store/repository/audit/clock/env
+   권한이 없는 frozen pure model/evaluator와 unit tests를 먼저 구현
 2. durable outbox + account single-writer
 3. authoritative execution/position/cash/NAV ledger + reconciliation break workflow
 4. continuous OMS/risk/reconciliation runtime과 운영 health/metric

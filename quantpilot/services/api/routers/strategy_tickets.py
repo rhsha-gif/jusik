@@ -1,0 +1,147 @@
+from __future__ import annotations
+
+from typing import Literal
+
+from fastapi import APIRouter, Depends, HTTPException
+from pydantic import BaseModel
+
+from quantpilot.packages.core.harness_service import HarnessService
+from quantpilot.packages.core.schemas import StrategyApprovalTicket, StrategyPerformanceRecord
+from quantpilot.packages.db.repositories import RepositoryError
+from quantpilot.services.api.dependencies import get_harness_service
+
+
+router = APIRouter()
+
+
+class StrategyTicketCreateRequest(BaseModel):
+    strategy_id: str
+    strategy_version: str
+    spec_hash: str
+    backtest_report_id: str
+    requested_execution_level: Literal["level_3", "level_4"] = "level_3"
+    capital_budget_pct: float = 0.2
+    valid_days: int = 30
+    reapproval_triggers: list[str] = []
+
+
+class StrategyTicketDecisionRequest(BaseModel):
+    approved_by: str = "user"
+    reason: str = "user_rejected"
+
+
+class StrategyPerformanceRequest(BaseModel):
+    strategy_id: str
+    strategy_version: str
+    realized_max_drawdown: float
+    realized_total_return: float
+    observation_days: int
+    source: str = "manual"
+
+
+@router.post("/execution/strategy-tickets/create")
+def create_strategy_ticket(
+    request: StrategyTicketCreateRequest,
+    service: HarnessService = Depends(get_harness_service),
+) -> StrategyApprovalTicket:
+    try:
+        return service.create_strategy_approval_ticket(
+            strategy_id=request.strategy_id,
+            strategy_version=request.strategy_version,
+            spec_hash=request.spec_hash,
+            backtest_report_id=request.backtest_report_id,
+            requested_execution_level=request.requested_execution_level,
+            capital_budget_pct=request.capital_budget_pct,
+            valid_days=request.valid_days,
+            reapproval_triggers=request.reapproval_triggers,
+        )
+    except RuntimeError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+
+
+@router.get("/execution/strategy-tickets/pending")
+def pending_strategy_tickets(
+    service: HarnessService = Depends(get_harness_service),
+) -> list[StrategyApprovalTicket]:
+    return service.pending_strategy_tickets()
+
+
+@router.get("/execution/strategy-tickets/activation-allowed")
+def strategy_activation_allowed(
+    strategy_id: str,
+    execution_level: Literal["level_3", "level_4"] = "level_3",
+    service: HarnessService = Depends(get_harness_service),
+) -> dict[str, object]:
+    allowed, detail = service.strategy_activation_allowed(
+        strategy_id, execution_level=execution_level
+    )
+    return {
+        "strategy_id": strategy_id,
+        "execution_level": execution_level,
+        "allowed": allowed,
+        "detail": detail,
+    }
+
+
+@router.post("/execution/strategy-tickets/{ticket_id}/approve")
+def approve_strategy_ticket(
+    ticket_id: str,
+    request: StrategyTicketDecisionRequest,
+    service: HarnessService = Depends(get_harness_service),
+) -> StrategyApprovalTicket:
+    try:
+        return service.approve_strategy_ticket(ticket_id, approved_by=request.approved_by)
+    except (RepositoryError, RuntimeError) as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+
+
+@router.post("/execution/strategy-tickets/{ticket_id}/reject")
+def reject_strategy_ticket(
+    ticket_id: str,
+    request: StrategyTicketDecisionRequest,
+    service: HarnessService = Depends(get_harness_service),
+) -> StrategyApprovalTicket:
+    try:
+        return service.reject_strategy_ticket(ticket_id, reason=request.reason)
+    except (RepositoryError, RuntimeError) as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+
+
+@router.post("/execution/strategy-tickets/{ticket_id}/revoke")
+def revoke_strategy_ticket(
+    ticket_id: str,
+    request: StrategyTicketDecisionRequest,
+    service: HarnessService = Depends(get_harness_service),
+) -> StrategyApprovalTicket:
+    try:
+        return service.revoke_strategy_ticket(ticket_id, reason=request.reason)
+    except (RepositoryError, RuntimeError) as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+
+
+@router.post("/execution/strategy-performance")
+def record_strategy_performance(
+    request: StrategyPerformanceRequest,
+    service: HarnessService = Depends(get_harness_service),
+) -> StrategyPerformanceRecord:
+    try:
+        return service.record_strategy_performance(
+            StrategyPerformanceRecord(
+                strategy_id=request.strategy_id,
+                strategy_version=request.strategy_version,
+                realized_max_drawdown=request.realized_max_drawdown,
+                realized_total_return=request.realized_total_return,
+                observation_days=request.observation_days,
+                source=request.source,
+            )
+        )
+    except (RepositoryError, RuntimeError, ValueError) as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+
+
+@router.post("/execution/strategy-performance/refresh")
+def refresh_strategy_performance(
+    service: HarnessService = Depends(get_harness_service),
+) -> list[StrategyPerformanceRecord]:
+    """Recompute realized performance from attributed fills (auto feed)."""
+    return service.run_strategy_performance_feed()

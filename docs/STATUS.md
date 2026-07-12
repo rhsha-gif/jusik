@@ -2,7 +2,7 @@
 
 > 이 문서는 시점별 보고서가 아니라 **갱신형 현황판**입니다.
 > 스테이지가 끝날 때마다 이 파일을 덮어쓰고, 상세 근거는 기존 `docs/*_report.md`에 남깁니다.
-> 마지막 갱신: **2026-07-06**
+> 마지막 갱신: **2026-07-12**
 
 ## 목적 (한 줄)
 
@@ -103,11 +103,11 @@ Level 1~5 자율화 전 과정을 먼저 완성하고, 사람 승인 게이트�
 2. §4.4 잔여: 동일 종목 충돌 규칙(`conflict_rule`)·상관 예산 — 다중 전략 동시
    운용 시작 시 (예산 게이트 자체는 ✅ 제출 경로에서 강제됨)
 3. DriftMonitor 개선: 일별 종가 재평가·수수료 반영 (통지 인박스 UI는 ✅ 완료)
-4. 라우터 분리 부채: strategy-studio·strategy-tickets·notifications 엔드포인트가
-   execution.py에 동거 (main.py에 타 세션 미커밋 CORS 변경 있음 — 커밋 전 주의)
+4. ~~라우터 분리 부채~~ ✅ strategy-studio·strategy-tickets·notifications를
+   전용 라우터로 분리하고 기존 50개 OpenAPI 경로·스키마 계약을 유지함
 5. KIS 앱키 확보 시: `RUN_KIS_MANUAL_INTEGRATION=1` 수동 통합 테스트 (토큰 헬퍼는 ✅ 준비됨)
 6. 소소한 부채: ~~`MARKET_ORDERS_ENABLED` 판독 중복 제거~~ ✅ (gatekeeper 단일화),
-   `.env.example` 동기화 코드 가드 (파일에 타 세션 미커밋 변경 있어 보류)
+   `.env.example` 동기화 코드 가드 (라우터/CORS 변경 커밋됨 — 보류 해제, 착수 가능)
 
 ## 사람 입력 대기
 

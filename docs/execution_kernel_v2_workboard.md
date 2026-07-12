@@ -3,7 +3,8 @@
 ## Document edit lease
 
 - Lease status: `free`
-- Document editor: `none`
+- Document editor: `none` (last held by Claude Code `claude-fable-5` for
+  `QP-KER-000D`; acquired and released `2026-07-13 KST` with its review commit)
 - Mission/task ID: `QP-KERNEL-V2`
 - Acquired at: `none`
 
@@ -23,13 +24,48 @@
 
 ## Counterpart plan review
 
-- Reviewer/model: Claude Code, first attempted with `claude-fable-5`, then
-  `sonnet`; exact accepted model will be recorded with its commit.
-- Review status: `in progress but not accepted`. Claude Code made a partial,
-  uncommitted one-file revision in its isolated worktree, then reported an
-  account reset at `2026-07-13 00:30 KST`. That worktree is preserved exactly;
-  the partial status wording is not integrated. Runtime implementation remains
-  held.
+- Reviewer/model: Claude Code CLI `2.1.205`, model alias `Fable 5`, session
+  model ID `claude-fable-5` (no fuller dated build ID is exposed to the
+  session; none is claimed).
+- Review status: `QP-KER-000D final review committed`. The independent
+  adversarial re-verification of the hardened contract against current source
+  (state machine, harness submit ordering, lifecycle/registry binding,
+  gatekeeper/batch risk, approval tickets, operator run binding, durable
+  coordinator, KIS session composition, broker adapter) found P0=0, P1=2,
+  P2=3; all five were closed inside the two owned documents. The earlier
+  `QP-KER-000B` partial worktree remains preserved and untouched. Runtime
+  implementation remains held until the mission lead integrates this review.
+- Claude `QP-KER-000D` findings (all closed in the contract):
+  - P1: the recipe/registry version rule omitted the legacy
+    `strategy_versions_match` non-numeric fallback (trimmed exact string
+    equality, `state_machine.py`), so a contract-faithful kernel would block
+    version pairs legacy accepts; the full rule and a fallback parity case are
+    now binding.
+  - P1: `normalized reason-code set` parity was undefined for stages where the
+    legacy path fails fast with one exception (candidate and
+    external-paper-input checks in `submit_order_plan()`) while the kernel
+    reports every same-stage defect; a closed subset/equality normalization
+    rule is now specified.
+  - P2: KIS Level 3 kernel-vs-legacy blocked-stage difference (authorization
+    `actor_assurance_missing` vs legacy explicit paper-input failure) is now
+    explicitly excluded from every parity corpus including Gate 065.
+  - P2: the "exact" AST rule item `module-scope List, Set, Dict` was ambiguous;
+    now stated as module-scope `list()`/`set()`/`dict()` constructor calls.
+  - P2: the contract-task verification diff base was stale for review
+    branches; each review branch now diffs against its own accepted base.
+- Claude cross-checks that found no defect: Level 4/5 authority check
+  sequences match `authorize_level4/5()` exactly; registry status-to-earned-
+  levels table matches `REGISTRY_STATUS_LEVELS`; lifecycle rank/minimum-status
+  rules match `lifecycle_binding.py`; final-safety check order matches
+  `current_submission_safety_failures()`; submit-time batch gate omits
+  `partial_allow`; the current-order-expiry P1 reproduction is real
+  (`risk_check_expires_at` is checked, `OrderPlan.expires_at` is not, and the
+  batch helper re-appends the current order unconditionally); sole KIS POST is
+  `place_limit_cash_order()` at exactly one coordinator call site;
+  claimed/`outcome_unknown` dispatches can never re-POST; `PaperRunStatus` and
+  session-status enums match; the dispatch model already enforces
+  `submission_evidence_expires_at <= risk_check_expires_at`, so the Gate 015
+  min-deadline needs no schema change; all §9 focused suites exist.
 - Codex draft findings:
   - all submission paths already converge on
     `HarnessService.submit_order_plan()`;
@@ -79,7 +115,7 @@ Statuses: `proposed`, `ready`, `in_progress`, `review`, `integrated`, `done`,
 | `QP-KER-000A` | GPT-5 Codex lead | Claude Code | Gate 2 | `주식트레이더-kernel-v2-contract` / `codex/qp-kernel-v2-contract` | `docs/execution_kernel_v2_contract.md`, `docs/execution_kernel_v2_workboard.md` | review | Repository inventory and decision-complete draft; no runtime edits; original main untouched. | draft `d3023a2` |
 | `QP-KER-000B` | Claude Code exact model to be recorded | GPT-5 Codex lead | `QP-KER-000A` | `주식트레이더-claude-kernel-v2-review` / `claude/qp-kernel-v2-review` | the same two docs in an isolated review branch only | blocked | Preserve partial file; do not claim completion or integrate without a reviewed commit. | one uncommitted contract file; account reset `2026-07-13 00:30 KST` |
 | `QP-KER-000C` | GPT-5 Codex lead | three read-only Codex audits | `QP-KER-000A`, Gate 2 mainline | `주식트레이더-kernel-v2-contract-hardening` / `codex/qp-kernel-v2-contract-hardening` | the same two docs only | done | Rebind to `70219d4`; close decision/auth/purity/durable/KIS findings; no runtime edits. | `2de0965`; auth P0/P1/P2=0, purity P0/P1/P2=0, KIS P0/P1=0/P2=1 |
-| `QP-KER-000D` | Claude Code exact model to be recorded | GPT-5 Codex lead | committed `QP-KER-000C` | fresh isolated Claude review worktree/branch | the same two docs only | ready | Independent final review/revision committed; only two docs changed; lead cross-check P0/P1=0. | dependency complete; wait for `00:30 KST` reset |
+| `QP-KER-000D` | Claude Code CLI 2.1.205 / `claude-fable-5` | GPT-5 Codex lead | committed `QP-KER-000C` | `주식트레이더-claude-kernel-v2-final-review` / `claude/qp-kernel-v2-final-review` | the same two docs only | review | Independent final review/revision committed; only two docs changed; lead cross-check P0/P1=0. | committed on branch as `docs(kernel): complete Claude final contract review` (hash reported in the task response); P0=0, P1=2 closed, P2=3 closed |
 | `QP-KER-010` | GPT-5 Codex lead | Claude Code + independent read-only audit | accepted `QP-KER-000D` | new `주식트레이더-kernel-v2-pure` / `codex/qp-kernel-v2-pure` | `quantpilot/packages/core/execution/kernel.py`, `quantpilot/tests/unit/test_execution_kernel_v2.py` | proposed | Strict deeply frozen pure model, import allowlist, closed decision order, deterministic fingerprint, zero side effects. | pending |
 | `QP-KER-015` | GPT-5 Codex lead | independent safety audit | `QP-KER-010` | separate expiry-hardening worktree | legacy submit/coordinator/store temporal checks and focused tests only | proposed | Use existing v11 order payload (no migration), strict expiry parse/effective deadline/reopen test; both safety fences, preclaim/restart/pre-POST; no ambiguous retry/release. | pending |
 | `QP-KER-020` | GPT-5 Codex lead | independent audit | `QP-KER-015` | new isolated worktree / `codex/qp-kernel-v2-shadow` | `quantpilot/packages/core/execution/kernel_shadow.py`, focused tests, minimal stage-local adapters/config boundary | proposed | `off` default; unknown mode fails closed; real blocked-path evidence prefixes; zero authoritative mutation; no second broker callable. | pending |
@@ -145,10 +181,10 @@ main `70219d4` accepted
 
 ## Blockers and authority requests
 
-- Claude Code account capacity resets at `2026-07-13 00:30 KST`. This blocks
-  `QP-KER-000D` and therefore runtime implementation, but not the docs-only
-  Codex hardening. Do not retry repeatedly before the reset and do not edit or
-  reset Claude's partial worktree.
+- Resolved: the Claude Code capacity reset at `2026-07-13 00:30 KST` passed
+  and `QP-KER-000D` is committed. Runtime implementation now waits only on the
+  mission lead's integration and cross-check. The earlier `QP-KER-000B`
+  partial worktree remains preserved and untouched.
 - Real KIS paper validation requires user credentials and explicit manual
   authority. It remains Gate P and does not block fake-only contract/model work.
 - Reproduced P1 pre-cutover finding: current Level 3 legacy submission can fill
@@ -167,10 +203,13 @@ main `70219d4` accepted
 ```powershell
 git diff --check
 git status --short
-git diff --name-only 1bb6be4..HEAD
+git diff --name-only <accepted-base>..HEAD
 ```
 
-Only the two Kernel v2 documents may change in each contract/review branch.
+`<accepted-base>` is the accepted commit the branch started from (`1bb6be4` for
+the `QP-KER-000C` hardening branch, `e5d91c9` for the `QP-KER-000D` review
+branch). Only the two Kernel v2 documents may change in each contract/review
+branch.
 
 ### Pure-model task
 
@@ -279,6 +318,28 @@ Required invariant evidence:
 - `2026-07-12 KST` — QP-KER-000C committed as `2de0965`. Final current-file
   audits: authorization P0/P1/P2=0; purity/decision P0/P1/P2=0; KIS/durable
   P0/P1=0 with one nonblocking Gate-070 flag-name P2. Only the two docs changed.
+- `2026-07-13 KST` — Claude Code (CLI `2.1.205`, `claude-fable-5`) started
+  `QP-KER-000D` on the fresh clean worktree
+  `주식트레이더-claude-kernel-v2-final-review`, branch
+  `claude/qp-kernel-v2-final-review` at `e5d91c9`, and acquired this document
+  lease.
+- `2026-07-13 KST` — Independent source re-verification of the hardened
+  contract: authority check sequences, registry earned levels, lifecycle
+  binding, harness submit ordering and both final-safety fences, the
+  current-order-expiry P1 reproduction, batch gate `full_batch`-only submit,
+  ticket state machine and caller-label-only approval, direct approval without
+  `approved_by`, Level 5 single captured instant and `paper_run_id=run_id`
+  binding, durable coordinator prepared/claimed/no-rePOST semantics, sole
+  coordinator-only `place_limit_cash_order` POST authority, and KIS session
+  composition all match the contract text. No P0 found.
+- `2026-07-13 KST` — Two P1 contract defects closed in-document: the
+  version-comparison rule now states the legacy non-numeric string fallback of
+  `strategy_versions_match` with a binding parity case, and blocked-outcome
+  parity normalization is now a closed subset/equality rule covering the
+  legacy fail-fast candidate and paper-input stages. Three P2s closed: KIS
+  Level 3 parity exclusion, AST-rule constructor-call wording, and per-branch
+  contract-task diff base. Runtime work remains held; `QP-KER-010` was not
+  started.
 
 ## Handoff record
 
@@ -308,6 +369,31 @@ known_limits: Claude final acceptance waits for 2026-07-13 00:30 KST reset; no r
 integration_requests: fresh Claude review must commit P0/P1=0 acceptance before QP-KER-010
 ```
 
+```text
+task_id: QP-KER-000D
+agent_and_model: Claude Code CLI 2.1.205, model alias Fable 5, session model ID
+  claude-fable-5 (no fuller dated build ID exposed; none claimed)
+commit: this branch's `docs(kernel): complete Claude final contract review`
+  commit; exact hash reported in the task response and to be recorded by the
+  integrator
+base: e5d91c9 on claude/qp-kernel-v2-final-review; governing main 70219d4
+owned_paths:
+  - docs/execution_kernel_v2_contract.md
+  - docs/execution_kernel_v2_workboard.md
+acceptance_met: yes for the review artifact; independent adversarial source
+  re-verification completed; P0=0; both P1 contract defects and all three P2s
+  closed inside the two owned documents; post-fix contract P0/P1=0 pending the
+  lead's cross-check
+exact_checks: git diff --check (clean); git status --short (only the two owned
+  docs modified pre-commit); git diff --name-only e5d91c9..HEAD (only the two
+  owned docs)
+known_limits: docs-only review; no test/smoke run was required or performed;
+  the reproduced current-order-expiry P1 remains open in runtime until Gate
+  015; KIS Gate P remains manual
+integration_requests: Codex lead diff-reviews and integrates this commit,
+  cross-checks P0/P1=0, then and only then starts QP-KER-010
+```
+
 ## Mission retrospective
 
 | Task ID | Task class | Agent/model | First-pass | P0 | P1 | P2 | Rework cycles | Required checks | Elapsed | Rating |
@@ -315,7 +401,7 @@ integration_requests: fresh Claude review must commit P0/P1=0 acceptance before 
 | `QP-KER-000A` | inventory/contract draft | GPT-5 Codex desktop | rework required | 0 | 11 consolidated | 3 consolidated | 1 | two-doc allowlist + diff check | complete draft | pending |
 | `QP-KER-000B` | independent binding review | Claude Code exact model pending | incomplete | 0 | not fully assessed | not fully assessed | 0 | reviewed two-doc commit | account reset pending | 0 |
 | `QP-KER-000C` | contract hardening | GPT-5 Codex desktop + three read-only audits | accepted Codex gate | 0 | 0 | 1 | 3 | two-doc allowlist + diff check | complete | 4 |
-| `QP-KER-000D` | final independent binding review | Claude Code exact model pending | not started | 0 | 0 required | 0 required | 0 | reviewed two-doc commit | waits for reset | 0 |
+| `QP-KER-000D` | final independent binding review | Claude Code CLI 2.1.205 / `claude-fable-5` | review committed first pass | 0 | 2 found, 2 closed | 3 found, 3 closed | 0 | reviewed two-doc commit + diff/status/name-only checks | complete; integration pending | pending lead cross-check |
 
 - Routing decision quality: pending counterpart and implementation evidence.
 - Capability scorecard update: append only after an accepted task artifact.

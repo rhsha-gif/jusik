@@ -1,9 +1,14 @@
 # Execution Kernel v2 Contract
 
 Status: Codex contract hardening completed at `2de0965`; three independent
-read-only audit axes now report P0=0/P1=0. Runtime implementation remains held
-until the required Claude Code final counterpart review is committed and
-integrated.
+read-only audit axes report P0=0/P1=0. The Claude Code (`claude-fable-5`)
+`QP-KER-000D` final counterpart review is committed on
+`claude/qp-kernel-v2-final-review`: it independently reverified the contract
+against current source, found P0=0/P1=2/P2=3, and closed all five inside this
+document (version-comparison fallback, blocked-outcome parity normalization,
+KIS Level 3 parity exclusion, AST-rule wording, review-branch diff base).
+Runtime implementation remains held until the mission lead integrates this
+review and cross-checks P0/P1=0.
 
 ## 1. Purpose and governing baseline
 
@@ -186,8 +191,9 @@ The AST rule is exact: `Import`/`ImportFrom` roots must be in the allowlist;
 calls named `open`, `__import__`, `eval`, `exec`, `compile`, `getattr`,
 `setattr`, `delattr`, `globals`, `locals`, or `vars` are forbidden; attribute
 calls ending in `now`, `utcnow`, or `today` are forbidden; and module-scope
-`List`, `Set`, `Dict`, list/set/dict comprehensions, or assignments whose value
-is a mutable literal are forbidden. Aliases are resolved before call checks.
+`list()`/`set()`/`dict()` constructor calls, list/set/dict comprehensions, or
+assignments whose value is a mutable literal are forbidden. Aliases are
+resolved before call checks.
 
 ### 4.2 Versioned input
 
@@ -462,8 +468,12 @@ marker -> `live_candidate`. Lifecycle rank is
 disabled/revoked fail. Registry and lifecycle strategy ID/version/spec hash
 must match, with exact string equality for registry-to-lifecycle versions.
 Recipe-to-registry and ordinary candidate-explanation-to-recipe versions use the
-current numeric dotted-version rule: trim whitespace, require digit-only
-components, drop trailing zero components, then compare tuples.
+legacy `strategy_versions_match` rule exactly: trim whitespace and split on
+dots; when both sides are non-empty digit-only component tuples, drop trailing
+zero components and compare the numeric tuples; otherwise the trimmed strings
+must be exactly equal. The kernel may not block a version pair that the legacy
+rule accepts, and the parity corpus must include one equal pair that matches
+only under the non-numeric string fallback.
 
 The exact authority check sequences for `authority_algorithm_version=1` are:
 
@@ -1169,6 +1179,27 @@ It does not compare:
 Legacy parity evidence must be derived from the same captured inputs. It may
 not be inferred from a later fill or terminal order state.
 
+Blocked-outcome normalization is closed. Verdict and first blocked stage must
+be exactly equal, and the legacy-translated reason codes must be a non-empty
+subset of the kernel's sorted unique reason set for that stage, including the
+mapped legacy first failure. The kernel may carry additional same-stage
+reasons only when they are derivable from the same captured evidence bundle;
+any other difference is a mismatch. This rule exists because the legacy path
+fails fast inside the candidate and external-paper-input stages (one raised
+exception) while the kernel reports every same-stage defect. Exact reason-set
+equality is therefore asserted with single-defect fixtures; deliberately
+multi-defect fixtures assert the subset rule. Neither form relaxes stage or
+verdict equality, and a kernel reason from a different stage is always a
+mismatch.
+
+KIS paper Level 3 is excluded from every parity corpus, including the Gate 065
+rehearsal: the kernel blocks it at authorization with
+`actor_assurance_missing`, while the current legacy KIS composition blocks the
+same call later at the explicit paper-input stage because Level 3 endpoints
+pass no snapshot/quote/run arguments. This stage difference is deliberate
+stricter-kernel precedence, not parity evidence, until the separate
+authenticated-subject binding mission defines the Level 3 external route.
+
 The known current-order expiry delta is handled explicitly: a kernel
 `order_expired` block versus a legacy allow is a real mismatch. A separately
 reviewed expiry hardening task must implement every temporal/durable fence in
@@ -1259,6 +1290,7 @@ The minimum pure-model case matrix is binding:
 | current order expiry reached | `blocked/candidate/order_expired` |
 | denied or internally inconsistent authorization | `blocked/authorization` stage |
 | Level 4/5 authorization and candidate strategy bindings disagree | `blocked/strategy_binding_mismatch` |
+| recipe/registry version pair equal only under the legacy non-numeric string fallback | eligible; kernel matches `strategy_versions_match` |
 | risk ID/policy/idempotency disagreement | `blocked/risk_check_mismatch` |
 | expired fresh-risk evidence | `blocked/risk_check_expired` |
 | failed single or batch risk | the corresponding closed risk reason |

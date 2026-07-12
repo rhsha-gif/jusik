@@ -11,10 +11,18 @@ A subsequent independent Codex purity audit of that review found P0=0/P1=1/
 P2=1: the "exact" AST purity rule still admitted mutable module globals
 created by module-scope calls such as `sorted(...)`, and the
 `strategy_versions_match` legacy rule was not total over Unicode digit
-strings. Both are closed in this document by the same Claude reviewer
-(commit `docs(kernel): close final purity audit gaps`); post-fix counts are
-P0=0/P1=0/P2=0. Runtime implementation remains held until the mission lead
-integrates this review and cross-checks P0/P1=0.
+strings. Claude closed those findings in `0bbec72`. Three independent
+post-fix audit axes consolidated to P0=0/P1=2/P2=4: the runtime scan rejected
+normal Python import metadata and imported typing special forms, while
+definition-time expressions in function defaults, annotations, decorators,
+and class headers remained open; documentation also needed the complete
+Unicode corpus, Gate-015 ownership/handoff, accurate audit evidence, and
+Gate-070 flag-P2 tracking. Claude Code began a follow-up but reached its session limit
+before producing a reviewed commit; that one-file partial worktree is
+preserved. This Codex hardening revision closes those findings with the exact
+definition-time grammar and runtime provenance rules below. Runtime
+implementation remains held until this revision receives independent P0/P1=0
+cross-checks and is integrated by the mission lead.
 
 ## 1. Purpose and governing baseline
 
@@ -171,18 +179,23 @@ quantpilot/packages/core/execution/kernel.py
 quantpilot/tests/unit/test_execution_kernel_v2.py
 ```
 
-Purity is enforced with an import allowlist, not a denylist. `kernel.py` may
-import only the following value-level modules:
+Purity is enforced with an exact import-form/member allowlist, not a root-only
+allowlist or denylist. `kernel.py` may contain only these unaliased imports:
 
-```text
-datetime        # value types/timezone conversion only; no now/utcnow/today
-decimal         # Decimal and deterministic context-free operations
-enum
-hashlib
-json
-typing
-pydantic        # BaseModel, ConfigDict, validators, closed field types
+```python
+from datetime import datetime, timezone
+from decimal import Decimal
+import hashlib
+import json
+from typing import Literal
+from pydantic import BaseModel, ConfigDict, ValidationError
 ```
+
+No alias, star import, other member, or alternate form is equivalent. In
+particular `from decimal import DefaultContext`, `from json import
+_default_encoder`, importing mutable registries/context, and importing
+`hashlib`/`json` members directly are rejected even though their roots are
+listed. The runtime identity check applies to exactly these bindings.
 
 It has no project-internal imports in v1. In particular, importing
 `core.schemas` would transitively expose wall-clock/ID factories and is not
@@ -192,64 +205,292 @@ subprocess, environment, random/secret/UUID generation, wall-clock calls, and
 mutable module globals. The contract does not claim transitive purity for any
 future import until that module receives its own equivalent audit.
 
-The AST rule is exact, and the module-scope policy is closed (an allowlist of
-statement and expression forms), not a call-name denylist:
+The purity checker parses `kernel.py` before import and builds four exact name
+sets: allowlisted import bindings, immutable module constants, module
+functions, and module classes. A name may occur in only one set; imported
+names may not be rebound, shadowed at module scope, or deleted. The policy is
+a closed allowlist of statement and expression forms, not a call-name
+denylist:
 
-- `Import`/`ImportFrom` roots must be in the allowlist. Calls named `open`,
-  `__import__`, `eval`, `exec`, `compile`, `getattr`, `setattr`, `delattr`,
-  `globals`, `locals`, or `vars` are forbidden anywhere in the module;
-  attribute calls ending in `now`, `utcnow`, or `today` are forbidden
-  anywhere. Aliases are resolved before call checks.
-- Statements directly at module scope may only be: one optional module
-  docstring, allowlisted imports, `class` and `def` definitions, and plain or
-  annotated assignments of the immutable-constant grammar below to simple
-  names. Every other module-scope statement form (expression statements other
-  than the docstring, `if`/`for`/`while`/`try`/`with`, augmented assignment,
-  `del`, `global`) is rejected.
-- The immutable-constant grammar is closed: `None`/`True`/`False`, string and
-  numeric literals, unary `+`/`-` on numeric literals, tuple displays whose
-  elements are grammar expressions, and simple names already bound at module
-  scope by this same rule. Every expression form outside the grammar is
-  rejected at module scope — in particular **every call expression without
-  exception** (not merely `list()`/`set()`/`dict()`; `sorted(...)`,
-  `json.loads(...)`, `tuple(...)`, `frozenset(...)`,
-  `model_json_schema()`, `model_dump()`, and any other call are all
-  rejected), plus comprehensions, generator expressions, lambdas, f-strings,
-  starred expressions, subscripts, attribute access, and list/set/dict
-  displays. Consequently a module-scope `CHECKS = sorted(...)` assignment is
-  mechanically impossible, and the only module-scope constants are the
-  immutable scalar/tuple values the pure implementation actually needs.
-- One additional closed module-scope form exists for type aliases: an
-  assignment whose value is built only from names imported from
-  `typing`/`pydantic`, class names defined in the module, subscripts of
-  those, and `Field(...)` calls with constant-grammar arguments inside
-  `Annotated[...]`. The runtime scan below treats the resulting typing
-  constructs as allowed non-data globals; no other call or subscript becomes
-  legal through this form.
-- Class bodies execute at import time and get their own closed form list:
-  annotated field declarations whose optional default is the constant grammar
-  or a direct pydantic `Field(...)` call with constant-grammar arguments, one
-  `model_config = ConfigDict(...)` with constant-grammar arguments, enum
-  member assignments of constant-grammar values, docstrings, and function
-  definitions decorated with allowlisted pydantic decorator names. No other
-  class-body statement is permitted. Closed mappings the evaluator needs
-  (check-name to detail-code, and similar) are constructed inside function
-  bodies or expressed as constant tuples; they never exist as module globals.
-- A runtime companion gate imports the module and recursively verifies every
-  module global that is not a class, function, allowlisted imported module,
-  or type-alias typing construct from the closed form above: each value must
-  be `None`, `bool`, `int`, `float`, `str`, `bytes`,
-  `decimal.Decimal`, a `datetime`/`date`/`time`/`timezone`/`timedelta` value,
-  an `enum` member, or a `tuple`/`frozenset` whose elements recursively
-  satisfy this same closed set. Any `list`, `set`, `dict`, `bytearray`, or
-  other mutable or open-ended global fails the gate even if a future AST-rule
-  regression would otherwise let it through.
+- Every `Import`/`ImportFrom` must equal one row of the exact form/member table
+  above. Imports may occur only as direct module statements.
+  `from __future__` is not needed and is forbidden. Every `Load`, not merely
+  calls, of `open`, `__import__`, `eval`, `exec`, `compile`, `getattr`,
+  `setattr`, `delattr`, `globals`, `locals`, `vars`, `print`, `input`,
+  `breakpoint`, `exit`, `quit`, `help`, `SystemExit`, `KeyboardInterrupt`,
+  `GeneratorExit`, `BaseException`, or `__builtins__` is forbidden anywhere;
+  every `Lambda` is forbidden; attribute calls ending in `now`, `utcnow`, or
+  `today` are also forbidden.
+  Import aliases are resolved before these checks.
+- `Global` and `Nonlocal`, async definitions, `await`, and attribute or
+  subscript assignment/deletion are forbidden anywhere. Direct calls must resolve to a
+  module function/class already accepted by this checker or to the closed
+  pure built-in set `all`, `any`, `enumerate`, `isinstance`, `issubclass`,
+  `len`, `max`, `min`, `range`, `sorted`, `str`, `int`, `bool`,
+  `bytes`, `tuple`, `type`, and `zip`. Imported-module calls are limited to
+  `json.dumps` and `hashlib.sha256`; `json.load`/`dump`, `print`, `input`,
+  `breakpoint`, process termination, and any call through a parameter or data
+  field are forbidden. The complete attribute-method table is:
+  `str.{strip,split,isdigit,encode,replace,join}`, `dict.items` on a
+  function-local canonicalization mapping only,
+  `Decimal.{as_tuple,is_finite}`, `datetime.{utcoffset,astimezone,isoformat}`,
+  `BaseModel.{model_validate,model_dump}`, `ValidationError.errors`, and
+  `sha256.hexdigest` on the function-local hash returned by the sole approved
+  hash call. Receivers must be the statically known imported/local class,
+  typed frozen-model/scalar parameter, or a local value produced by an
+  approved call; arbitrary parameters and evidence fields are never invoked.
+  No mutation method (`append`, `extend`, `update`, `setdefault`, item
+  assignment, and similar), file/socket/process method, or unknown receiver
+  method is allowed. Expanding either call table requires a reviewed contract
+  change.
+- Approved callable names and roots (`json`, `hashlib`, every safe built-in,
+  every module function/class, and every imported binding) are reserved: they
+  cannot be rebound or used as a parameter, comprehension/loop target,
+  exception target, or local assignment in any scope. Direct-call resolution
+  uses lexical scope, so a shadowed name never inherits allowlist status. No
+  call permits `*args` or `**kwargs`, and a function/class/module/callable name
+  may not be supplied as runtime data. Class/type names may appear only as a
+  direct `Call.func`, in the closed type-annotation and class-base grammars,
+  as the two exact exception-handler types below, as the second operand of
+  `isinstance`/`issubclass`, or as the right-hand operand of the raw copier's exact
+  `value_type is ApprovedClass` / `value_type in (ApprovedClass, ...)`
+  classification. An approved callable attribute may occur only as
+  the `func` of its approved `Call`; it cannot be loaded and passed as data.
+  Attribute loads rooted at an imported module/class are otherwise rejected
+  except immutable value access explicitly needed by the type/value grammar
+  (`timezone.utc` and declared frozen-model scalar fields).
+- The call signatures are closed. `all`/`any`/`len`/`tuple`/`type` take one
+  positional argument; `enumerate` takes one or two; `range` takes one to
+  three; `zip` takes positional iterables only; `sorted` takes exactly one
+  positional iterable and **no** `key`/`reverse`; `min`/`max` take positional
+  values only and no keywords; scalar constructors take at most one
+  positional value. `isinstance`/`issubclass` take two positional arguments
+  and their type operand is an approved class or literal tuple of approved
+  classes. `json.dumps` receives only the detached canonical local tree and
+  the constant keywords `ensure_ascii`, `allow_nan`, `sort_keys`, and
+  `separators`; `default` is forbidden. `hashlib.sha256` receives exactly one
+  local bytes value. Every allowed method has only the following exact
+  arguments: `strip()`, `split(".")`, `isdigit()`,
+  `encode("utf-8")`, `replace("+00:00", "Z")`, `join(local_strings)`,
+  `items()`, `as_tuple()`, `is_finite()`, `utcoffset()`,
+  `astimezone(timezone.utc)`, `hexdigest()`, `model_validate(detached_tree)`,
+  `model_dump(mode="python")`,
+  `errors(include_url=False, include_context=False, include_input=False)`,
+  and `isoformat(timespec="microseconds")`. No omitted optional argument is
+  implicitly accepted; in particular zero-argument `astimezone()` is forbidden
+  because it reads the host local timezone. Thus constructs such
+  as `sorted(values, key=open)` or `json.dumps(value, default=eval)` are AST
+  violations even before the forbidden callable-name loads are considered.
+- Function bodies use a closed statement grammar: optional docstring, simple
+  local assignment/unpacking, `if`, finite `for` over an approved typed/local
+  iterable, `return`, and only the two exact `try` forms required by v1.
+  `validate_kernel_input_v1` may catch imported `ValidationError`.
+  Only `validate_kernel_input_v1` may raise
+  `KernelEvidenceValidationError`, built once from the fully aggregated,
+  sanitized local code/path tuple with the cause expression exactly `None` so
+  a rejected raw or Pydantic validation exception cannot leak through chained
+  traceback. `_copy_raw_value` never raises;
+  the version helper may catch only `ValueError` and return mismatch. Neither
+  form has `else`/`finally` or a broad handler, and no other raise/cause form
+  is allowed. Every
+  other `Raise`, `Assert`, `Yield`/`YieldFrom`, `With`, `While`, `Match`,
+  function-local import, nested function/class, async construct, `break`/
+  `continue`, deletion, or augmented assignment is forbidden. Assignment
+  targets are local simple names/tuples only; attribute/subscript stores remain
+  forbidden.
+- Runtime expressions are also closed. They may contain `Constant`, approved
+  lexical `Name`, tuple/dict displays, `BoolOp`, `IfExp`, `UnaryOp` (`not`,
+  unary signs on exact int only), arithmetic/string `BinOp`
+  (`+`, `-`, `*`, `//`, `%`),
+  primitive/identity/membership `Compare`, an approved `Call`, a
+  provenance-approved `Attribute`/`Subscript`, and tuple/dict/generator
+  comprehensions whose targets are simple locals and whose iterables already
+  have exact built-in or frozen-tuple provenance. List/set displays,
+  `ListComp`/`SetComp`, f-strings/formatting, lambdas, walrus, starred values,
+  power/matrix/bitwise runtime operators, and every unlisted expression node
+  are forbidden. Arithmetic may consume only exact `int` and
+  string/tuple values. Finite `Decimal` and datetime values permit only
+  equality/order/identity comparisons plus their approved context-free
+  methods; Decimal unary signs and arithmetic are forbidden because they can consult and mutate
+  process-global decimal context flags/precision. No operation is attempted
+  on an unclassified raw value.
+- Attribute loads are permitted only for: a declared field reached through a
+  statically typed `FrozenKernelModel`; the exact immutable constant
+  `timezone.utc`; the `tzinfo` slot inside the dominated exact-datetime raw
+  branch; or the receiver/method pair of the closed
+  call table. Subscript loads are permitted only on exact local dict/list/
+  tuple/string values, frozen tuple fields, or inside the exact raw-copier
+  branch below. Imported module/class attributes, function/class metadata,
+  dunder attributes, and mutable external registries/context (including
+  `decimal.DefaultContext`, `hashlib.algorithms_available`, and
+  `json.encoder`) are rejected. The checker propagates model-field and
+  approved-call result provenance through simple local assignments; unknown
+  provenance fails closed.
+- The validation boundary consists only of `validate_kernel_input_v1` and one
+  private recursive `_copy_raw_value` helper; these are the only functions
+  that accept an unvalidated object. Before Pydantic sees it, the preflight
+  requires an exact built-in
+  `dict` root with exact string keys and recursively accepts only exact
+  `dict`/`list`/`tuple`, `None`, `bool`, `int`, `str`, `bytes`,
+  `Decimal`, and aware `datetime` values whose `tzinfo` has exact built-in
+  `timezone` type. It copies dicts, normalizes exact
+  lists/tuples to new tuples, and never calls, formats, stringifies, or takes
+  `repr` of a supplied value. Subclasses, callables, custom mappings/iterables,
+  naive/non-finite values, or unknown objects append a sanitized structural
+  finding containing only an allowlisted field path/code. The helper returns
+  `(detached_or_safe_none, remaining_budget, findings_tuple)`, substitutes
+  exact `None` for an unsafe/over-limit branch, and continues safe siblings so
+  classification never depends on traversal order. The safe detached
+  exact-built-in tree is always passed to
+  `KernelEvaluationInputV1.model_validate` (or `{}` when the root itself was
+  invalid) so type/extra/missing defects in other branches are still found;
+  no raw value may reach `json.dumps`, hashing, an error formatter, or another
+  local function. In `_copy_raw_value`, the first operation is
+  `value_type = type(value)`. Any iteration, subscript, comparison other than
+  that identity classification, or method call on `value` must be lexically
+  dominated by the matching `value_type is dict/list/tuple/str/bytes/int/bool/
+  Decimal/datetime` branch. The checker has a dedicated rule for this
+  helper; besides the exact safe built-ins/methods above, the only module
+  function it may call is itself. This explicit container normalization is the sole
+  pre-model coercion; scalar values remain strict.
+- Inside the exact-datetime branch, the helper first loads only the C-level
+  `value.tzinfo` slot, requires `type(value.tzinfo) is timezone`, and only then
+  may call `utcoffset`/`astimezone`. A custom `tzinfo` subclass is rejected
+  without invoking it. Fixed-offset built-in `timezone` values remain valid,
+  preserving the equal-instant/different-offset fingerprint case.
+- Preflight is total over cyclic and oversized exact containers. Immutable
+  module constants bind `MAX_RAW_DEPTH=64`, `MAX_RAW_NODES=50000`,
+  `MAX_RAW_CONTAINER_ITEMS=10000`, `MAX_RAW_TEXT_CHARS=65536`, and
+  `MAX_RAW_BYTES=65536`, `MAX_RAW_ABS_INT=9223372036854775807`,
+  `MAX_DECIMAL_DIGITS=128`, and `MAX_DECIMAL_ABS_EXPONENT=128`.
+  `_copy_raw_value` carries depth and remaining-node budget as integers and
+  returns the detached value, remaining budget, and immutable finding tuple;
+  no mutable seen-set is
+  required. It checks depth/budget before descent and container/text/bytes size only
+  after the exact-type branch. A self-referential dict/list therefore reaches
+  the depth guard and records a structural finding rather than raising
+  `RecursionError`. Exact ints are range-checked before later use. Exact finite
+  Decimals are checked via `as_tuple()` for digit count and exponent range,
+  without Decimal arithmetic or global context. Depth, node, item, text,
+  numeric-range, naive-time, and non-finite failures
+  use closed codes/allowlisted paths and never embed raw keys or values.
+- Direct module statements may only be one optional docstring, allowlisted
+  imports, class/function definitions satisfying the definition grammar
+  below, and plain `Assign` statements from the immutable-constant grammar to
+  one simple name. Module `AnnAssign`, type-alias assignments, executable
+  expressions, control flow, augmented assignment, and deletion are all
+  forbidden. PEP-604 unions and `Literal` expressions are written inline in class
+  field or function annotations; no typing object or Pydantic field metadata
+  is stored in a module-global alias.
+- The immutable-constant grammar contains only `None`/`True`/`False`, string,
+  bytes and integer literals; unary `+`/`-` on integer
+  literals; tuple displays whose elements recursively use this grammar; and
+  previously declared immutable module constants. It excludes every call,
+  attribute, subscript, comprehension, generator, lambda, f-string, starred
+  expression, named expression, binary operator other than the unary numeric
+  signs, and list/set/dict display. Therefore `CHECKS = sorted(...)`,
+  `json.loads(...)`, `tuple(...)`, `frozenset(...)`, `model_dump()`, and all
+  other module-scope calls are rejected.
 
-A binding regression fixture proves both halves: a module variant containing
-`CHECKS = sorted(("b", "a"))` at module scope is rejected by the AST gate,
-and the same list value injected as a module global is rejected by the
-runtime immutability scan. The import allowlist above is unchanged by this
-rule.
+Every expression evaluated while a `def` or `class` is created is separately
+closed:
+
+- A function may omit an annotation. When present, each parameter and return
+  annotation must use the type-expression grammar below. Positional and
+  keyword defaults are absent or use the immutable-constant grammar; no
+  call, mutable display, `*`/`**` expansion, or default factory is legal.
+  Module functions have no decorators. Kernel evidence classes define no
+  methods, so class-body function definitions and every decorator are
+  forbidden in v1. Timestamp awareness, bounded strings/numbers, and
+  cross-field rules are checked by the pure validation/evaluation functions,
+  not by definition-time Pydantic decorators.
+- The type-expression grammar permits: built-in scalar names `str`, `int`,
+  `bool`, and `bytes`; `None`; frozen model classes already defined in the
+  module; and the exact local names `datetime`, `timezone`, `Decimal`, and
+  `Literal` from the import table.
+  `BaseModel` is permitted only in the exact class-base shape below; imported
+  functions such as Pydantic helpers, `json` functions, and hash functions
+  are never type operands. The grammar also permits PEP 604 `A | B` and
+  subscripts of only `tuple` and `Literal`. Generic tuple slices and
+  `Literal[...]` accept only recursively valid type expressions or literal
+  constants as appropriate. Attribute access, calls, all other subscripts,
+  and other operators are rejected. The recursive model-tree test remains the
+  stricter gate that forbids `Any`, `object`, `dict`, `list`, `set`, and open
+  mappings in persisted evidence models.
+- Class headers have no decorators, keywords, or metaclass expression. Their
+  bases must be simple names and one of three exact shapes:
+  `FrozenKernelModel(BaseModel)`, an evidence model with the sole base
+  `FrozenKernelModel`, or the one public error
+  type has the exact shape `KernelEvidenceValidationError(ValueError)`. A
+  class body permits
+  a docstring; annotated Pydantic fields whose annotation uses the type
+  grammar and whose optional default is
+  an immutable constant; exactly one
+  `model_config = ConfigDict(...)` in `FrozenKernelModel` with constant
+  keyword arguments from the exact set `frozen`, `extra`, `strict`, and
+  `revalidate_instances`. No positional argument, nested call, method, or
+  other class-body statement/definition-time expression is legal.
+
+The runtime companion gate is a backstop driven by those AST sets; it does not
+guess provenance from value type:
+
+- It exempts only the exact interpreter-created names `__name__`, `__doc__`,
+  `__package__`, `__loader__`, `__spec__`, `__file__`, `__cached__`, and
+  `__builtins__`, after checking their normal shapes and that source code never
+  loads or assigns them. `__loader__` must be `None` or identical to
+  `__spec__.loader`; `__builtins__` must be the actual `builtins` module or an
+  exact dict whose entries for **every** permitted built-in name loaded by the
+  valid source (calls, raw type comparisons such as `dict`/`list`, class bases
+  such as `ValueError`, and exception handlers) are identical to the
+  corresponding object in the actual `builtins` module. Invalid source that
+  loads a forbidden name is rejected by the pre-import AST gate instead.
+  No other dunder
+  name is automatically exempt. `__annotations__` must be absent because
+  module `AnnAssign` is forbidden.
+- Each AST import binding is exempt only when resolving the allowlisted source
+  module/member in the test process yields the identical runtime object. This
+  covers the imported typing special form `Literal` without
+  exempting a rebound value.
+- Each AST class/function name must resolve to a class/function respectively.
+  Function `__defaults__` must be `None` or a tuple recursively satisfying the
+  immutable-constant runtime types. `__kwdefaults__` must be `None` or an exact
+  dict whose string-key set equals the AST keyword-only parameters with
+  defaults and whose values recursively satisfy the immutable-constant types;
+  this narrowly allowed interpreter-created dict is not a general mutable-
+  global exemption. Every remaining runtime name must be
+  an AST-declared constant whose value is `None`, `bool`, `int`, `str`,
+  `bytes`, or a tuple recursively containing only those
+  values. Any additional name or any list/set/dict/bytearray/open-ended value
+  fails. Class metadata is trusted only because the exhaustive class-header,
+  field, default, decorator, and body AST grammar above has already passed.
+
+Binding regression fixtures prove the checker rejects module
+`CHECKS = sorted(("b", "a"))`, `def f(cache=json.loads("[]"))`, a call in an
+annotation, a call in a class base, an arbitrary decorator call, a module
+`AnnAssign`, an imported-name rebind, an injected mutable runtime global,
+`sorted(values, key=open)`, `json.dumps(value, default=eval)`, a `SystemExit`
+raise, `from decimal import DefaultContext`, `from json import
+_default_encoder`, an unapproved imported attribute read, and a tampered
+`__builtins__` binding. Raw validation fixtures include objects whose `__iter__`,
+`__getitem__`, comparison, `__str__`, `__repr__`, `__format__`, and `__call__`
+all explode, plus an exact `datetime` carrying a hostile custom `tzinfo`;
+none is invoked and no attacker text appears. Self-referential
+dict/list, depth/node/item/text overflow, and naive/non-finite values all
+return the same sanitized structural-error family without an uncaught
+exception. Two binding aggregation fixtures require: two naive timestamps
+produce `naive_or_invalid_timestamp` with sorted allowlisted paths, while one
+naive timestamp plus any non-timestamp defect produces
+`invalid_evidence_schema`; preflight may not stop at the first naive field.
+A minimal kernel-shaped fixture using frozen Pydantic fields, inline PEP-604
+union/`Literal`/tuple annotations, and the exact `ConfigDict` must pass both
+AST and runtime gates. The reduced import allowlist is exactly the list above.
+
+All closed categorical/state/check fields in v1 use inline
+`Literal["..."]` annotations, never Python `Enum` fields. This is binding
+because Pydantic `strict=True` rejects a raw string for an Enum-typed field,
+while accepting an Enum instance would expand the raw-object boundary. Literal
+strings keep the raw adapter, strict structural validation, canonical JSON,
+and fingerprint representation identical.
 
 ### 4.2 Versioned input
 
@@ -548,11 +789,21 @@ rule (conversion failure is caught and returns mismatch) in a separately
 verified fail-closed-only runtime change, accepted no later than Gate
 `QP-KER-015` and before any parity gate treats version evidence as safe.
 Only then is kernel/legacy parity over the version corpus required, and the
-corpus must include a focused regression case in which one side is a Unicode
-digit string such as `"²"`: both the hardened legacy helper and the kernel
-return mismatch without raising. The kernel may not block a version pair
-that the legacy rule accepts, and the parity corpus must include one equal
-pair that matches only under the non-numeric string fallback.
+corpus must bind all of these focused regressions:
+
+```text
+"²" vs "2"       -> mismatch, no exception
+"²" vs "²"       -> mismatch, no exception, no exact-string fallback
+"２" vs "2"      -> match
+"２.０" vs "2"   -> match after numeric conversion/trailing-zero removal
+```
+
+The two superscript cases distinguish the required `isdigit()`-then-guarded-
+`int()` rule from an incorrect `isdecimal()` plus string-fallback
+implementation; the fullwidth cases preserve versions the legacy helper
+already accepts. The kernel may not block a version pair that the hardened
+legacy rule accepts, and the parity corpus must also include one equal pair
+that matches only under the ordinary non-numeric string fallback.
 
 The exact authority check sequences for `authority_algorithm_version=1` are:
 
@@ -817,7 +1068,7 @@ session_status
 session_lease_deadline
 ```
 
-`checkpoint_status` is the closed enum
+`checkpoint_status` is the closed Literal string
 `started | completed | blocked | failed`; only `started` may create a new
 submission. `session_status` is `active | closed | abandoned`; only `active`
 with `evaluated_at < session_lease_deadline` qualifies.
@@ -923,7 +1174,7 @@ closed profile. Eligible KIS paper sets both to `required`; eligible mock and
 in-process simulated paper set both to `not_required`.
 
 `evidence_fingerprint` is SHA-256 over a canonical JSON projection of every
-input field. Canonicalization uses JSON-mode enum values; UTC `Z` timestamps
+input field. Canonicalization uses the Literal string values directly; UTC `Z` timestamps
 with exactly six fractional digits; UTF-8 with `ensure_ascii=false`;
 `sort_keys=true`; compact separators; and `allow_nan=false`. Decimal values are
 finite and formatted from `Decimal.as_tuple()` without consulting the mutable
@@ -1032,11 +1283,11 @@ validate_kernel_input_v1(raw_snapshot)
   -> valid deeply immutable input
   -> or KernelEvidenceValidationError
 
-evaluate_execution(input: KernelEvaluationInputV1)
+evaluate_execution(evidence: KernelEvaluationInputV1)
   -> KernelDecisionV1
 ```
 
-Structural validation is limited to type/shape, closed enums, finite numeric
+Structural validation is limited to type/shape, closed Literal values, finite numeric
 values, bounded opaque references, and aware timestamps. Kind/run-mode/policy/
 strategy/risk binding contradictions remain semantic decisions so their closed
 reasons are stable. The public validator catches and sanitizes the underlying
@@ -1049,6 +1300,14 @@ If every structural defect is an invalid/naive timestamp, the code is
 `naive_or_invalid_timestamp`; every mixed or other structural failure uses
 `invalid_evidence_schema`. The evaluator is total for a constructed input and
 does not raise for semantic allow/block conditions.
+
+The validator aggregates three immutable finding tuples before choosing that
+code: raw-preflight findings, sanitized Pydantic `errors(...)`, and the closed
+timestamp-path scan of the safe detached tree. Pydantic validation therefore
+runs even when preflight found a safely replaceable defect; no invalid raw
+object is passed to it. Only a zero-finding successful Pydantic model is
+returned. This ordering is what makes the two-naive and mixed-defect fixtures
+independent of traversal/Pydantic fail order.
 
 The initial shadow runner maps a construction error to a structured
 non-authoritative `evidence_error` comparison. It neither changes nor suppresses
@@ -1143,7 +1402,7 @@ known dispatch re-entry routes only to replay/reconciliation and cannot POST.
 ## 5. Mode and composition contract
 
 The later shadow runner reads `EXECUTION_KERNEL_V2_MODE` at the composition
-boundary and converts it to a closed mode enum:
+boundary and converts it to a closed mode value:
 
 ```text
 off       # default; kernel is not constructed or called
@@ -1374,7 +1633,8 @@ The minimum pure-model case matrix is binding:
 | denied or internally inconsistent authorization | `blocked/authorization` stage |
 | Level 4/5 authorization and candidate strategy bindings disagree | `blocked/strategy_binding_mismatch` |
 | recipe/registry version pair equal only under the legacy non-numeric string fallback | eligible; kernel matches `strategy_versions_match` |
-| version pair where one side is a Unicode digit string (for example `"²"` vs `"2"`) | `blocked/authorization` with the closed version-binding reason; no exception raised; hardened legacy helper returns the same mismatch |
+| `"²"` vs `"2"` and `"²"` vs `"²"` | `blocked/authorization` with the closed version-binding reason; no exception; no string fallback |
+| `"２"` vs `"2"` and `"２.０"` vs `"2"` | eligible when all other evidence passes; numeric Unicode behavior preserved |
 | risk ID/policy/idempotency disagreement | `blocked/risk_check_mismatch` |
 | expired fresh-risk evidence | `blocked/risk_check_expired` |
 | failed single or batch risk | the corresponding closed risk reason |
@@ -1395,6 +1655,8 @@ The minimum pure-model case matrix is binding:
 | source list/dict mutated after validation | input, decision, fingerprint unchanged |
 | extra `api_key`/`account_number`/raw response field | sanitized structural error; secret absent from text |
 | naive timestamp or non-finite numeric | sanitized structural error |
+| two naive timestamps and no other defect | `naive_or_invalid_timestamp`; both allowlisted paths sorted |
+| one naive timestamp plus any other structural defect | `invalid_evidence_schema`; no fail-fast timestamp misclassification |
 | multiple failures in one stage | sorted unique reasons from that stage only |
 | failures in different stages | reasons from first stage only; suffix `not_evaluated` |
 | authorization failure on a pre-approved-state proposal | authorization reason; candidate and suffix not evaluated |
@@ -1445,6 +1707,12 @@ default-off behind a reversible flag. Every cutover is separately reversible
 and starts disabled. KIS is last.
 `partial_allow`, outbox/single-writer, ledger, and continuous runtime remain
 subsequent roadmap missions.
+
+The exact Gate-070 flag name and its closed composition matrix with
+`EXECUTION_KERNEL_V2_MODE`, profile, data mode, and unknown-value handling are
+an acknowledged nonblocking P2 for Gates 010/015. Gate 070 may not move to
+`ready` until that P2 is closed in a reviewed contract/ADR; unknown or
+unsupported combinations must fail closed and the flag must default false.
 
 ## 9. Gate acceptance and rollback
 

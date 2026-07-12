@@ -115,7 +115,8 @@ Gate 2 accepted
 
 - Claude Code session capacity resets at `2026-07-12 12:20 KST`. This blocks
   the required counterpart artifact and therefore runtime implementation, but
-  does not block Codex inventory/contract drafting.
+  does not block Codex inventory/contract drafting. A hidden, docs-only Claude
+  review process is scheduled for `12:21 KST`; it has no runtime ownership.
 - Real KIS paper validation requires user credentials and explicit manual
   authority. It remains Gate P and does not block fake-only contract/model work.
 - Reproduced P1 pre-cutover finding: current Level 3 legacy submission can fill
@@ -221,6 +222,11 @@ Required invariant evidence:
   inferred: a past-expiry, user-approved Level 3 mock order with a still-valid
   risk check became `filled` with one broker fill. Classified P1 for cutover;
   runtime fix remains held for counterpart contract review.
+- `2026-07-12 09:00 KST` — Scheduled hidden process PID `71524` to start the
+  required Claude Code Fable review at `12:21 KST` in
+  `claude/qp-kernel-v2-review`. Standard output/error are redirected to
+  temporary `qp-kernel-claude-review.*.log` files. The prompt restricts writes
+  to the two contract docs and requires its own reviewed commit.
 
 ## Handoff record
 

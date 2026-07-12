@@ -511,6 +511,38 @@ computes the output fingerprint once. A later executor-envelope contract may
 recompute and compare that fingerprint, but v1 does not pretend to verify a
 nonexistent input fingerprint.
 
+### 4.6 Submission evidence retained outside the pure decision
+
+The current submission call also carries full `PortfolioSnapshot`, optional
+`ManagedPositionBinding`, optional `Quote`, `paper_run_id`, optional
+`entry_atr14`, and optional `before_broker_submit` callback. V1 does not embed
+these mutable/domain objects or a callable in its fingerprinted pure input.
+
+This is not permission to drop them. The shadow/cutover adapter must retain the
+original values and pass them unchanged to the existing legacy submission
+boundary after an eligible decision. Kernel evidence binds their relevant
+identity through snapshot ID/time, explicit-presence flags, professional
+authorization evidence, and opaque run/provenance references. The external
+paper coordinator remains responsible for its stronger full request
+fingerprint over order, snapshot, quote, ATR, buying power, and reserve basis.
+
+The pure evaluator never calls the submission fence. During later cutover the
+side-effecting facade must preserve the existing order exactly:
+
+```text
+first final-safety snapshot
+-> eligible KernelDecision
+-> OrderStatus.submitted transition
+-> before_broker_submit fence callback
+-> second final-safety snapshot
+-> durable prepare/reservation when external paper
+-> exactly one broker submit
+```
+
+Tests compare object snapshots/identities at the adapter boundary and prove the
+callback is invoked exactly once only by the authoritative executor, never by
+shadow evaluation.
+
 ## 5. Mode and composition contract
 
 The later shadow runner reads `EXECUTION_KERNEL_V2_MODE` at the composition
@@ -703,6 +735,7 @@ The minimum pure-model case matrix is binding:
 | `QP-KER-010` | pure frozen model/evaluator and unit tests | none |
 | `QP-KER-020` | default-off mock shadow runner and normalized comparison | none |
 | `QP-KER-030` | exhaustive Level 1-5 mock/simulated-paper parity corpus | none |
+| `QP-KER-035` | common side-effecting facade preserving legacy arguments and sole submit call | none |
 | `QP-KER-040` | Level 3 direct/ticket handoff cutover | only after separate audit; no new broker |
 | `QP-KER-050` | Level 4 handoff cutover | existing guarded authority only |
 | `QP-KER-060` | Level 5 ordinary and professional handoff cutover | existing Level 5 authority only |

@@ -68,7 +68,8 @@ Statuses: `proposed`, `ready`, `in_progress`, `review`, `integrated`, `done`,
 | `QP-KER-010` | GPT-5 Codex lead | Claude Code + independent read-only audit | accepted `QP-KER-000B` | new `주식트레이더-kernel-v2-pure` / `codex/qp-kernel-v2-pure` | `quantpilot/packages/core/execution/kernel.py`, `quantpilot/tests/unit/test_execution_kernel_v2.py` | proposed | Frozen pure input/output, closed decision order, deterministic fingerprint, forbidden-import and zero-side-effect tests. | pending |
 | `QP-KER-020` | GPT-5 Codex lead | independent audit | `QP-KER-010` | new isolated worktree / `codex/qp-kernel-v2-shadow` | `quantpilot/packages/core/execution/kernel_shadow.py`, focused tests, minimal composition/config boundary | proposed | `off` default; unknown mode fails closed; shadow itself has no authoritative mutation; current-order expiry mismatch is fixed fail-closed rather than ignored; no second broker callable. | pending |
 | `QP-KER-030` | best-fit test owner | independent auditor | `QP-KER-020` | separate parity worktree | kernel parity tests only | proposed | L1-2, L3 direct/ticket, L4 blocked/success, L5 dry/blocked/success, professional risk reduction, and fake KIS evidence parity; all side-effect counters zero. | pending |
-| `QP-KER-040` | GPT-5 Codex lead | Claude Code/read-only audit | `QP-KER-030` | separate Level 3 worktree | Level 3 adapters and tests | proposed | Direct and ticket paths use the common handoff; direct approval gains explicit persisted actor evidence or remains fixture mock/simulated-paper `unverified_local`; ticket actor binding is retained; no broker expansion. | pending |
+| `QP-KER-035` | GPT-5 Codex lead | independent safety audit | `QP-KER-030` | separate facade worktree / `codex/qp-kernel-v2-facade` | `quantpilot/packages/core/execution/kernel_service.py`, focused facade tests, minimal dependency injection | proposed | One authoritative facade preserves snapshot/quote/binding/run/ATR/fence arguments, invokes the fence exactly once in legacy order, and reaches only the existing single submit boundary. | pending |
+| `QP-KER-040` | GPT-5 Codex lead | Claude Code/read-only audit | `QP-KER-035` | separate Level 3 worktree | Level 3 adapters and tests | proposed | Direct and ticket paths use the common handoff; direct approval gains explicit persisted actor evidence or remains fixture mock/simulated-paper `unverified_local`; ticket actor binding is retained; no broker expansion. | pending |
 | `QP-KER-050` | GPT-5 Codex lead | independent audit | `QP-KER-040` | separate Level 4 worktree | Level 4 adapter and tests | proposed | Existing `authorize_level4()` evidence is adapted once; default disabled and kill behavior unchanged. | pending |
 | `QP-KER-060A` | GPT-5 Codex lead | independent audit | `QP-KER-050` | separate Level 5 worktree | ordinary operator adapter and tests | proposed | Existing Level 5 fallback/reporting preserved; no LLM/RL authority; common handoff used. | pending |
 | `QP-KER-060B` | GPT-5 Codex lead | independent audit | `QP-KER-060A` | separate professional worktree | professional protective/retirement adapter and tests | proposed | Position-binding and reduce-only evidence preserved; no exposure-increasing regression. | pending |
@@ -87,6 +88,7 @@ Gate 2 accepted
   -> QP-KER-010 pure model
   -> QP-KER-020 off/shadow runner
   -> QP-KER-030 exhaustive parity
+  -> QP-KER-035 common authoritative facade
   -> QP-KER-040 Level 3 cutover
   -> QP-KER-050 Level 4 cutover
   -> QP-KER-060A Level 5 ordinary cutover
@@ -106,6 +108,11 @@ Gate 2 accepted
   do not persist a shadow result.
 - `QP-KER-030 -> QP-KER-040+`: each level needs its own accepted parity corpus
   before authority switches.
+- `QP-KER-030 -> QP-KER-035`: introduce one facade that preserves every
+  existing submission argument and fence ordering; it may delegate only to the
+  accepted legacy submit boundary and may not receive a broker client directly.
+- `QP-KER-035 -> QP-KER-040+`: level adapters call the facade, not a new broker
+  port; each cutover proves one facade call and at most one existing submit.
 - `QP-KER-060B -> QP-KER-070`: KIS cutover may compose only with the existing
   coordinator and store provenance; it cannot call the client directly.
 - `QP-KER-080 -> QP-DURABLE-OUTBOX`: preserve the accepted typed handoff and

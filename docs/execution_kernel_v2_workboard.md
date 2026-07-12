@@ -3,8 +3,10 @@
 ## Document edit lease
 
 - Lease status: `free`
-- Document editor: `none` (last held by Claude Code `claude-fable-5` for
-  `QP-KER-000D`; acquired and released `2026-07-13 KST` with its review commit)
+- Document editor: `none` (last held by Claude Code `claude-fable-5` for the
+  `QP-KER-000D` purity-audit closure follow-up; acquired and released
+  `2026-07-13 KST` with the `docs(kernel): close final purity audit gaps`
+  commit)
 - Mission/task ID: `QP-KERNEL-V2`
 - Acquired at: `none`
 
@@ -53,6 +55,32 @@
     now stated as module-scope `list()`/`set()`/`dict()` constructor calls.
   - P2: the contract-task verification diff base was stale for review
     branches; each review branch now diffs against its own accepted base.
+- Post-review independent Codex purity audit of the committed `QP-KER-000D`
+  artifact (`c74a491`): P0=0, P1=1, P2=1. Both closed by the same Claude Code
+  reviewer (session model ID `claude-fable-5`) in the follow-up commit
+  `docs(kernel): close final purity audit gaps` on this branch:
+  - P1: the "exact" AST purity rule rejected only mutable
+    literals/comprehensions and `list()`/`set()`/`dict()` constructor calls,
+    so module-scope calls such as `sorted(...)`, `json.loads(...)`, or
+    `model_json_schema()`/`model_dump()` could still create mutable module
+    globals. The rule is now mechanically complete: a closed module-scope
+    statement/expression allowlist forbids every module-scope call, a closed
+    type-alias form is carved out explicitly, class bodies get their own
+    closed form list, a recursive runtime module-global immutability scan
+    backs the AST gate, and a regression fixture proving
+    `CHECKS = sorted(...)` is rejected is binding. The import allowlist is
+    unchanged and only immutable constants the pure implementation needs are
+    permitted.
+  - P2: legacy `strategy_versions_match` (`state_machine.py`) uses
+    `str.isdigit()` then `int()`, so Unicode digit strings such as `"²"`
+    (U+00B2) raise `ValueError`; the helper is not total. The contract now
+    specifies the decision-complete total rule (conversion failure is a
+    mismatch, never an exception, never a string-fallback acceptance), binds
+    the gate ordering (legacy helper hardened fail-closed no later than Gate
+    015, before any version parity), and requires a focused Unicode-digit
+    regression case for kernel/legacy parity. Accepted versions are not
+    broadened.
+- Post-fix audit counts for the `QP-KER-000D` artifact: P0=0, P1=0, P2=0.
 - Claude cross-checks that found no defect: Level 4/5 authority check
   sequences match `authorize_level4/5()` exactly; registry status-to-earned-
   levels table matches `REGISTRY_STATUS_LEVELS`; lifecycle rank/minimum-status
@@ -115,9 +143,9 @@ Statuses: `proposed`, `ready`, `in_progress`, `review`, `integrated`, `done`,
 | `QP-KER-000A` | GPT-5 Codex lead | Claude Code | Gate 2 | `주식트레이더-kernel-v2-contract` / `codex/qp-kernel-v2-contract` | `docs/execution_kernel_v2_contract.md`, `docs/execution_kernel_v2_workboard.md` | review | Repository inventory and decision-complete draft; no runtime edits; original main untouched. | draft `d3023a2` |
 | `QP-KER-000B` | Claude Code exact model to be recorded | GPT-5 Codex lead | `QP-KER-000A` | `주식트레이더-claude-kernel-v2-review` / `claude/qp-kernel-v2-review` | the same two docs in an isolated review branch only | blocked | Preserve partial file; do not claim completion or integrate without a reviewed commit. | one uncommitted contract file; account reset `2026-07-13 00:30 KST` |
 | `QP-KER-000C` | GPT-5 Codex lead | three read-only Codex audits | `QP-KER-000A`, Gate 2 mainline | `주식트레이더-kernel-v2-contract-hardening` / `codex/qp-kernel-v2-contract-hardening` | the same two docs only | done | Rebind to `70219d4`; close decision/auth/purity/durable/KIS findings; no runtime edits. | `2de0965`; auth P0/P1/P2=0, purity P0/P1/P2=0, KIS P0/P1=0/P2=1 |
-| `QP-KER-000D` | Claude Code CLI 2.1.205 / `claude-fable-5` | GPT-5 Codex lead | committed `QP-KER-000C` | `주식트레이더-claude-kernel-v2-final-review` / `claude/qp-kernel-v2-final-review` | the same two docs only | review | Independent final review/revision committed; only two docs changed; lead cross-check P0/P1=0. | committed on branch as `docs(kernel): complete Claude final contract review` (hash reported in the task response); P0=0, P1=2 closed, P2=3 closed |
+| `QP-KER-000D` | Claude Code CLI 2.1.205 / `claude-fable-5` | GPT-5 Codex lead | committed `QP-KER-000C` | `주식트레이더-claude-kernel-v2-final-review` / `claude/qp-kernel-v2-final-review` | the same two docs only | review | Independent final review/revision committed; only two docs changed; lead cross-check P0/P1=0. | `c74a491` `docs(kernel): complete Claude final contract review`; P0=0, P1=2 closed, P2=3 closed. Post-review Codex purity audit (P0=0, P1=1, P2=1) closed in follow-up `docs(kernel): close final purity audit gaps` (hash in task response); post-fix P0/P1/P2=0 |
 | `QP-KER-010` | GPT-5 Codex lead | Claude Code + independent read-only audit | accepted `QP-KER-000D` | new `주식트레이더-kernel-v2-pure` / `codex/qp-kernel-v2-pure` | `quantpilot/packages/core/execution/kernel.py`, `quantpilot/tests/unit/test_execution_kernel_v2.py` | proposed | Strict deeply frozen pure model, import allowlist, closed decision order, deterministic fingerprint, zero side effects. | pending |
-| `QP-KER-015` | GPT-5 Codex lead | independent safety audit | `QP-KER-010` | separate expiry-hardening worktree | legacy submit/coordinator/store temporal checks and focused tests only | proposed | Use existing v11 order payload (no migration), strict expiry parse/effective deadline/reopen test; both safety fences, preclaim/restart/pre-POST; no ambiguous retry/release. | pending |
+| `QP-KER-015` | GPT-5 Codex lead | independent safety audit | `QP-KER-010` | separate expiry-hardening worktree | legacy submit/coordinator/store temporal checks and focused tests only | proposed | Use existing v11 order payload (no migration), strict expiry parse/effective deadline/reopen test; both safety fences, preclaim/restart/pre-POST; no ambiguous retry/release; total fail-closed `strategy_versions_match` legacy hardening with Unicode-digit regression before any version parity. | pending |
 | `QP-KER-020` | GPT-5 Codex lead | independent audit | `QP-KER-015` | new isolated worktree / `codex/qp-kernel-v2-shadow` | `quantpilot/packages/core/execution/kernel_shadow.py`, focused tests, minimal stage-local adapters/config boundary | proposed | `off` default; unknown mode fails closed; real blocked-path evidence prefixes; zero authoritative mutation; no second broker callable. | pending |
 | `QP-KER-030` | best-fit test owner | independent auditor | `QP-KER-020` | separate parity worktree | kernel parity tests only | proposed | L1-2, mock/sim L3, L4 blocked/success, L5 blocked/success, dry-run zero-call; professional closed; all shadow counters zero. | pending |
 | `QP-KER-035` | GPT-5 Codex lead | independent safety audit | `QP-KER-030` | separate facade worktree / `codex/qp-kernel-v2-facade` | `quantpilot/packages/core/execution/kernel_service.py`, focused facade tests, minimal dependency injection | proposed | One authoritative facade preserves snapshot/quote/binding/run/ATR/fence arguments, invokes the fence exactly once in legacy order, and reaches only the existing single submit boundary. | pending |
@@ -208,8 +236,9 @@ git diff --name-only <accepted-base>..HEAD
 
 `<accepted-base>` is the accepted commit the branch started from (`1bb6be4` for
 the `QP-KER-000C` hardening branch, `e5d91c9` for the `QP-KER-000D` review
-branch). Only the two Kernel v2 documents may change in each contract/review
-branch.
+branch, `c74a491` for the `QP-KER-000D` purity-audit closure follow-up on the
+same branch). Only the two Kernel v2 documents may change in each
+contract/review branch.
 
 ### Pure-model task
 
@@ -340,6 +369,23 @@ Required invariant evidence:
   Level 3 parity exclusion, AST-rule constructor-call wording, and per-branch
   contract-task diff base. Runtime work remains held; `QP-KER-010` was not
   started.
+- `2026-07-13 KST` — A post-review independent Codex purity audit of the
+  committed `QP-KER-000D` artifact at `c74a491` found P0=0, P1=1, P2=1: the
+  AST purity rule still admitted mutable module globals created by
+  module-scope calls (`sorted(...)`, `json.loads(...)`,
+  `model_json_schema()`/`model_dump()`), and legacy `strategy_versions_match`
+  is not total over Unicode digit strings (`isdigit()` passes, `int()` raises
+  `ValueError`, verified against `state_machine.py:93-107`). The same Claude
+  Code reviewer (`claude-fable-5`) closed both in the two owned documents:
+  closed module-scope statement/expression policy with a full call ban, an
+  explicit type-alias form, closed class-body forms, a recursive runtime
+  module-global immutability scan, and a binding `CHECKS = sorted(...)`
+  rejection fixture; plus the decision-complete total version rule,
+  fail-closed conversion handling, Gate-015-bounded legacy hardening
+  ordering, and a Unicode-digit parity regression. Post-fix P0/P1/P2=0.
+  Safe defaults, no-rePOST, KIS, auth, expiry, and stage-precedence contracts
+  are unchanged; no runtime code was touched; `QP-KER-010` was not started.
+  Committed as `docs(kernel): close final purity audit gaps`.
 
 ## Handoff record
 
@@ -394,6 +440,34 @@ integration_requests: Codex lead diff-reviews and integrates this commit,
   cross-checks P0/P1=0, then and only then starts QP-KER-010
 ```
 
+```text
+task_id: QP-KER-000D (purity-audit closure follow-up)
+agent_and_model: Claude Code, session model ID claude-fable-5 (CLI build
+  2.1.205 as recorded at QP-KER-000D start; no newer build ID was verifiable
+  in this session and none is claimed)
+commit: this branch's `docs(kernel): close final purity audit gaps` commit;
+  exact hash reported in the task response and to be recorded by the
+  integrator
+base: c74a491 on claude/qp-kernel-v2-final-review; governing main 70219d4
+owned_paths:
+  - docs/execution_kernel_v2_contract.md
+  - docs/execution_kernel_v2_workboard.md
+acceptance_met: yes; post-review independent Codex purity audit findings
+  (P0=0, P1=1, P2=1) both closed inside the two owned documents; post-fix
+  P0=0, P1=0, P2=0; import allowlist, safe defaults, no-rePOST, KIS, auth,
+  expiry, and stage-precedence contracts unchanged; accepted versions not
+  broadened
+exact_checks: git diff --check (clean); git status --short (only the two
+  owned docs modified pre-commit); git diff --name-only c74a491..HEAD (only
+  the two owned docs)
+known_limits: docs-only closure; the strategy_versions_match runtime
+  hardening itself lands at Gate 015 per the bound ordering; no test/smoke
+  run was required or performed; KIS Gate P remains manual
+integration_requests: Codex lead diff-reviews and integrates this commit
+  together with c74a491, cross-checks P0/P1=0, then and only then starts
+  QP-KER-010
+```
+
 ## Mission retrospective
 
 | Task ID | Task class | Agent/model | First-pass | P0 | P1 | P2 | Rework cycles | Required checks | Elapsed | Rating |
@@ -402,6 +476,7 @@ integration_requests: Codex lead diff-reviews and integrates this commit,
 | `QP-KER-000B` | independent binding review | Claude Code exact model pending | incomplete | 0 | not fully assessed | not fully assessed | 0 | reviewed two-doc commit | account reset pending | 0 |
 | `QP-KER-000C` | contract hardening | GPT-5 Codex desktop + three read-only audits | accepted Codex gate | 0 | 0 | 1 | 3 | two-doc allowlist + diff check | complete | 4 |
 | `QP-KER-000D` | final independent binding review | Claude Code CLI 2.1.205 / `claude-fable-5` | review committed first pass | 0 | 2 found, 2 closed | 3 found, 3 closed | 0 | reviewed two-doc commit + diff/status/name-only checks | complete; integration pending | pending lead cross-check |
+| `QP-KER-000D` follow-up | purity-audit closure | Claude Code / `claude-fable-5` | closure committed first pass | 0 | 1 found, 1 closed | 1 found, 1 closed | 0 | two-doc allowlist + diff/status/name-only checks | complete; integration pending | pending lead cross-check |
 
 - Routing decision quality: pending counterpart and implementation evidence.
 - Capability scorecard update: append only after an accepted task artifact.

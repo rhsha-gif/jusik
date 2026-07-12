@@ -7,8 +7,14 @@ read-only audit axes report P0=0/P1=0. The Claude Code (`claude-fable-5`)
 against current source, found P0=0/P1=2/P2=3, and closed all five inside this
 document (version-comparison fallback, blocked-outcome parity normalization,
 KIS Level 3 parity exclusion, AST-rule wording, review-branch diff base).
-Runtime implementation remains held until the mission lead integrates this
-review and cross-checks P0/P1=0.
+A subsequent independent Codex purity audit of that review found P0=0/P1=1/
+P2=1: the "exact" AST purity rule still admitted mutable module globals
+created by module-scope calls such as `sorted(...)`, and the
+`strategy_versions_match` legacy rule was not total over Unicode digit
+strings. Both are closed in this document by the same Claude reviewer
+(commit `docs(kernel): close final purity audit gaps`); post-fix counts are
+P0=0/P1=0/P2=0. Runtime implementation remains held until the mission lead
+integrates this review and cross-checks P0/P1=0.
 
 ## 1. Purpose and governing baseline
 
@@ -183,17 +189,67 @@ It has no project-internal imports in v1. In particular, importing
 allowed. An AST test rejects every non-allowlisted import, `open`,
 `__import__`, `eval`, `exec`, dynamic import/reflection, filesystem, socket,
 subprocess, environment, random/secret/UUID generation, wall-clock calls, and
-module-level mutable collections. The contract does not claim transitive
-purity for any future import until that module receives its own equivalent
-audit.
+mutable module globals. The contract does not claim transitive purity for any
+future import until that module receives its own equivalent audit.
 
-The AST rule is exact: `Import`/`ImportFrom` roots must be in the allowlist;
-calls named `open`, `__import__`, `eval`, `exec`, `compile`, `getattr`,
-`setattr`, `delattr`, `globals`, `locals`, or `vars` are forbidden; attribute
-calls ending in `now`, `utcnow`, or `today` are forbidden; and module-scope
-`list()`/`set()`/`dict()` constructor calls, list/set/dict comprehensions, or
-assignments whose value is a mutable literal are forbidden. Aliases are
-resolved before call checks.
+The AST rule is exact, and the module-scope policy is closed (an allowlist of
+statement and expression forms), not a call-name denylist:
+
+- `Import`/`ImportFrom` roots must be in the allowlist. Calls named `open`,
+  `__import__`, `eval`, `exec`, `compile`, `getattr`, `setattr`, `delattr`,
+  `globals`, `locals`, or `vars` are forbidden anywhere in the module;
+  attribute calls ending in `now`, `utcnow`, or `today` are forbidden
+  anywhere. Aliases are resolved before call checks.
+- Statements directly at module scope may only be: one optional module
+  docstring, allowlisted imports, `class` and `def` definitions, and plain or
+  annotated assignments of the immutable-constant grammar below to simple
+  names. Every other module-scope statement form (expression statements other
+  than the docstring, `if`/`for`/`while`/`try`/`with`, augmented assignment,
+  `del`, `global`) is rejected.
+- The immutable-constant grammar is closed: `None`/`True`/`False`, string and
+  numeric literals, unary `+`/`-` on numeric literals, tuple displays whose
+  elements are grammar expressions, and simple names already bound at module
+  scope by this same rule. Every expression form outside the grammar is
+  rejected at module scope — in particular **every call expression without
+  exception** (not merely `list()`/`set()`/`dict()`; `sorted(...)`,
+  `json.loads(...)`, `tuple(...)`, `frozenset(...)`,
+  `model_json_schema()`, `model_dump()`, and any other call are all
+  rejected), plus comprehensions, generator expressions, lambdas, f-strings,
+  starred expressions, subscripts, attribute access, and list/set/dict
+  displays. Consequently a module-scope `CHECKS = sorted(...)` assignment is
+  mechanically impossible, and the only module-scope constants are the
+  immutable scalar/tuple values the pure implementation actually needs.
+- One additional closed module-scope form exists for type aliases: an
+  assignment whose value is built only from names imported from
+  `typing`/`pydantic`, class names defined in the module, subscripts of
+  those, and `Field(...)` calls with constant-grammar arguments inside
+  `Annotated[...]`. The runtime scan below treats the resulting typing
+  constructs as allowed non-data globals; no other call or subscript becomes
+  legal through this form.
+- Class bodies execute at import time and get their own closed form list:
+  annotated field declarations whose optional default is the constant grammar
+  or a direct pydantic `Field(...)` call with constant-grammar arguments, one
+  `model_config = ConfigDict(...)` with constant-grammar arguments, enum
+  member assignments of constant-grammar values, docstrings, and function
+  definitions decorated with allowlisted pydantic decorator names. No other
+  class-body statement is permitted. Closed mappings the evaluator needs
+  (check-name to detail-code, and similar) are constructed inside function
+  bodies or expressed as constant tuples; they never exist as module globals.
+- A runtime companion gate imports the module and recursively verifies every
+  module global that is not a class, function, allowlisted imported module,
+  or type-alias typing construct from the closed form above: each value must
+  be `None`, `bool`, `int`, `float`, `str`, `bytes`,
+  `decimal.Decimal`, a `datetime`/`date`/`time`/`timezone`/`timedelta` value,
+  an `enum` member, or a `tuple`/`frozenset` whose elements recursively
+  satisfy this same closed set. Any `list`, `set`, `dict`, `bytearray`, or
+  other mutable or open-ended global fails the gate even if a future AST-rule
+  regression would otherwise let it through.
+
+A binding regression fixture proves both halves: a module variant containing
+`CHECKS = sorted(("b", "a"))` at module scope is rejected by the AST gate,
+and the same list value injected as a module global is rejected by the
+runtime immutability scan. The import allowlist above is unchanged by this
+rule.
 
 ### 4.2 Versioned input
 
@@ -467,13 +523,36 @@ marker -> `live_candidate`. Lifecycle rank is
 `draft < backtested < paper_candidate < paper_validated < live_candidate`;
 disabled/revoked fail. Registry and lifecycle strategy ID/version/spec hash
 must match, with exact string equality for registry-to-lifecycle versions.
-Recipe-to-registry and ordinary candidate-explanation-to-recipe versions use the
-legacy `strategy_versions_match` rule exactly: trim whitespace and split on
-dots; when both sides are non-empty digit-only component tuples, drop trailing
-zero components and compare the numeric tuples; otherwise the trimmed strings
-must be exactly equal. The kernel may not block a version pair that the legacy
-rule accepts, and the parity corpus must include one equal pair that matches
-only under the non-numeric string fallback.
+Recipe-to-registry and ordinary candidate-explanation-to-recipe versions use
+the legacy `strategy_versions_match` rule made total. The decision-complete
+rule is: trim whitespace and split each side on dots. A side takes the
+numeric path only when it has at least one component and every component
+satisfies `str.isdigit()`; the numeric path converts each component with
+base-10 `int()`, drops trailing zero components, and compares the numeric
+tuples. When either side has a component failing `isdigit()`, the trimmed
+original strings must be exactly equal. `str.isdigit()` accepts Unicode
+digit characters — for example superscript two, `U+00B2` — that base-10
+`int()` rejects with `ValueError`, so the current legacy helper in
+`state_machine.py` is not total. The pure evaluator must be total and fail
+closed: when any component passes `isdigit()` but its `int()` conversion
+fails, the whole comparison is a mismatch. It never raises, and it does not
+fall back to string equality for such a pair, because the legacy rule never
+accepted it (it raised). This does not broaden accepted versions: every pair
+the current legacy rule accepts — including Unicode decimal digits that
+`int()` does parse, such as fullwidth digits — remains accepted with the
+same result, and no previously raising pair becomes accepted.
+
+Gate ordering for this rule is binding. First, the legacy
+`strategy_versions_match` helper is hardened with the identical fail-closed
+rule (conversion failure is caught and returns mismatch) in a separately
+verified fail-closed-only runtime change, accepted no later than Gate
+`QP-KER-015` and before any parity gate treats version evidence as safe.
+Only then is kernel/legacy parity over the version corpus required, and the
+corpus must include a focused regression case in which one side is a Unicode
+digit string such as `"²"`: both the hardened legacy helper and the kernel
+return mismatch without raising. The kernel may not block a version pair
+that the legacy rule accepts, and the parity corpus must include one equal
+pair that matches only under the non-numeric string fallback.
 
 The exact authority check sequences for `authority_algorithm_version=1` are:
 
@@ -1228,8 +1307,12 @@ check alone is not sufficient. Tests may not suppress the mismatch.
 1. two evaluations of identical input are exactly equal;
 2. input objects are unchanged after evaluation;
 3. output contains no callable and cannot perform a command;
-4. the module passes the import allowlist and dynamic import/I/O/clock/ID AST
-   bans, and the recursive model tree contains no mutable/open-ended type;
+4. the module passes the import allowlist, the dynamic import/I/O/clock/ID
+   AST bans, the closed module-scope statement/expression policy (a fixture
+   module containing `CHECKS = sorted(("b", "a"))` at module scope is
+   rejected), and the recursive runtime module-global immutability scan (the
+   same list value injected as a module global is rejected), and the
+   recursive model tree contains no mutable/open-ended type;
 5. naive time, mismatched policy, stale risk, failed authorization, failed
    single risk, failed batch, absent batch membership, kill, live, pause,
    unhealthy broker, unsupported order type, and missing paper provenance all
@@ -1291,6 +1374,7 @@ The minimum pure-model case matrix is binding:
 | denied or internally inconsistent authorization | `blocked/authorization` stage |
 | Level 4/5 authorization and candidate strategy bindings disagree | `blocked/strategy_binding_mismatch` |
 | recipe/registry version pair equal only under the legacy non-numeric string fallback | eligible; kernel matches `strategy_versions_match` |
+| version pair where one side is a Unicode digit string (for example `"²"` vs `"2"`) | `blocked/authorization` with the closed version-binding reason; no exception raised; hardened legacy helper returns the same mismatch |
 | risk ID/policy/idempotency disagreement | `blocked/risk_check_mismatch` |
 | expired fresh-risk evidence | `blocked/risk_check_expired` |
 | failed single or batch risk | the corresponding closed risk reason |
@@ -1339,7 +1423,7 @@ The expiry/durable hardening corpus is also binding before any cutover:
 |---|---|---|
 | `QP-KER-000` | accepted contract, workboard, and counterpart review | none |
 | `QP-KER-010` | pure frozen model/evaluator and unit tests | none |
-| `QP-KER-015` | legacy and durable order-expiry/TOCTOU hardening with v11 reopen coverage and independent P0/P1=0 | none; fail-closed only |
+| `QP-KER-015` | legacy and durable order-expiry/TOCTOU hardening with v11 reopen coverage, plus the total fail-closed `strategy_versions_match` legacy helper, with independent P0/P1=0 | none; fail-closed only |
 | `QP-KER-020` | default-off mock shadow runner and normalized comparison | none |
 | `QP-KER-030` | exhaustive Level 1-5 mock/simulated-paper parity corpus | none |
 | `QP-KER-035` | common side-effecting facade preserving legacy arguments and sole submit call | none |

@@ -24,7 +24,10 @@ Level 1~5 자율화 전 과정을 먼저 완성하고, 사람 승인 게이트�
 | 데이터: external_historical (KIS) | 🟡 코드 완성, 실서버 미검증 | 가짜 transport로 단위 테스트됨; 실 키 확보 시 `RUN_KIS_MANUAL_INTEGRATION=1` 수동 테스트 준비됨 |
 | KIS 토큰 발급 (`/oauth2/tokenP`) | ✅ 헬퍼 구현 (실서버 미검증) | `request_access_token(_from_env)` — 앱키/시크릿으로 발급; fake transport 단위 테스트 완료, 실 키 확보 시 수동 검증 |
 | 뉴스 브리핑 (구상 ①) | 🟡 골격 완료 (fixture) | 읽기 전용 격리 경계 + `GET /api/briefing/daily`; 실제 수집기·프론트 페이지는 후속 |
-| 실시간 시세 / paper trading | ❌ 범위 밖 | 라이브 체크리스트 선행조건 |
+| 실시간 일반 provider | ❌ 미구현, fail closed | 일반 provider factory는 realtime/paper 요청을 fixture로 fallback하지 않음 |
+| KIS paper managed-order kill v1 | 🟡 schema v9 개발 검증 완료, 운영 미승인 | fake-client cancel journal/kill 검증 완료; `VTTC0084R`와 cancel POST는 Gate P 수동 검증 대기 |
+| KIS paper atomic reservation v1 | ✅ schema v10 Gate 1 개발 완료 | baseline `5eb70a9`; Gate P buying-power/실서버 semantics는 미검증 |
+| KIS paper canonical execution events v1 | ✅ schema v11 Gate 2 fake-only 개발 완료 | schema v10 row가 계속 authoritative; append-only shadow journal/replay parity 완료, 실제 KIS Gate P는 미검증 |
 | 라이브 트레이딩 | ❌ 의도적 미구현 | `docs/live_trading_enablement_checklist.md` 12항목 전부 사람 체크 필요 (현재 0/12) |
 
 ## 안전 불변식 (변경 금지 기본값)
@@ -33,7 +36,18 @@ Level 1~5 자율화 전 과정을 먼저 완성하고, 사람 승인 게이트�
 `FULLY_AUTOMATED_OPERATOR_ENABLED=false` · `MARKET_ORDERS_ENABLED=false` ·
 `BROKER_MODE=mock` · `DATA_MODE=fixture`
 
-## 최근 완료 (2026-07-06)
+## 최근 완료 (2026-07-11)
+
+- **Roadmap Gate 1 — Atomic Risk Reservation v1 완료**: KIS paper의 현금,
+  매도 가능수량, incremental long-gross를 schema v10 SQLite에서 주문과
+  원자적으로 예약한다. 모호한 POST 결과와 부분체결은 reservation을
+  유지하고, 확정 terminal에서만 같은 transaction으로 해제한다.
+- Claude Code `claude-fable-5` 독립 감사와 QP-RES-A1 후속 재감사를 완료했다.
+  잔여 P0=0/P1=0이며 A1은 closed다. 기준선 재검증은 `885 passed,
+  2 skipped`, smoke `mock/live=false/operator blocked`, kill CLI
+  `paper_kill_disabled`다. 실제 KIS 호출은 하지 않았다.
+- Gate 2 canonical execution events가 후속 계보에서 완료됐다. Gate P/manual
+  KIS 운영 검증은 별도 보류한다.
 
 - Level 1-2 모의체결 + 승인 티켓 레일 + Execution 페이지 커밋 (`pytest 274 passed`, `vitest 20 passed`, `build ok`)
 - `quantpilot/jobs/fetch_krx_local_data.py` 추가 — pykrx로 실 KRX 일봉을 받아
@@ -94,6 +108,22 @@ Level 1~5 자율화 전 과정을 먼저 완성하고, 사람 승인 게이트�
   ④ `MARKET_ORDERS_ENABLED` 판독 단일화. 검증: pytest 325개 중 324 passed·
   1 skipped (junit), smoke OK, vitest 20, build OK, 브리핑 페이지 브라우저 실검증
 
+## 최근 완료 (2026-07-12, Roadmap Gate 2)
+
+- **Atomic Risk Reservation v1 + Canonical Execution Events v1 통합 후보** —
+  schema v10 reservation은 주문 prepare와 현금·매도수량·incremental long-gross를
+  한 transaction으로 묶고, schema v11 append-only event journal은 dispatch/reservation/
+  cancel의 모든 authoritative mutation과 같은 transaction으로 shadow dual-write한다.
+- schema v10 row는 계속 source of truth다. reducer/replay는 broker를 호출하거나 row를
+  수리하지 않으며, ambiguous POST no-retry와 단일 submission authority를 유지한다.
+  Gate 2 accepted head `8eaf15a`와 Drift 기준선 계보의 mainline 통합 후보 검증:
+  상태/마이그레이션 `234 passed`, event/reducer/parity `103 passed`, Drift/env
+  `84 passed`, 교차 기능 `44 passed`, 전체 backend `1046 passed, 2 skipped`.
+  smoke는 broker mock/live=false/operator blocked, kill CLI는 `paper_kill_disabled`,
+  OpenAPI 51 paths byte-exact + d.ts 동기화, frontend `23 passed` + build 성공.
+- 실제 KIS paper buying-power/cancel TR, 계좌 round trip, 세션 캘린더는 Gate P 수동
+  증거이며 이 fake-only 개발 완료에 포함되지 않는다.
+
 ## 최근 완료 (2026-07-12, QP-DRIFT-DAILY)
 
 - **DriftMonitor 성과 피드 개선 (1차, Claude)** — auto_feed가 KIS 실거래 비용
@@ -125,24 +155,20 @@ Level 1~5 자율화 전 과정을 먼저 완성하고, 사람 승인 게이트�
 > 제품 구상(대화형 전략 수립 → 전략 단위 승인 → 자동 운용)과의 정렬 설계 및
 > 전체 로드맵: `docs/product_vision_alignment_design.md`
 
-1. 승인 기준(acceptance thresholds) 확정 — 표본이 생겼으므로 이제 논의 가능 (사람 입력)
-2. §4.4 잔여: 동일 종목 충돌 규칙(`conflict_rule`)·상관 예산 — 다중 전략 동시
-   운용 시작 시 (예산 게이트 자체는 ✅ 제출 경로에서 강제됨)
-3. ~~DriftMonitor 개선: 일별 종가 재평가·수수료 반영~~ ✅ (2026-07-12, QP-DRIFT-DAILY —
-   auto_feed가 KIS 비용 반영 + 현 데이터 모드 종가로 보유 포지션 일별 재평가;
-   `cost_basis`/`valuation` 필드로 레코드에 산정 기준 명시, 임계 로직(×1.5)은 무변경.
-   2차로 Codex 안전 검토 커밋 `f8bb594`가 성과 증거를 fail-closed로 결속 —
-   위 "최근 완료 (2026-07-12)" 참조; capital_epoch 원장·권위 캘린더는 후속)
-4. ~~라우터 분리 부채~~ ✅ strategy-studio·strategy-tickets·notifications를
-   전용 라우터로 분리하고 기존 50개 OpenAPI 경로·스키마 계약을 유지함
-5. KIS 앱키 확보 시: `RUN_KIS_MANUAL_INTEGRATION=1` 수동 통합 테스트 (토큰 헬퍼는 ✅ 준비됨)
-6. 소소한 부채: ~~`MARKET_ORDERS_ENABLED` 판독 중복 제거~~ ✅ (gatekeeper 단일화),
-   ~~`.env.example` 동기화 코드 가드~~ ✅ (`test_env_example_sync.py` — 런타임 env 읽기
-   전수 스캔 + 카나리; 누락이던 `OPERATOR_KILL_SWITCH`·`KIS_PAPER_STATE_DB` 문서화)
+1. `QP-KERNEL-V2`: Claude 계약 최종 검토를 먼저 완료한 뒤 Level 3/4/5 공통
+   execution kernel을 side-effect 없는 shadow부터 점진 전환
+2. durable outbox + account single-writer
+3. authoritative execution/position/cash/NAV ledger + reconciliation break workflow
+4. continuous OMS/risk/reconciliation runtime과 운영 health/metric
+5. Gate P: 명시적 사용자 권한 아래 실제 KIS paper 수동 검증
+6. 제품 backlog: 승인 기준 확정, `conflict_rule`/상관 예산, capital_epoch 원장,
+   권위 있는 KRX 캘린더, 동일 타임스탬프 체결 ordering
 
 ## 사람 입력 대기
 
 - [ ] KIS 오픈API 앱키/시크릿 (계좌 개설 필요; 모의투자 도메인 `openapivts.koreainvestment.com:29443`)
+- [ ] Gate P 명시적 수동 권한: `VTTC0084R`, real buying-power field mapping,
+  session-calendar 경계, 소량 paper round trip과 cancel 결과 확인
 - [x] ~~Stage 03 거래비용·세금 가정치~~ → 확정: 한투 실거래 API·일반 개인 기준
   (`backtest/costs.py`; 뱅키스 온라인이 아닌 영업점 계좌면 `--fee-bps 14.7` 오버라이드)
 - [ ] 슬리피지(현 5bps)·체결버퍼 가정치 — 연구용 가정 유지 중, 브로커 확인 전
@@ -160,7 +186,9 @@ Level 1~5 자율화 전 과정을 먼저 완성하고, 사람 승인 게이트�
 ## 검증 명령
 
 ```powershell
-python -m pytest quantpilot/tests -p no:cacheprovider --basetemp=.pytest_tmp
+python -m pytest quantpilot/tests -p no:cacheprovider --basetemp=.pytest_tmp `
+  --junitxml=.pytest_tmp/results.xml
 python -m quantpilot.jobs.run_smoke
+python -m quantpilot.jobs.run_kis_paper_kill engage
 # 프론트 (quantpilot/apps/web): npm run test && npm run build
 ```

@@ -898,6 +898,40 @@ class HarnessService:
             dispatch_provider,
             "list_paper_order_dispatches",
         ):
+            if hasattr(dispatch_provider, "list_paper_risk_reservations"):
+                for reservation in dispatch_provider.list_paper_risk_reservations(
+                    held_only=True
+                ):
+                    if (
+                        reservation.order_plan_id in excluded
+                        or reservation.kind != "sell_quantity"
+                    ):
+                        continue
+                    reserved_quantity = float(
+                        reservation.reserved_sell_quantity or 0
+                    )
+                    additional_reservation = max(
+                        0.0,
+                        reserved_quantity
+                        - accounted_reserved_quantities_by_order.get(
+                            reservation.order_plan_id,
+                            0.0,
+                        ),
+                    )
+                    if additional_reservation > 0.000001:
+                        reserved_sell_quantities[reservation.symbol] = (
+                            reserved_sell_quantities.get(reservation.symbol, 0.0)
+                            + additional_reservation
+                        )
+                    accounted_reserved_quantities_by_order[
+                        reservation.order_plan_id
+                    ] = max(
+                        accounted_reserved_quantities_by_order.get(
+                            reservation.order_plan_id,
+                            0.0,
+                        ),
+                        reserved_quantity,
+                    )
             active_dispatch_states = {
                 "prepared",
                 "dispatch_claimed",

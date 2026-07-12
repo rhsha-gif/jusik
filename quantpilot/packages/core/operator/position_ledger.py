@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from datetime import date, datetime
+from decimal import Decimal
 from math import isclose, isfinite
 import re
 from typing import Any, Literal
@@ -23,6 +24,16 @@ PaperRunStatus = Literal["started", "completed", "blocked", "failed"]
 StateStoreDataMode = Literal["fixture", "paper_trading"]
 StateStoreBrokerEnvironment = Literal["fixture_mock", "kis_paper"]
 PaperExecutionSessionStatus = Literal["active", "closed", "abandoned"]
+PaperKillStatus = Literal["killing", "killed", "recovery_required", "released"]
+PaperCancelStatus = Literal[
+    "prepared",
+    "cancel_claimed",
+    "cancel_accepted",
+    "cancel_outcome_unknown",
+    "reconciled_cancelled",
+    "reconciled_filled",
+    "rejected",
+]
 PaperDispatchStatus = Literal[
     "prepared",
     "dispatch_claimed",
@@ -36,6 +47,13 @@ PaperDispatchStatus = Literal[
     "failed_pre_dispatch",
 ]
 PaperDispatchReconciliationStatus = Literal["pending", "reconciled", "blocked"]
+PaperReservationStatus = Literal[
+    "held",
+    "released_filled",
+    "released_cancelled",
+    "released_rejected",
+    "released_expired",
+]
 PendingLiquidationStatus = Literal[
     "prepared",
     "submitted",
@@ -254,6 +272,147 @@ class PaperExecutionSession(HarnessModel):
         return self
 
 
+class PaperKillOperation(HarnessModel):
+    """Durable account-scoped kill state; release never re-arms strategies."""
+
+    kill_id: str = Field(default_factory=lambda: new_id("pkill"))
+    store_id: str
+    data_mode: Literal["paper_trading"] = "paper_trading"
+    broker_environment: Literal["kis_paper"] = "kis_paper"
+    account_scope_fingerprint: str = Field(pattern=r"^sha256:[0-9a-f]{64}$")
+    status: PaperKillStatus = "killing"
+    reason: str = Field(min_length=1, max_length=256)
+    unresolved_reason_codes: list[str] = Field(default_factory=list)
+    requested_at: datetime
+    updated_at: datetime
+    completed_at: datetime | None = None
+    released_at: datetime | None = None
+    revision: int = Field(default=0, ge=0)
+
+    @field_validator("kill_id", "store_id", "reason")
+    @classmethod
+    def kill_identity_must_not_be_blank(cls, value: str) -> str:
+        normalized = value.strip()
+        if not normalized:
+            raise ValueError("paper-kill identity fields must not be blank")
+        return normalized
+
+    @field_validator("unresolved_reason_codes")
+    @classmethod
+    def normalize_kill_reasons(cls, value: list[str]) -> list[str]:
+        normalized = [item.strip() for item in value]
+        if any(not item or re.fullmatch(r"[a-z0-9_]{1,64}", item) is None for item in normalized):
+            raise ValueError("paper-kill reason codes must be safe identifiers")
+        return sorted(set(normalized))
+
+    @field_validator("requested_at", "updated_at", "completed_at", "released_at")
+    @classmethod
+    def kill_timestamps_must_be_aware(
+        cls,
+        value: datetime | None,
+    ) -> datetime | None:
+        return None if value is None else _require_aware_timestamp(value)
+
+    @model_validator(mode="after")
+    def kill_state_must_be_consistent(self) -> "PaperKillOperation":
+        if self.updated_at < self.requested_at:
+            raise ValueError("paper-kill update cannot precede request")
+        if self.status in {"killed", "released"}:
+            if self.completed_at is None or self.unresolved_reason_codes:
+                raise ValueError("completed paper kill requires no unresolved reasons")
+        elif self.completed_at is not None:
+            raise ValueError("incomplete paper kill cannot have completion time")
+        if self.status == "recovery_required" and not self.unresolved_reason_codes:
+            raise ValueError("recovery-required paper kill needs a reason")
+        if self.status == "released":
+            if self.released_at is None or self.released_at < self.completed_at:  # type: ignore[operator]
+                raise ValueError("released paper kill requires a valid release time")
+        elif self.released_at is not None:
+            raise ValueError("only released paper kills can have a release time")
+        return self
+
+
+class PaperCancelRequest(HarnessModel):
+    """One-attempt durable cancel evidence for one managed KIS paper order."""
+
+    cancel_id: str = Field(default_factory=lambda: new_id("pcancel"))
+    kill_id: str
+    order_plan_id: str
+    broker_order_id: str
+    broker_order_reference: str
+    broker_forwarding_order_org_number: str = Field(pattern=r"^[A-Za-z0-9]{1,16}$")
+    symbol: str = Field(pattern=r"^[A-Z0-9]{6}$")
+    side: Literal["buy", "sell"]
+    cancelable_quantity: float = Field(gt=0, allow_inf_nan=False)
+    original_limit_price: float = Field(gt=0, allow_inf_nan=False)
+    exchange_id: Literal["KRX"] = "KRX"
+    store_id: str
+    data_mode: Literal["paper_trading"] = "paper_trading"
+    broker_environment: Literal["kis_paper"] = "kis_paper"
+    account_scope_fingerprint: str = Field(pattern=r"^sha256:[0-9a-f]{64}$")
+    status: PaperCancelStatus = "prepared"
+    attempt_count: int = Field(default=0, ge=0, le=1)
+    claimed_at: datetime | None = None
+    response_order_reference: str | None = None
+    last_error_code: str | None = Field(default=None, pattern=r"^[a-z0-9_]{1,64}$")
+    created_at: datetime
+    updated_at: datetime
+    reconciled_at: datetime | None = None
+    revision: int = Field(default=0, ge=0)
+
+    @field_validator(
+        "cancel_id",
+        "kill_id",
+        "order_plan_id",
+        "broker_order_id",
+        "broker_order_reference",
+        "broker_forwarding_order_org_number",
+        "store_id",
+    )
+    @classmethod
+    def cancel_identity_must_not_be_blank(cls, value: str) -> str:
+        normalized = value.strip()
+        if not normalized:
+            raise ValueError("paper-cancel identity fields must not be blank")
+        return normalized
+
+    @field_validator("symbol")
+    @classmethod
+    def normalize_cancel_symbol(cls, value: str) -> str:
+        return value.strip().upper()
+
+    @field_validator("claimed_at", "created_at", "updated_at", "reconciled_at")
+    @classmethod
+    def cancel_timestamps_must_be_aware(
+        cls,
+        value: datetime | None,
+    ) -> datetime | None:
+        return None if value is None else _require_aware_timestamp(value)
+
+    @model_validator(mode="after")
+    def cancel_state_must_be_consistent(self) -> "PaperCancelRequest":
+        if self.updated_at < self.created_at:
+            raise ValueError("paper-cancel update cannot precede creation")
+        if self.status == "prepared":
+            if self.attempt_count != 0 or self.claimed_at is not None:
+                raise ValueError("prepared cancel cannot claim an external attempt")
+        terminal = {"reconciled_cancelled", "reconciled_filled"}
+        if self.status not in {"prepared", *terminal} and (
+            self.attempt_count != 1 or self.claimed_at is None
+        ):
+            raise ValueError("post-claim cancel requires exactly one attempt")
+        if self.status in terminal:
+            if self.reconciled_at is None:
+                raise ValueError("terminal cancel requires reconciliation time")
+            if self.attempt_count == 0 and self.claimed_at is not None:
+                raise ValueError("unattempted terminal cancel cannot have a claim time")
+            if self.attempt_count == 1 and self.claimed_at is None:
+                raise ValueError("attempted terminal cancel requires a claim time")
+        elif self.reconciled_at is not None:
+            raise ValueError("nonterminal cancel cannot have reconciliation time")
+        return self
+
+
 class PaperDispatchFillEvidence(HarnessModel):
     """Allowlisted broker fill evidence without credentials or account identifiers."""
 
@@ -352,6 +511,7 @@ class PaperOrderDispatch(HarnessModel):
         ge=0,
         allow_inf_nan=False,
     )
+    minimum_cash_reserve_krw: int | None = Field(default=None, ge=0)
     entry_atr14: float | None = Field(default=None, ge=0, allow_inf_nan=False)
     store_id: str
     session_id: str
@@ -435,6 +595,26 @@ class PaperOrderDispatch(HarnessModel):
         except ValueError as exc:
             raise ValueError("broker order time must be valid HHMMSS") from exc
         return value
+
+    @field_validator("minimum_cash_reserve_krw", mode="before")
+    @classmethod
+    def minimum_cash_reserve_must_be_an_exact_integer(
+        cls,
+        value: object,
+    ) -> object:
+        if value is None:
+            return None
+        if isinstance(value, bool):
+            raise ValueError("paper-dispatch cash reserve must be an exact integer")
+        if isinstance(value, int):
+            return value
+        if isinstance(value, Decimal):
+            if value.is_finite() and value == value.to_integral_value():
+                return int(value)
+        elif isinstance(value, float):
+            if isfinite(value) and value.is_integer():
+                return int(value)
+        raise ValueError("paper-dispatch cash reserve must be an exact integer")
 
     @model_validator(mode="before")
     @classmethod
@@ -742,6 +922,162 @@ class PaperOrderDispatch(HarnessModel):
                 raise ValueError("reconciliation time cannot precede the latest evidence")
         elif self.reconciled_at is not None:
             raise ValueError("reconciliation time requires reconciled status")
+        return self
+
+
+class PaperRiskReservation(HarnessModel):
+    """Secret-free integer capacity held for one KIS paper order."""
+
+    reservation_id: str = Field(default_factory=lambda: new_id("presv"))
+    order_plan_id: str
+    idempotency_key: str
+    kind: Literal["cash_buy", "sell_quantity"]
+    symbol: str = Field(pattern=r"^[A-Z0-9]{6}$")
+    side: Literal["buy", "sell"]
+    reserved_cash_krw: int | None = Field(default=None, ge=0)
+    reserved_sell_quantity: int | None = Field(default=None, gt=0)
+    reserved_gross_exposure_krw: int = Field(ge=0)
+    broker_orderable_cash_basis_krw: int | None = Field(default=None, ge=0)
+    broker_orderable_buy_quantity_basis: int | None = Field(default=None, ge=0)
+    snapshot_orderable_quantity_basis: int | None = Field(default=None, ge=0)
+    snapshot_gross_exposure_basis_krw: int = Field(ge=0)
+    minimum_cash_reserve_krw: int = Field(ge=0)
+    gross_exposure_limit_krw: int = Field(ge=0)
+    store_id: str
+    session_id: str
+    fencing_token: int = Field(ge=1)
+    account_scope_fingerprint: str = Field(pattern=r"^sha256:[0-9a-f]{64}$")
+    data_mode: Literal["paper_trading"] = "paper_trading"
+    broker_environment: Literal["kis_paper"] = "kis_paper"
+    status: PaperReservationStatus = "held"
+    release_reason: str | None = Field(
+        default=None,
+        pattern=r"^[a-z0-9_]{1,64}$",
+    )
+    created_at: datetime
+    updated_at: datetime
+    released_at: datetime | None = None
+    revision: int = Field(default=0, ge=0)
+
+    @field_validator(
+        "reservation_id",
+        "order_plan_id",
+        "idempotency_key",
+        "store_id",
+        "session_id",
+    )
+    @classmethod
+    def reservation_identity_must_not_be_blank(cls, value: str) -> str:
+        normalized = value.strip()
+        if not normalized:
+            raise ValueError("paper-reservation identity fields must not be blank")
+        return normalized
+
+    @field_validator("symbol", mode="before")
+    @classmethod
+    def normalize_reservation_symbol(cls, value: object) -> object:
+        if not isinstance(value, str):
+            raise ValueError("paper-reservation symbol must be text")
+        return value.strip().upper()
+
+    @field_validator("release_reason")
+    @classmethod
+    def release_reason_must_not_be_blank(
+        cls,
+        value: str | None,
+    ) -> str | None:
+        if value is None:
+            return None
+        normalized = value.strip()
+        if not normalized:
+            raise ValueError("paper-reservation release reason must not be blank")
+        return normalized
+
+    @field_validator(
+        "reserved_cash_krw",
+        "reserved_sell_quantity",
+        "reserved_gross_exposure_krw",
+        "broker_orderable_cash_basis_krw",
+        "broker_orderable_buy_quantity_basis",
+        "snapshot_orderable_quantity_basis",
+        "snapshot_gross_exposure_basis_krw",
+        "minimum_cash_reserve_krw",
+        "gross_exposure_limit_krw",
+        mode="before",
+    )
+    @classmethod
+    def capacity_values_must_be_exact_integers(
+        cls,
+        value: object,
+    ) -> object:
+        if value is None:
+            return None
+        if isinstance(value, bool):
+            raise ValueError("paper-reservation capacity values must be integers")
+        if isinstance(value, int):
+            return value
+        if isinstance(value, Decimal):
+            if value.is_finite() and value == value.to_integral_value():
+                return int(value)
+        elif isinstance(value, float):
+            if isfinite(value) and value.is_integer():
+                return int(value)
+        raise ValueError("paper-reservation capacity values must be exact integers")
+
+    @field_validator("created_at", "updated_at", "released_at")
+    @classmethod
+    def reservation_timestamps_must_be_aware(
+        cls,
+        value: datetime | None,
+    ) -> datetime | None:
+        return None if value is None else _require_aware_timestamp(value)
+
+    @model_validator(mode="after")
+    def reservation_state_must_be_consistent(self) -> "PaperRiskReservation":
+        if self.updated_at < self.created_at:
+            raise ValueError("paper-reservation update cannot precede creation")
+
+        if self.kind == "cash_buy":
+            if (
+                self.side != "buy"
+                or self.reserved_cash_krw is None
+                or self.reserved_cash_krw <= 0
+                or self.reserved_sell_quantity is not None
+                or self.broker_orderable_cash_basis_krw is None
+                or self.broker_orderable_buy_quantity_basis is None
+                or self.snapshot_orderable_quantity_basis is not None
+                or self.reserved_gross_exposure_krw != self.reserved_cash_krw
+            ):
+                raise ValueError("cash-buy reservation capacity evidence is inconsistent")
+            projected_gross = (
+                self.snapshot_gross_exposure_basis_krw
+                + self.reserved_gross_exposure_krw
+            )
+            if projected_gross > self.gross_exposure_limit_krw:
+                raise ValueError("cash-buy reservation exceeds gross-exposure limit")
+        elif (
+            self.side != "sell"
+            or self.reserved_sell_quantity is None
+            or self.reserved_cash_krw is not None
+            or self.snapshot_orderable_quantity_basis is None
+            or self.broker_orderable_cash_basis_krw is not None
+            or self.broker_orderable_buy_quantity_basis is not None
+            or self.reserved_gross_exposure_krw != 0
+        ):
+            raise ValueError("sell-quantity reservation capacity evidence is inconsistent")
+
+        terminal = self.status != "held"
+        if terminal:
+            if self.release_reason is None or self.released_at is None:
+                raise ValueError(
+                    "terminal paper reservation requires release evidence"
+                )
+            if not self.created_at <= self.released_at <= self.updated_at:
+                raise ValueError(
+                    "paper-reservation release time must be within its lifecycle"
+                )
+        elif self.release_reason is not None or self.released_at is not None:
+            raise ValueError("held paper reservation cannot contain release evidence")
         return self
 
 

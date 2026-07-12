@@ -1,8 +1,11 @@
 from __future__ import annotations
 
+from dataclasses import replace
 from datetime import date, datetime, timedelta, timezone
 from decimal import Decimal
+import json
 from pathlib import Path
+import sqlite3
 
 import pytest
 
@@ -223,6 +226,92 @@ def _coordinator(
     )
 
 
+def test_durable_kill_fences_prepare_and_pre_post_submission(tmp_path) -> None:
+    client = FakePaperClient()
+    clock = MutableClock()
+    with PaperStateStore(
+        tmp_path / "kill-fence.sqlite3",
+        data_mode="paper_trading",
+        account_scope_fingerprint=FINGERPRINT,
+    ) as store:
+        coordinator = _coordinator(store, client, clock)
+        order = _order()
+        coordinator.prepare_order(
+            order,
+            run_id="run-kill-fence",
+            user_id="paper-user",
+            snapshot=_snapshot(),
+            quote=_quote(),
+            entry_atr14=1200,
+            quote_max_age_seconds=30,
+            snapshot_max_age_seconds=30,
+            minimum_cash_reserve=200000,
+        )
+        store.start_paper_kill_operation(
+            session=coordinator.session,
+            reason="operator_requested",
+            started_at=NOW + timedelta(microseconds=1),
+        )
+
+        with pytest.raises(PaperPreDispatchFailure, match="paper kill"):
+            coordinator.submit_prepared_order(order)
+        assert client.order_calls == 0
+        assert store.load_paper_order_dispatch(order.order_plan_id).status == (
+            "expired_pre_dispatch"
+        )
+        released = store.load_paper_risk_reservation(order.order_plan_id)
+        assert released is not None
+        assert released.status == "released_expired"
+
+        with pytest.raises(RuntimeError, match="paper_kill_blocks_submission"):
+            coordinator.prepare_order(
+                _order(order_plan_id="plan-002", idempotency_key="paper-order-key-002"),
+                run_id="run-kill-fence",
+                user_id="paper-user",
+                snapshot=_snapshot(),
+                quote=_quote(),
+                entry_atr14=1200,
+                quote_max_age_seconds=30,
+                snapshot_max_age_seconds=30,
+                minimum_cash_reserve=200000,
+            )
+
+
+def test_kill_terminalizes_prepared_dispatch_without_broker_post(tmp_path) -> None:
+    client = FakePaperClient()
+    clock = MutableClock()
+    with PaperStateStore(
+        tmp_path / "kill-terminalize.sqlite3",
+        data_mode="paper_trading",
+        account_scope_fingerprint=FINGERPRINT,
+    ) as store:
+        coordinator = _coordinator(store, client, clock)
+        coordinator.prepare_order(
+            _order(),
+            run_id="run-kill-terminalize",
+            user_id="paper-user",
+            snapshot=_snapshot(),
+            quote=_quote(),
+            entry_atr14=1200,
+            quote_max_age_seconds=30,
+            snapshot_max_age_seconds=30,
+            minimum_cash_reserve=200000,
+        )
+        store.start_paper_kill_operation(
+            session=coordinator.session,
+            reason="operator_requested",
+            started_at=NOW + timedelta(microseconds=1),
+        )
+        terminal = coordinator.terminalize_prepared_dispatches_for_kill()
+
+        assert [item.status for item in terminal] == ["expired_pre_dispatch"]
+        assert terminal[0].last_error_code == "paper_kill_engaged"
+        released = store.load_paper_risk_reservation(terminal[0].order_plan_id)
+        assert released is not None
+        assert released.status == "released_expired"
+        assert client.order_calls == 0
+
+
 def test_prepare_commits_exact_evidence_before_single_post_and_replays_without_post(
     tmp_path,
 ) -> None:
@@ -253,6 +342,41 @@ def test_prepare_commits_exact_evidence_before_single_post_and_replays_without_p
         assert prepared.broker_orderable_cash == 250000
         assert prepared.broker_orderable_buy_quantity == 6
         assert prepared.quote_reference_basis == "l2_midpoint"
+        reservation = store.load_paper_risk_reservation(order.order_plan_id)
+        assert reservation is not None
+        assert reservation.status == "held"
+        assert reservation.reserved_cash_krw == 70_000
+        assert reservation.reserved_gross_exposure_krw == 70_000
+        assert reservation.broker_orderable_cash_basis_krw == 250_000
+        assert reservation.broker_orderable_buy_quantity_basis == 6
+        assert reservation.snapshot_gross_exposure_basis_krw == 700_000
+        assert reservation.minimum_cash_reserve_krw == 200_000
+        assert reservation.gross_exposure_limit_krw == 800_000
+        for integer_value in (
+            reservation.reserved_cash_krw,
+            reservation.reserved_gross_exposure_krw,
+            reservation.broker_orderable_cash_basis_krw,
+            reservation.broker_orderable_buy_quantity_basis,
+            reservation.snapshot_gross_exposure_basis_krw,
+            reservation.minimum_cash_reserve_krw,
+            reservation.gross_exposure_limit_krw,
+        ):
+            assert type(integer_value) is int
+        assert client.buying_power_calls == 1
+        assert client.order_calls == 0
+
+        with pytest.raises(ValueError, match="cash-reserve evidence changed"):
+            coordinator.prepare_order(
+                order,
+                run_id="run-001",
+                user_id="paper-user",
+                snapshot=_snapshot(),
+                quote=_quote(),
+                entry_atr14=1200,
+                quote_max_age_seconds=30,
+                snapshot_max_age_seconds=30,
+                minimum_cash_reserve=200001,
+            )
         assert client.buying_power_calls == 1
         assert client.order_calls == 0
 
@@ -272,6 +396,160 @@ def test_prepare_commits_exact_evidence_before_single_post_and_replays_without_p
         assert replayed == broker_order
         assert replayed_fills == []
         assert client.order_calls == 1
+
+
+def test_fractional_capacity_inputs_round_conservatively(tmp_path) -> None:
+    client = FakePaperClient()
+    client.buying_power = replace(
+        client.buying_power,
+        orderable_cash=Decimal("500000.9"),
+        no_receivable_buy_amount=Decimal("450000.9"),
+    )
+    snapshot = PortfolioSnapshot(
+        snapshot_id="snapshot-fractional-capacity",
+        user_id="paper-user",
+        cash=300_000.6,
+        equity=1_000_000.9,
+        positions=[],
+        daily_loss_ratio=-0.01,
+        monthly_loss_ratio=-0.02,
+        captured_at=NOW - timedelta(seconds=4),
+        source="kis_paper_balance_reconciled",
+    )
+    with PaperStateStore(
+        tmp_path / "fractional-capacity.sqlite3",
+        data_mode="paper_trading",
+        account_scope_fingerprint=FINGERPRINT,
+    ) as store:
+        coordinator = _coordinator(store, client, MutableClock())
+        prepared = coordinator.prepare_order(
+            _order(),
+            run_id="run-fractional-capacity",
+            user_id="paper-user",
+            snapshot=snapshot,
+            quote=_quote(),
+            entry_atr14=1200,
+            quote_max_age_seconds=30,
+            snapshot_max_age_seconds=30,
+            minimum_cash_reserve=200_000.2,
+        )
+        reservation = store.load_paper_risk_reservation(
+            prepared.order_plan_id
+        )
+
+        assert reservation is not None
+        assert prepared.broker_orderable_cash == 249_999
+        assert reservation.broker_orderable_cash_basis_krw == 249_999
+        assert reservation.minimum_cash_reserve_krw == 200_001
+        assert reservation.snapshot_gross_exposure_basis_krw == 700_001
+        assert reservation.gross_exposure_limit_krw == 799_999
+        assert client.order_calls == 0
+
+
+def test_migrated_open_dispatch_reprepare_uses_backfilled_cash_reserve(
+    tmp_path,
+) -> None:
+    path = tmp_path / "migrated-reprepare.sqlite3"
+    client = FakePaperClient()
+    order = _order()
+    with PaperStateStore(
+        path,
+        data_mode="paper_trading",
+        account_scope_fingerprint=FINGERPRINT,
+    ) as store:
+        coordinator = _coordinator(store, client, MutableClock())
+        prepared = coordinator.prepare_order(
+            order,
+            run_id="run-migrated-reprepare",
+            user_id="paper-user",
+            snapshot=_snapshot(),
+            quote=_quote(),
+            entry_atr14=1200,
+            quote_max_age_seconds=30,
+            snapshot_max_age_seconds=30,
+            minimum_cash_reserve=200000,
+        )
+        session_id = coordinator.session.session_id
+
+    connection = sqlite3.connect(path)
+    try:
+        metadata = json.loads(
+            connection.execute(
+                "SELECT state_json FROM state_store_metadata"
+            ).fetchone()[0]
+        )
+        metadata["schema_version"] = 9
+        dispatch_state = json.loads(
+            connection.execute(
+                "SELECT state_json FROM paper_order_dispatches"
+            ).fetchone()[0]
+        )
+        dispatch_state.pop("minimum_cash_reserve_krw", None)
+        connection.execute("DROP TABLE paper_execution_event_identity_keys")
+        connection.execute("DROP TABLE paper_execution_events")
+        connection.execute("DROP TABLE paper_risk_reservations")
+        connection.execute(
+            "UPDATE paper_order_dispatches SET state_json = ?",
+            (json.dumps(dispatch_state, separators=(",", ":"), sort_keys=True),),
+        )
+        connection.execute(
+            "UPDATE state_store_metadata SET schema_version = 9, state_json = ?",
+            (json.dumps(metadata, separators=(",", ":"), sort_keys=True),),
+        )
+        connection.execute("PRAGMA user_version = 9")
+        connection.commit()
+    finally:
+        connection.close()
+
+    with PaperStateStore(
+        path,
+        data_mode="paper_trading",
+        account_scope_fingerprint=FINGERPRINT,
+    ) as reopened:
+        session = reopened.load_paper_execution_session(session_id)
+        assert session is not None
+        coordinator = DurablePaperSubmissionCoordinator(
+            store=reopened,
+            session=session,
+            client=client,  # type: ignore[arg-type]
+            session_authority=FakeSessionAuthority(),
+            clock=MutableClock(),
+        )
+        migrated = reopened.load_paper_order_dispatch(prepared.order_plan_id)
+        reservation = reopened.load_paper_risk_reservation(
+            prepared.order_plan_id
+        )
+        assert migrated is not None
+        assert migrated.minimum_cash_reserve_krw is None
+        assert reservation is not None
+        assert reservation.minimum_cash_reserve_krw == 230_000
+
+        with pytest.raises(ValueError, match="cash-reserve evidence changed"):
+            coordinator.prepare_order(
+                order,
+                run_id="run-migrated-reprepare",
+                user_id="paper-user",
+                snapshot=_snapshot(),
+                quote=_quote(),
+                entry_atr14=1200,
+                quote_max_age_seconds=30,
+                snapshot_max_age_seconds=30,
+                minimum_cash_reserve=200000,
+            )
+        replay = coordinator.prepare_order(
+            order,
+            run_id="run-migrated-reprepare",
+            user_id="paper-user",
+            snapshot=_snapshot(),
+            quote=_quote(),
+            entry_atr14=1200,
+            quote_max_age_seconds=30,
+            snapshot_max_age_seconds=30,
+            minimum_cash_reserve=230000,
+        )
+        assert replay == migrated
+        assert client.buying_power_calls == 1
+        assert client.order_calls == 0
 
 
 @pytest.mark.parametrize(
@@ -322,6 +600,11 @@ def test_unknown_is_never_retried_and_business_reject_is_terminal(
         persisted = store.load_paper_order_dispatch(order.order_plan_id)
         assert persisted is not None and persisted.status == expected_status
         assert persisted.attempt_count == 1
+        reservation = store.load_paper_risk_reservation(order.order_plan_id)
+        assert reservation is not None
+        assert reservation.status == (
+            "held" if expected_status == "outcome_unknown" else "released_rejected"
+        )
         with pytest.raises(exception_type):
             coordinator.submit_prepared_order(order)
         assert client.order_calls == 1
@@ -556,6 +839,61 @@ def test_sell_uses_snapshot_orderable_quantity_without_buying_power_query(tmp_pa
         assert client.order_calls == 0
 
 
+def test_fractional_sell_orderable_quantity_fails_closed(tmp_path) -> None:
+    client = FakePaperClient()
+    sell_explanation = _explanation().model_copy(
+        update={"action": "sell", "estimated_cash_impact": -70000}
+    )
+    sell_order = _order(
+        intent=OrderIntent(
+            symbol="005930",
+            side="sell",
+            quantity=1,
+            limit_price=70000,
+            notional=70000,
+            target_weight=0.63,
+            reason="risk exit",
+            quote_time=NOW - timedelta(seconds=5),
+        ),
+        purpose="protective_exit",
+        explanation=sell_explanation,
+    )
+    snapshot = _snapshot().model_copy(
+        update={
+            "positions": [
+                PortfolioPosition(
+                    symbol="005930",
+                    quantity=10,
+                    orderable_quantity=1.5,
+                    market_price=70000,
+                    sector="technology",
+                )
+            ]
+        }
+    )
+    with PaperStateStore(
+        tmp_path / "fractional-sell.sqlite3",
+        data_mode="paper_trading",
+        account_scope_fingerprint=FINGERPRINT,
+    ) as store:
+        coordinator = _coordinator(store, client, MutableClock())
+        with pytest.raises(ValueError, match="nonnegative whole number"):
+            coordinator.prepare_order(
+                sell_order,
+                run_id="run-fractional-sell",
+                user_id="paper-user",
+                snapshot=snapshot,
+                quote=_quote(),
+                quote_max_age_seconds=30,
+                snapshot_max_age_seconds=30,
+                minimum_cash_reserve=200000,
+            )
+        assert store.list_paper_order_dispatches() == []
+        assert store.list_paper_risk_reservations() == []
+        assert client.buying_power_calls == 0
+        assert client.order_calls == 0
+
+
 def test_session_closure_is_rechecked_immediately_before_claim_and_post(
     tmp_path,
 ) -> None:
@@ -726,6 +1064,11 @@ def test_restart_expires_prepared_record_without_any_post(tmp_path) -> None:
         assert recovered[0].status == "expired_pre_dispatch"
         assert recovered[0].attempt_count == 0
         assert recovered[0].session_id == recovery_session.session_id
+        released = store.load_paper_risk_reservation(prepared.order_plan_id)
+        assert released is not None
+        assert released.status == "released_expired"
+        assert released.session_id == recovery_session.session_id
+        assert released.fencing_token == recovery_session.fencing_token
         assert client.order_calls == 0
 
 

@@ -17,6 +17,10 @@ from quantpilot.packages.core.kis_paper import (
     KIS_BALANCE_TR_ID,
     KIS_BUYING_POWER_ENDPOINT,
     KIS_BUYING_POWER_TR_ID,
+    KIS_CANCELABLE_ORDERS_ENDPOINT,
+    KIS_CANCELABLE_ORDERS_TR_ID,
+    KIS_CANCEL_ORDER_ENDPOINT,
+    KIS_CANCEL_ORDER_TR_ID,
     KIS_CASH_BUY_TR_ID,
     KIS_CASH_ORDER_ENDPOINT,
     KIS_CASH_SELL_TR_ID,
@@ -31,6 +35,7 @@ from quantpilot.packages.core.kis_paper import (
     KisHttpResponse,
     KisJsonTransport,
     KisPaperBusinessError,
+    KisPaperCancelOutcomeUnknown,
     KisPaperClient,
     KisPaperConfig,
     KisPaperConfigurationError,
@@ -364,6 +369,176 @@ def test_daily_order_query_uses_exact_paper_tr_and_preserves_fill_evidence() -> 
     assert call["params"]["INQR_END_DT"] == "20260710"
     assert call["params"]["CANO"] == "00000000"
     assert call["params"]["EXCG_ID_DVSN_CD"] == "KRX"
+
+
+def _cancelable_row(order_number: str = "0000012345") -> dict[str, str]:
+    return {
+        "ord_gno_brno": "91234",
+        "odno": order_number,
+        "orgn_odno": "",
+        "ord_dvsn_name": "지정가",
+        "pdno": "005930",
+        "prdt_name": "FAKE-SAMSUNG",
+        "rvse_cncl_dvsn_name": "취소",
+        "ord_qty": "3",
+        "ord_unpr": "70000",
+        "ord_tmd": "101530",
+        "tot_ccld_qty": "1",
+        "tot_ccld_amt": "70000",
+        "psbl_qty": "2",
+        "sll_buy_dvsn_cd": "02",
+        "ord_dvsn_cd": "00",
+        "excg_dvsn_cd": "01",
+        "excg_id_dvsn_cd": "KRX",
+    }
+
+
+def test_cancelable_order_inquiry_paginates_and_preserves_cancel_identity() -> None:
+    transport = RecordingTransport(
+        _response(
+            {
+                "rt_cd": "0",
+                "output": [_cancelable_row()],
+                "ctx_area_fk100": "cursor-fk",
+                "ctx_area_nk100": "cursor-nk",
+            },
+            tr_cont="F",
+        ),
+        _response(
+            {"rt_cd": "0", "output": [_cancelable_row("0000012346")]},
+            tr_cont="D",
+        ),
+    )
+    client = KisPaperClient(_config(), transport=transport)
+
+    result = client.get_cancelable_orders()
+
+    assert result.pages_fetched == 2
+    assert [row.order_number for row in result.rows] == ["0000012345", "0000012346"]
+    assert result.rows[0].order_branch_number == "91234"
+    assert result.rows[0].side == "buy"
+    assert result.rows[0].cancelable_quantity == 2
+    assert result.rows[0].order_price == Decimal("70000")
+    first, second = transport.calls
+    assert first["url"] == f"{KIS_PAPER_BASE_URL}{KIS_CANCELABLE_ORDERS_ENDPOINT}"
+    assert first["headers"]["tr_id"] == KIS_CANCELABLE_ORDERS_TR_ID
+    assert first["params"] == {
+        "CANO": "00000000",
+        "ACNT_PRDT_CD": "01",
+        "INQR_DVSN_1": "0",
+        "INQR_DVSN_2": "0",
+        "CTX_AREA_FK100": "",
+        "CTX_AREA_NK100": "",
+    }
+    assert second["headers"]["tr_cont"] == "N"
+    assert second["params"]["CTX_AREA_FK100"] == "cursor-fk"
+    assert second["params"]["CTX_AREA_NK100"] == "cursor-nk"
+
+
+def test_cancel_full_remaining_order_uses_exact_uppercase_paper_contract_once() -> None:
+    transport = RecordingTransport(
+        _response(
+            {
+                "rt_cd": "0",
+                "msg_cd": "APBK0013",
+                "output": {
+                    "KRX_FWDG_ORD_ORGNO": "91234",
+                    "ODNO": "0000099999",
+                    "ORD_TMD": "101531",
+                },
+            }
+        )
+    )
+    client = KisPaperClient(_config(), transport=transport)
+
+    result = client.cancel_full_remaining_order(
+        order_branch_number="91234",
+        original_order_number="0000012345",
+        order_division_code="00",
+        cancelable_quantity=2,
+        original_order_price=Decimal("70000"),
+    )
+
+    assert result.original_order_number == "0000012345"
+    assert result.cancel_order_number == "0000099999"
+    assert result.cancelled_quantity == 2
+    assert result.transaction_id == KIS_CANCEL_ORDER_TR_ID
+    assert transport.calls == [
+        {
+            "method": "POST",
+            "url": f"{KIS_PAPER_BASE_URL}{KIS_CANCEL_ORDER_ENDPOINT}",
+            "headers": {
+                "content-type": "application/json; charset=utf-8",
+                "authorization": "Bearer fake-paper-token",
+                "appkey": "fake-app-key",
+                "appsecret": "fake-app-secret",
+                "tr_id": KIS_CANCEL_ORDER_TR_ID,
+                "custtype": "P",
+            },
+            "params": None,
+            "body": {
+                "CANO": "00000000",
+                "ACNT_PRDT_CD": "01",
+                "KRX_FWDG_ORD_ORGNO": "91234",
+                "ORGN_ODNO": "0000012345",
+                "ORD_DVSN": "00",
+                "RVSE_CNCL_DVSN_CD": "02",
+                "ORD_QTY": "2",
+                "ORD_UNPR": "70000",
+                "QTY_ALL_ORD_YN": "Y",
+                "EXCG_ID_DVSN_CD": "KRX",
+                "CNDT_PRIC": "",
+            },
+            "timeout_seconds": 10.0,
+        }
+    ]
+
+
+@pytest.mark.parametrize(
+    "outcome",
+    [
+        TimeoutError("fake timeout containing fake-paper-token"),
+        ConnectionError("fake reset containing 00000000"),
+        _response({"rt_cd": "0", "msg_cd": "APBK0013", "output": {}}),
+    ],
+)
+def test_ambiguous_cancel_outcomes_are_distinct_and_never_retried(
+    outcome: KisHttpResponse | BaseException,
+) -> None:
+    transport = RecordingTransport(outcome)
+    client = KisPaperClient(_config(), transport=transport)
+
+    with pytest.raises(KisPaperCancelOutcomeUnknown) as captured:
+        client.cancel_full_remaining_order(
+            order_branch_number="91234",
+            original_order_number="0000012345",
+            order_division_code="00",
+            cancelable_quantity=2,
+            original_order_price=Decimal("70000"),
+        )
+
+    assert "reconcile before any retry" in str(captured.value)
+    assert "fake-paper-token" not in str(captured.value)
+    assert "00000000" not in str(captured.value)
+    assert len(transport.calls) == 1
+
+
+def test_cancel_business_rejection_is_definitive_and_not_unknown() -> None:
+    transport = RecordingTransport(
+        _response({"rt_cd": "1", "msg_cd": "APBK1001", "msg1": "rejected"})
+    )
+    client = KisPaperClient(_config(), transport=transport)
+
+    with pytest.raises(KisPaperBusinessError, match="APBK1001"):
+        client.cancel_full_remaining_order(
+            order_branch_number="91234",
+            original_order_number="0000012345",
+            order_division_code="00",
+            cancelable_quantity=2,
+            original_order_price=Decimal("70000"),
+        )
+
+    assert len(transport.calls) == 1
 
 
 def test_daily_order_window_uses_calendar_months_instead_of_fixed_days() -> None:

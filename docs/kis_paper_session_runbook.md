@@ -105,6 +105,43 @@ Windows 작업 스케줄러는 정규 자동주문 시간에 1분 간격으로 �
 
 `outcome_unknown`, 브로커 매칭 중복, 로컬/영속 증거 충돌, 기준선 누락, 오래된 데이터, 세션 날짜 불일치가 있으면 신규 자동 매수는 중지된다. 미확정 매수가 있어도 검증된 보호 매도는 별도 위험 게이트를 통과할 수 있다.
 
+## 관리 주문 cancel-all kill
+
+KIS paper kill은 일반 전략 세션과 분리된 명시적 CLI다. QuantPilot의 durable dispatch와 KIS 주문 identity가 정확히 일치하는 미체결 주문만 취소하며, 수동·외부 주문이나 포지션을 임의로 취소·청산하지 않는다.
+
+Engage 필수 게이트:
+
+```powershell
+$env:KIS_PAPER_KILL_ENABLED='true'
+$env:KIS_PAPER_KILL_CONFIRMATION='cancel managed paper orders'
+$env:LIVE_TRADING_ENABLED='false'
+$env:MARKET_ORDERS_ENABLED='false'
+$env:BROKER_MODE='paper'
+$env:DATA_MODE='paper_trading'
+python -m quantpilot.jobs.run_kis_paper_kill engage
+```
+
+작업은 기존 account-bound SQLite와 execution lease를 사용한다. 먼저 `KILLING`을 커밋하고, unattempted `prepared` 주문을 로컬에서 종료한 뒤 기존 미확정 주문을 조회 조정한다. 취소는 durable `cancel_claimed`가 커밋된 뒤 한 번만 POST한다. timeout·응답 유실·프로세스 중단 이후에는 절대 재POST하지 않고 조회만 수행한다.
+
+다음 중 하나라도 남으면 `RECOVERY_REQUIRED`이며 일반 paper 세션도 계속 차단된다.
+
+- broker 조회 실패 또는 history window 만료
+- 취소 결과 불명확 또는 원 주문이 계속 working
+- managed dispatch와 일치하지 않는 수동·외부 주문
+- 주문번호·조직번호·종목·수량·가격 identity 충돌
+- 미해결 dispatch/cancel reconciliation
+
+모든 관리 주문이 브로커 조회에서 filled/cancelled/rejected로 종결되고 외부 working order도 없을 때만 `KILLED`가 된다. `KILLED` 상태의 단순 재실행은 broker POST 없이 기존 결과를 반환한다.
+
+Release는 동일한 broker proof를 다시 조회하며 전략 승인이나 자동화 플래그를 복구하지 않는다.
+
+```powershell
+$env:KIS_PAPER_KILL_CONFIRMATION='release paper kill'
+python -m quantpilot.jobs.run_kis_paper_kill release
+```
+
+새 working order, 외부 주문 또는 조회 오류가 발견되면 release 대신 다시 `RECOVERY_REQUIRED`로 이동한다. DB를 직접 수정해 `RELEASED`로 바꾸지 않는다.
+
 ## 브로커 조회기간 만료 주문
 
 KIS paper 일별 주문·체결 조회는 실행일을 기준으로 최근 3개월의 달력 날짜 경계까지만 사용한다. 예를 들어 실행일이 7월 10일이면 4월 10일은 포함하고 4월 9일 이전 주문은 자동 조회 대상에서 제외한다. 월말은 해당 월의 마지막 날짜로 보정한다.

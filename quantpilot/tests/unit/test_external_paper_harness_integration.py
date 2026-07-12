@@ -14,20 +14,28 @@ from quantpilot.packages.core.execution.paper_submission import (
 from quantpilot.packages.core.execution.paper_reconciliation_apply import (
     PaperReconciliationApplier,
 )
+from quantpilot.packages.core.execution.paper_reconciliation import (
+    PaperBrokerReconciler,
+)
+from quantpilot.packages.core.execution.reducer import replay_paper_execution_events
 from quantpilot.jobs.run_kis_paper_session import _hydrate_durable_order_plans
 from quantpilot.packages.core.harness_service import HarnessService
 from quantpilot.packages.core.kis_paper import (
     KisBuyingPower,
     KisCashOrderResult,
+    KisDailyOrderFill,
     KisPaperOrderOutcomeUnknown,
 )
 from quantpilot.packages.core.marketdata.types import Quote
+from quantpilot.packages.core.operator.position_ledger import PaperOrderDispatch
 from quantpilot.packages.core.operator.service import OperatorService
 from quantpilot.packages.core.schemas import (
     BrokerMode,
+    DataMode,
     OrderIntent,
     OrderPlan,
     OrderStatus,
+    PortfolioPosition,
     PortfolioSnapshot,
     ProposalExplanation,
     UserPolicy,
@@ -153,6 +161,8 @@ def _order(policy: UserPolicy) -> OrderPlan:
         risk_check_expires_at=NOW + timedelta(minutes=5),
         idempotency_key="paper-order-key-001",
         policy_version=policy.version,
+        account_equity_at_proposal=1_000_000,
+        portfolio_snapshot_id="snapshot-001",
     )
     return OrderPlan(
         order_plan_id="plan-001",
@@ -239,14 +249,15 @@ def _harness(
 def test_external_paper_submit_prepares_and_claims_before_single_post(
     tmp_path,
 ) -> None:
+    database_path = tmp_path / "paper.sqlite3"
+    policy = _policy()
+    order = _order(policy)
     with PaperStateStore(
-        tmp_path / "paper.sqlite3",
+        database_path,
         data_mode="paper_trading",
         account_scope_fingerprint=FINGERPRINT,
     ) as store:
         harness, client, _ = _harness(store)
-        policy = _policy()
-        order = _order(policy)
         harness.repositories.policies.add(policy)
         harness.repositories.order_plans.add(order)
 
@@ -270,25 +281,168 @@ def test_external_paper_submit_prepares_and_claims_before_single_post(
         assert broker_order.broker_order_id == dispatch.broker_order_id
         assert fills == []
 
-        restarted_harness = HarnessService()
+        dispatch_events = store.list_paper_execution_events(
+            "order_dispatch",
+            order.order_plan_id,
+        )
+        projection = replay_paper_execution_events(dispatch_events)
+        assert isinstance(projection.after, PaperOrderDispatch)
+        assert projection.after == dispatch
+        replayed_order = OrderPlan.model_validate(
+            projection.after.order_plan_payload
+        )
+        assert replayed_order.explanation is not None
+        assert replayed_order.explanation.account_equity_at_proposal == 1_000_000
+        assert replayed_order.explanation.portfolio_snapshot_id == "snapshot-001"
+        assert client.order_calls == 1
+
+    with PaperStateStore(
+        database_path,
+        data_mode="paper_trading",
+        account_scope_fingerprint=FINGERPRINT,
+    ) as reopened:
+        persisted = reopened.load_paper_order_dispatch(order.order_plan_id)
+        assert persisted is not None
+        restart_projection = replay_paper_execution_events(
+            reopened.list_paper_execution_events(
+                "order_dispatch",
+                order.order_plan_id,
+            )
+        )
+        assert restart_projection.after == persisted
+
+        restarted_harness = HarnessService(
+            data_mode=DataMode.local_historical,
+            market_data_provider=SimpleNamespace(
+                get_price_history=lambda: [
+                    {
+                        "symbol": "005930",
+                        "date": "2026-07-10",
+                        "open": 70_000,
+                        "high": 70_000,
+                        "low": 70_000,
+                        "close": 70_000,
+                        "volume": 10_000,
+                    }
+                ]
+            ),  # type: ignore[arg-type]
+            performance_clock=lambda: datetime(
+                2026,
+                7,
+                10,
+                7,
+                0,
+                tzinfo=timezone.utc,
+            ),
+        )
         restarted_harness.repositories.policies.add(policy)
-        restarted_operator = OperatorService(restarted_harness)
+        restarted_operator = OperatorService(
+            restarted_harness,
+            professional_state_store=reopened,
+        )
         restarted_runtime = SimpleNamespace(
             operator=restarted_operator,
-            store=store,
+            store=reopened,
         )
         _hydrate_durable_order_plans(  # type: ignore[arg-type]
             restarted_runtime,
-            (dispatch,),
+            (persisted,),
         )
+
+        recovered = restarted_harness.repositories.order_plans.require(
+            order.order_plan_id
+        )
+        assert recovered.explanation is not None
+        assert recovered.explanation.account_equity_at_proposal == 1_000_000
+        assert recovered.explanation.portfolio_snapshot_id == "snapshot-001"
+
+        filled_dispatch = PaperBrokerReconciler(
+            store=reopened,
+            client=client,  # type: ignore[arg-type]
+            clock=lambda: NOW + timedelta(seconds=20),
+        ).reconcile_dispatch(
+            persisted,
+            (
+                KisDailyOrderFill(
+                    order_number="0000012345",
+                    original_order_number="",
+                    order_branch_number="91234",
+                    order_date="20260710",
+                    order_time="100001",
+                    symbol="005930",
+                    product_name="fixture security",
+                    side="buy",
+                    order_quantity=1,
+                    order_price=Decimal("70000"),
+                    total_filled_quantity=1,
+                    average_fill_price=Decimal("70000"),
+                    remaining_quantity=0,
+                    rejected_quantity=0,
+                    cancelled=False,
+                    confirmed_cancel_quantity=0,
+                    total_filled_amount=Decimal("70000"),
+                ),
+            ),
+            reconciled_at=NOW + timedelta(seconds=20),
+        )
+        assert filled_dispatch.status == "filled"
+        filled_projection = replay_paper_execution_events(
+            reopened.list_paper_execution_events(
+                "order_dispatch",
+                order.order_plan_id,
+            )
+        )
+        assert filled_projection.after == filled_dispatch
+
         applied = PaperReconciliationApplier(
             repositories=restarted_harness.repositories,
             audit=restarted_harness.audit,
-        ).apply((dispatch,))
+        ).apply((filled_dispatch,))
         assert applied.applied_order_plan_ids == (order.order_plan_id,)
-        assert restarted_harness.repositories.order_plans.require(
+        assert len(applied.new_fill_ids) == 1
+        recovered = restarted_harness.repositories.order_plans.require(
             order.order_plan_id
-        ).status == OrderStatus.accepted
+        )
+        assert recovered.status == OrderStatus.filled
+        reconciled_fills = [
+            restarted_harness.repositories.fills.require(fill_id)
+            for fill_id in applied.new_fill_ids
+        ]
+        assert restarted_operator.professional is not None
+        restarted_operator.professional.record_reconciled_fills(
+            policy=policy,
+            order=recovered,
+            fills=reconciled_fills,
+            snapshot=PortfolioSnapshot(
+                snapshot_id="snapshot-after-fill",
+                user_id=policy.user_id,
+                cash=930_000,
+                equity=1_000_000,
+                positions=[
+                    PortfolioPosition(
+                        symbol="005930",
+                        quantity=1,
+                        market_price=70_000,
+                    )
+                ],
+                captured_at=NOW + timedelta(seconds=30),
+                source="reconciled_test_broker",
+            ),
+            entry_atr14=1_200,
+        )
+
+        performance = restarted_harness.compute_strategy_performance(
+            "pullback_trend_v2",
+            "2.0",
+        )
+        assert performance is not None
+        assert performance.normalization_basis == "first_order_account_equity"
+        assert performance.normalization_equity == 1_000_000
+        assert performance.normalization_snapshot_id == "snapshot-001"
+        assert performance.data_mode == DataMode.local_historical
+        assert performance.included_fill_count == 1
+        assert performance.included_fill_fingerprint is not None
+        assert client.order_calls == 1
 
 
 def test_outcome_unknown_is_never_relabelled_failed_and_blocks_more_buys(

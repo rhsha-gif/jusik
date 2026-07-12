@@ -254,6 +254,25 @@ This is one documentation sample, not enough to change a routing preference. The
 evidence is that a bounded same-family fallback can complete a documentation mission when the selected
 counterpart is unavailable, provided the deviation and missing cross-vendor review are explicit.
 
+### 8.3 QP-ROADMAP-EXECUTION evidence (2026-07-11 KST)
+
+Source: `docs/roadmap_execution_workboard.md`, Claude branch
+`claude/qp-roadmap-contracts` commit `215a4b9`, and Codex integration review on
+`codex/qp-roadmap-baseline-v9`.
+
+| task_id | instance | task_class | first_pass_result | defects | rework | checks_run | elapsed | reviewer | rating |
+|---|---|---|---|---|---:|---|---|---|---:|
+| QP-RM-00A / QP-RISK-RES-V1-contract | Claude Code Opus alias (exact resolved ID unexposed), `claude-fable-5` finalizer | safety contract and roadmap acceptance design | rework-required | P1: omitted required gross-exposure reservation and assigned durable release to an in-memory applier; P1 scope group also persisted capacity as floats contrary to the approved roadmap | 1 | Claude `git diff --check` clean; docs-only commit `215a4b9`; no network/runtime changes | not recorded | GPT-5 Codex mission lead | 2 |
+| QP-RM-00 | GPT-5 Codex desktop | baseline integration and release verification | accepted | [] | 0 | backend `819 passed, 2 skipped`; smoke mock/live=false/operator blocked; kill CLI `paper_kill_disabled`; original dirty worktree unchanged | not recorded | Claude counterpart acceptance matrix + Codex evidence review | 5 |
+
+The Claude artifact was substantive and useful: it established the staged gate
+matrix, migration/backfill requirement, concurrency/crash cases, and conservative
+`outcome_unknown` hold. Codex review corrected the P1 issues before runtime work.
+A requested Claude revision was prevented by the session limit, so the integration
+record explicitly retains the deviation rather than treating the draft as
+self-approved. This is one new contract-design sample and does not change the
+task-class preference.
+
 ## 9. Operating notes
 
 - Append new evidence records to §8 (or a successor evidence log split out when it grows) at each

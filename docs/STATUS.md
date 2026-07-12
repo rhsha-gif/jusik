@@ -94,6 +94,31 @@ Level 1~5 자율화 전 과정을 먼저 완성하고, 사람 승인 게이트�
   ④ `MARKET_ORDERS_ENABLED` 판독 단일화. 검증: pytest 325개 중 324 passed·
   1 skipped (junit), smoke OK, vitest 20, build OK, 브리핑 페이지 브라우저 실검증
 
+## 최근 완료 (2026-07-12, QP-DRIFT-DAILY)
+
+- **DriftMonitor 성과 피드 개선 (1차, Claude)** — auto_feed가 KIS 실거래 비용
+  (수수료 1.40527bps/편도 + 매도세 20bps) 반영 + 보유 포지션 일별 종가 재평가로
+  체결 사이 드로다운 관측. `cost_basis`/`valuation` 후방호환 필드 추가.
+  main `6721d24`. 임계 로직(×1.5)·zero-MDD fail-closed 무변경.
+- **드리프트 성과 증거 fail-closed 결속 (2차, Codex 안전 검토 산출물)** —
+  Codex가 `codex/qp-drift-daily-audit`에서 커밋 `f8bb594` 산출, Claude 리드가
+  독립 diff 검토(P0/P1 없음) 후 `claude/qp-drift-daily-final-review`에 cherry-pick
+  (`25182df`). ① 정규화 분모를 누적 매수 명목가 → 첫 매수 제안 시점 계좌 equity
+  (`account_equity_at_proposal`+`portfolio_snapshot_id` 동반 증거)로 교체해 백테스트
+  MDD와 동일 기준 비교 ② 증거 열화 시 티켓 만료 대신 `strategy_activation_allowed`가
+  사유 코드로 실행 차단 (`valuation_status`, 체결 워터마크·시세·캘린더 fingerprint)
+  ③ KST 세션 마감 finality(15:30+30m), 미래 체결/재고 초과 매도 →
+  `reconciliation_required`, provider 실패의 MDD 만료 우회 불가를 테스트로 고정.
+  신규 테스트 31개, 제거 0. 검증(`25182df`): 백엔드 pytest 830개 중 828 passed·
+  2 skipped (junit), 표적 82 passed, smoke OK (broker mock, live 비활성, operator
+  blocked), openapi.json 바이트 단위 동기화(51 paths) + d.ts diff 없음,
+  vitest 23 passed, build OK.
+- **비차단 한계 (라이브 준비 주장 아님)**: ① capital_epoch/현금흐름 원장 부재 —
+  증거 epoch 중 paper 자본 리셋·출금 금지(운영 규율) ② 수동 `SimpleKrxCalendar`는
+  라이브 후보 권위 아님(휴장일 누락 자체는 미탐지, live-candidate 전 권위 소스 필요)
+  ③ 동일 타임스탬프 체결 순서는 canonical event ordering 도입 대기.
+  상세: `docs/qp_drift_daily_workboard.md` Known limits.
+
 ## 다음 단계 후보 (우선순위 제안)
 
 > 제품 구상(대화형 전략 수립 → 전략 단위 승인 → 자동 운용)과의 정렬 설계 및
@@ -104,7 +129,9 @@ Level 1~5 자율화 전 과정을 먼저 완성하고, 사람 승인 게이트�
    운용 시작 시 (예산 게이트 자체는 ✅ 제출 경로에서 강제됨)
 3. ~~DriftMonitor 개선: 일별 종가 재평가·수수료 반영~~ ✅ (2026-07-12, QP-DRIFT-DAILY —
    auto_feed가 KIS 비용 반영 + 현 데이터 모드 종가로 보유 포지션 일별 재평가;
-   `cost_basis`/`valuation` 필드로 레코드에 산정 기준 명시, 임계 로직(×1.5)은 무변경)
+   `cost_basis`/`valuation` 필드로 레코드에 산정 기준 명시, 임계 로직(×1.5)은 무변경.
+   2차로 Codex 안전 검토 커밋 `f8bb594`가 성과 증거를 fail-closed로 결속 —
+   위 "최근 완료 (2026-07-12)" 참조; capital_epoch 원장·권위 캘린더는 후속)
 4. ~~라우터 분리 부채~~ ✅ strategy-studio·strategy-tickets·notifications를
    전용 라우터로 분리하고 기존 50개 OpenAPI 경로·스키마 계약을 유지함
 5. KIS 앱키 확보 시: `RUN_KIS_MANUAL_INTEGRATION=1` 수동 통합 테스트 (토큰 헬퍼는 ✅ 준비됨)

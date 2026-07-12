@@ -2,10 +2,10 @@
 
 ## Document edit lease
 
-- Lease status: `held`
-- Document editor: `Claude Code`
+- Lease status: `released`
+- Document editor: `—` (마지막 편집: Claude Code, 미션 완료 갱신)
 - Mission/task ID: `QP-DRIFT-DAILY`
-- Acquired at: `2026-07-12 KST`
+- Acquired at: `2026-07-12 KST` / Released at: `2026-07-12 KST`
 
 ## Mission charter
 
@@ -42,6 +42,18 @@
   - 검토자 검증: 수수료 수식이 backtest engine(`engine.py:315,349-354`)과 일치, 정확값 단언 기존
     테스트 없음, 프론트 소비처 없음(additive 안전).
 - Required substantive counterpart role: 구현 전 설계·분해 검토 (읽기 전용 감사). 단일 파일 중심의 국소 변경이므로 구현 소유는 리드가 유지하고, Codex는 독립 검토를 소유한다.
+- **후속 Codex 실질 산출물 (CLI 복구 후)**: Codex가 `codex/qp-drift-daily-audit` 브랜치에서 안전
+  감사를 넘어 fail-closed 강화 구현 커밋 `f8bb594` ("fix(drift): bind performance evidence fail
+  closed")를 독립 소유·산출함. 리드(Claude Fable 5)가 diff 전수 독립 검토 후 P0/P1 없음으로 판정,
+  `claude/qp-drift-daily-final-review`에 cherry-pick (`25182df`). 핵심 내용:
+  - 성과 정규화 분모를 누적 매수 명목가 → **첫 매수 제안 시점 계좌 equity**(`account_equity_at_proposal`
+    + `portfolio_snapshot_id` 동반 증거, both-or-neither 검증)로 교체해 백테스트 MDD와 동일 기준 비교.
+  - 증거 열화 시 **만료 대신 차단**: `valuation_status`/`normalization_basis`/fingerprint(체결 워터마크·
+    시세·캘린더) 불일치가 있으면 `strategy_activation_allowed`가 사유 코드와 함께 fail-closed 차단.
+    티켓은 일시 데이터 문제로 파괴되지 않되 실행은 불가. 드리프트 임계 로직(×1.5, zero-MDD)은 무변경.
+  - KST 세션 마감(15:30+30분 finality) 이전의 당일 종가 미확정 처리, 미래 체결/재고 초과 매도 →
+    `reconciliation_required`, provider 실패가 MDD 만료를 우회할 수 없음을 테스트로 고정.
+  - 테스트 31개 신규 추가(제거 0), 기존 단언은 새 equity 기준의 정확값으로 재조준(약화 없음).
 
 ## Routing assessment
 
@@ -58,8 +70,10 @@
 | Task ID | Owner/model | Reviewer/model | Depends on | Worktree/branch | Owned paths | Status | Acceptance | Evidence/commit |
 |---|---|---|---|---|---|---|---|---|
 | `QP-DD-00` | Claude Fable 5 | — | none | main tree | `docs/qp_drift_daily_workboard.md` | done | 미션·설계·라우팅 확정 | this file |
-| `QP-DD-01` | Claude Fable 5 | Codex (read-only) | `QP-DD-00` | `주식트레이더-drift-daily` / `claude/qp-drift-daily-01` | `quantpilot/packages/core/harness_service.py`, `quantpilot/packages/core/schemas.py`, `quantpilot/tests/unit/test_strategy_drift.py`, `quantpilot/tests/unit/test_strategy_performance_feed.py`, `openapi.json`, `quantpilot/apps/web/src/lib/openapi.d.ts`, `docs/STATUS.md`, this workboard | in_progress | 일별 종가 재평가 + 비용 반영 + 후방호환 스키마, 신규 테스트, 전체 검증 통과 | |
-| `QP-DD-02` | Claude Fable 5 (lead) | — | `QP-DD-01` | main tree | mainline integration | pending | 전체 검증 재실행 후 main 병합, STATUS/작업보드 갱신 | |
+| `QP-DD-01` | Claude Fable 5 | Codex (read-only) → fallback 검토자 | `QP-DD-00` | `주식트레이더-drift-daily` / `claude/qp-drift-daily-01` | `quantpilot/packages/core/harness_service.py`, `quantpilot/packages/core/schemas.py`, `quantpilot/tests/unit/test_strategy_drift.py`, `quantpilot/tests/unit/test_strategy_performance_feed.py`, `openapi.json`, `quantpilot/apps/web/src/lib/openapi.d.ts`, `docs/STATUS.md`, this workboard | done | 일별 종가 재평가 + 비용 반영 + 후방호환 스키마, 신규 테스트, 전체 검증 통과 | `6721d24` (main) |
+| `QP-DD-02` | Claude Fable 5 (lead) | — | `QP-DD-01` | main tree | mainline integration | done | 전체 검증 재실행 후 main 병합, STATUS/작업보드 갱신 | main = `6721d24` |
+| `QP-DD-03` | Codex GPT-5.x | Claude Fable 5 (독립 diff 검토) | `QP-DD-02` | `codex/qp-drift-daily-audit` | `harness_service.py`, `schemas.py`, `data/providers.py`, `data/external.py`, `operator/professional_cycle.py`, `services/api/dependencies.py`, `jobs/run_kis_paper_session.py`, `.env.example`, `openapi.json`, `openapi.d.ts`, 관련 unit tests | review | 드리프트 성과 증거 fail-closed 결속 (P0/P1 폐쇄), 안전 기본값 무변경, 테스트 약화 없음 | `f8bb594` → cherry-pick `25182df` |
+| `QP-DD-04` | Claude Fable 5 (lead) | — | `QP-DD-03` | `주식트레이더-claude-drift-final` / `claude/qp-drift-daily-final-review` | cherry-pick + `docs/qp_drift_daily_workboard.md`, `docs/STATUS.md` | done | f8bb594 독립 검토·체리픽, 전체 검증(백엔드/스모크/openapi/프론트) 재실행, 문서 최종화 | 검증 출력은 Checkpoint log 참조 |
 
 ## Design summary (QP-DD-01)
 
@@ -78,9 +92,44 @@
    실현 MDD 증가는 단일 종목·수수료 효과에서 보장되며 다종목 교차 mark에서는 경험적 경향
    (F2) — fail-closed 안전성은 이 불변식이 아니라 임계 로직 무변경 + F1 명문화로 담보.
 
+## Known limits (비차단, 명시 기록)
+
+라이브 준비 완료를 주장하지 않는다. 다음 한계는 P0/P1이 아니며 후속 미션 대상이다.
+
+1. **capital_epoch/현금흐름 원장 부재**: 정규화 분모(첫 매수 시점 계좌 equity)는 증거 epoch 동안
+   외부 현금흐름이 없다는 가정에 기댄다. 권위 있는 capital_epoch/cashflow ledger가 없으므로
+   **증거 epoch 진행 중 paper 자본 리셋·출금은 금지**된다 (운영 규율로 담보, 코드 강제 아님).
+2. **수동 `SimpleKrxCalendar`는 라이브 후보 권위가 아님**: 주말 + `KRX_HOLIDAYS` 수동 설정 기반의
+   최소 캘린더다. 캘린더 설정 변경은 fingerprint로 기존 증거를 무효화하지만, 휴장일 누락 자체는
+   탐지하지 못한다. live-candidate 단계 전에 권위 있는 KRX 캘린더 소스로 교체해야 한다.
+3. **동일 타임스탬프 체결 순서**: 같은 `filled_at`의 체결 간 순서는 canonical event ordering이
+   도입될 때까지 정렬 안정성에 의존한다. 현재 fixture 결정성 하에서는 재현 가능하나, 실서버
+   이벤트 스트림 기준의 순서 보증은 아니다.
+4. `F4` (이월): 날짜 파싱 실패 전량 발생 시 재평가가 조용히 비활성화되는 경로의 로깅/라벨 강등은
+   여전히 후속 검토 항목 — 단, f8bb594 이후에는 해당 경우 `valuation_status`가 `complete`가 될 수
+   없어 활성화가 차단되므로 실행 경로 위험은 폐쇄됨.
+
 ## Checkpoint log
 
 - `2026-07-12` — Claude Fable 5 — 미션 수임, 설계 확정, worktree `claude/qp-drift-daily-01` 생성, Codex 읽기 전용 분해 검토 요청 발송.
 - `2026-07-12` — Claude Fable 5 — Codex CLI가 `~/.codex/config.toml` 오류로 차단 → 독립 컨텍스트 fallback 검토자 투입 (QP-WORKFLOW-DOC 선례).
 - `2026-07-12` — Claude Fable 5 — 구현 완료: fee-aware daily-close 재평가, 스키마 필드 2개, 신규 테스트 7개. openapi.json 재생성 시 기존 스테일 발견(`/api/operator/professional-status` 누락, 51 paths로 보정).
 - `2026-07-12` — fallback reviewer — APPROVE-WITH-CHANGES (F1~F6); 필수 F1·F6 및 권고 F2·F3 반영, F4는 후속 항목.
+- `2026-07-12` — Claude Fable 5 (lead) — QP-DD-01/02 main 통합 확인 (main = `6721d24`).
+- `2026-07-12` — Codex GPT-5.x — CLI 복구 후 `codex/qp-drift-daily-audit`에서 안전 검토 + fail-closed
+  강화 커밋 `f8bb594` 산출 (13 files, +1918/−99; 신규 테스트 31개).
+- `2026-07-12` — Claude Fable 5 (lead) — `f8bb594` 독립 diff 전수 검토: P0/P1 없음, 안전 플래그·드리프트
+  임계 로직 무변경, 테스트 제거 0건·단언 약화 없음 확인 → `claude/qp-drift-daily-final-review`에
+  cherry-pick (`25182df`).
+- `2026-07-12` — Claude Fable 5 (lead) — 전체 검증 (branch `claude/qp-drift-daily-final-review`, `25182df`):
+  - 표적 pytest (`test_strategy_drift.py`, `test_strategy_performance_feed.py`, `test_providers.py`):
+    `82 passed in 4.04s`
+  - 전체 백엔드 pytest (junit): `tests=830, failures=0, errors=0, skipped=2` (828 passed)
+  - `run_smoke`: OK — `"broker": "mock"`, `"live_trading_enabled": false`, operator
+    `"status": "blocked"` (`level5_flag_disabled`)
+  - OpenAPI 정확 동기화: 앱 재생성 `openapi.json`이 커밋 blob과 **바이트 단위 일치** (51 paths);
+    `npm run generate:api` 재생성 후 `openapi.d.ts` git diff 없음
+  - 프론트 (`quantpilot/apps/web`, 임시 node_modules junction 사용 후 제거): vitest
+    `23 passed (7 files)`, `npm run build` 성공 (17.65s)
+- `2026-07-12` — Claude Fable 5 (lead) — 워크보드·STATUS 최종화, 문서 lease 해제. main 통합은
+  사용자/리드 결정 대기 (integration recommendation: **통합 권고**).

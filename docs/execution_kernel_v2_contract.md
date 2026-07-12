@@ -399,12 +399,18 @@ broker_mode: mock | paper
 environment: mock | simulated_paper | kis_paper
 supports_limit_orders
 supports_market_orders
+requires_whole_quantity
+requires_integer_limit_price
 requires_durable_prepare
 requires_atomic_reservation
 requires_account_provenance
 ```
 
 The first slice accepts no live environment and no unknown capability value.
+For `kis_paper`, both whole-quantity and integer-limit flags are true, mirroring
+the current coordinator's `_whole_positive_number` checks. This does not claim
+to implement the full KRX tick-size schedule; that belongs to the later broker
+capability/security-master roadmap gate.
 
 ### 4.3 Versioned output
 
@@ -489,6 +495,8 @@ operator_kill_switch_engaged
 autopilot_paused
 broker_unhealthy
 market_order_disabled
+quantity_step_mismatch
+price_step_mismatch
 explicit_snapshot_missing
 explicit_quote_missing
 paper_run_id_missing
@@ -750,6 +758,7 @@ The minimum pure-model case matrix is binding:
 | current policy snapshot changed before submission | `blocked/policy_snapshot_changed` |
 | live, either kill, pause, or unhealthy broker | matching `final_safety` reason |
 | market order with disabled context/capability | `blocked/market_order_disabled` |
+| KIS paper fractional quantity or non-integer KRW limit | matching capability-step reason |
 | external paper without snapshot/quote/run/provenance/fence evidence | matching `paper_evidence` reason |
 | external paper without a matching strategy explanation binding | `blocked/paper_evidence/strategy_binding_missing` |
 | valid external-paper evidence | eligible with both durable requirement flags, zero calls |

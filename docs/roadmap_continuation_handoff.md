@@ -15,22 +15,22 @@
 3. 캐노니컬 실행 이벤트 shadow journal v1, schema v11
 4. Execution Kernel v2의 계약·정적 안전 게이트 `QP-KER-000A~000E`
 
-현재 실제 구현 게이트는 **Execution Kernel v2 `QP-KER-010`**이다. 순수 커널 구현과 테스트는
-별도 브랜치 커밋 `61a4f93`에서 세 번의 Codex 독립 감사 기준 P0=0/P1=0으로 수용됐지만,
-**main에는 아직 없다**. Claude Code의 최종 파일 해시 결속 리뷰가 남았으므로 상태는
-`accepted_unmerged`이며 `done`이나 `integrated`가 아니다.
+**2026-07-14 갱신: Gate 010 통합 완료.** 아래 1~4단계가 그대로 수행되어 완료됐다.
 
-세 Codex 감사 판정은 당시 운영 기록에 있었고, 이 인계서가 그 요약을 저장소에 처음 남긴 문서다.
-인계 정확성은 별도 Claude artifact `docs/roadmap_continuation_handoff_claude_review.md`가 재현 검증했지만,
-이 문서 감사는 runtime용 `QP-KER-010B` 최종 hash-bound follow-up을 대체하지 않는다.
+1. Claude Code(CLI 2.1.209, `claude-fable-5`)가 recursion-review worktree에서 최종 해시 결속
+   follow-up `76fdef8`을 직접 커밋했다(hash-bound 판정 P0=0/P1=0/P2=0, 전체 243/243,
+   adversarial 12/12, semantic AST digest 독립 재계산 일치).
+2. Codex 독립 재감사가 P0=0/P1=0/P2=1을 반환했고, 유일한 P2(회고 행 누락)는 `28ba4c3`으로
+   폐쇄했다.
+3. 새 clean 통합 worktree(`C:/qp-gate010-integration-20260714`)에서 recursion 문서 계보
+   (`b70d848`→`0419707`→`083b55a`→`76fdef8`→`28ba4c3`, merge `a9a15d3`)와 runtime
+   `61a4f93`(merge `fed4ed6`)을 순서대로 통합하고 main을 `fed4ed6`으로 fast-forward했다.
+4. 통합 트리 재검증: backend `1289 passed, 2 skipped, 0 failed`; smoke `broker=mock`,
+   `live_trading_enabled=false`, operator `blocked`, submitted `[]`; `git diff --check` clean;
+   두 runtime 파일 SHA256은 §2.1의 최종값과 동일.
 
-다음 채팅의 첫 임무는 새 기능 구현이 아니라 다음 순서다.
-
-1. 기존 Claude recursion-review worktree에서 최종 해시 결속 follow-up을 Claude가 직접 커밋한다.
-2. Codex 미션 리드가 그 커밋을 독립 재감사한다.
-3. P0=0/P1=0일 때만 recursion 문서 계보와 `61a4f93`을 mainline 후보에 통합한다.
-4. 전체 backend, smoke, diff, 안전 기본값을 재검증한다.
-5. 그 뒤에만 `QP-KER-015`를 시작한다.
+현재 활성 게이트는 **`QP-KER-015`** (temporal/durable expiry와 strategy version totality
+hardening)다.
 
 ## 1. 절대 보존해야 하는 상태
 
@@ -69,9 +69,9 @@ BROKER_MODE=mock
 | Gate 1 atomic reservation | `integrated` | main에 포함 | schema v10; fake-only acceptance; reservation+prepared dispatch 원자성 |
 | Gate 2 canonical events | `integrated` | main에 포함 | schema v11; authoritative row와 canonical shadow event same-transaction dual-write |
 | Kernel 계약 | `integrated` | main `f8162e2` | `QP-KER-000A~000E` 계약/정적 안전 게이트 완료 |
-| Recursion 계약 보강 | `accepted_unmerged` | `b70d848` -> `0419707` | main `f8162e2`에서 분기; 두 커밋 모두 필요 |
-| Claude recursion 리뷰 | `review_incomplete` | `083b55a` | 실질 리뷰이지만 최종 runtime 파일 해시에 결속되지 않음 |
-| Pure Kernel runtime | `accepted_unmerged` | `codex/qp-kernel-v2-pure` / `61a4f93` | 2026-07-14 재검증: backend `1289 passed, 2 skipped`; safe smoke; 세 Codex 감사 P0=0/P1=0 |
+| Recursion 계약 보강 | `integrated` | `b70d848` -> `0419707`, merge `a9a15d3` | 2026-07-14 main 통합 |
+| Claude recursion 리뷰 | `integrated` | `083b55a` -> `76fdef8` -> `28ba4c3` | 최종 hash-bound follow-up P0=0/P1=0/P2=0; Codex 재감사 P0=0/P1=0; main 통합 |
+| Pure Kernel runtime | `integrated` | `61a4f93`, merge `fed4ed6` | 통합 트리 재검증: backend `1289 passed, 2 skipped`; safe smoke; Claude+Codex P0/P1=0 |
 | Manual KIS Gate P | `open_manual` | 자동화 대상 아님 | `VTTC0084R`, 실제 paper cancel/buying-power semantics는 사용자 승인·자격증명이 있는 수동 검증 필요 |
 
 ### 2.1 Gate 010 최종 파일 결속값
@@ -110,26 +110,11 @@ quantpilot/tests/unit/test_execution_kernel_v2.py
   `docs/roadmap_continuation_handoff_claude_review.md`의 독립 재현 기록이며, runtime 통합 승인 증거는
   다음 채팅에서 Claude `QP-KER-010B` follow-up과 Codex 재감사로 새로 남겨야 한다.
 
-### 2.2 아직 사용하면 안 되는 Claude 초안
+### 2.2 Claude 초안 처리 완료 (2026-07-14)
 
-worktree:
-
-```text
-C:\Users\goyan\OneDrive\문서\코덱스\주식트레이더-claude-kernel-v2-recursion-review
-branch: claude/qp-kernel-v2-recursion-review
-HEAD: 083b55a1bb17f1e33311396ca616ab1c1f97ec33
-```
-
-이 worktree에는 Claude가 중단된 실행에서 남긴 다음 두 uncommitted 수정이 있다.
-
-```text
-docs/execution_kernel_v2_contract.md
-docs/execution_kernel_v2_workboard.md
-```
-
-그 초안에는 `61a4f93` 이전의 오래된 runtime hash/test count가 들어 있다. Codex가 수정·reset·stage하지
-않는다. Claude가 final follow-up을 수행할 때 자기 변경을 최종 해시로 교정하고 새 커밋으로 남겨야 한다.
-`083b55a`를 amend하지 않는다.
+worktree `주식트레이더-claude-kernel-v2-recursion-review`의 두 uncommitted 초안은 최종 해시로
+교정되어 `76fdef8`(hash-bound follow-up)과 `28ba4c3`(Codex 재감사 P2 폐쇄)으로 커밋됐고,
+`083b55a`는 amend되지 않았다. 해당 계보는 merge `a9a15d3`으로 main에 통합됐다.
 
 ## 3. 전체 매크로 로드맵 0~12
 
@@ -147,7 +132,7 @@ docs/execution_kernel_v2_workboard.md
 | 0 | 기준점 동결, KIS kill v1, ADR/문서 정합 | `integrated` + Gate P `manual` | `VTTC0084R` 실제 paper 검증은 별도 사용자 승인 시에만 |
 | 1 | 원자적 현금·매도수량·gross exposure 위험예약 | `integrated` | 완료. schema v10 보존 |
 | 2 | Canonical Order/Execution Event 모델과 reducer | `integrated` | 완료. schema v11 shadow journal 보존 |
-| 3 | Execution Kernel v2 단일 순수 판단 경계와 단계별 cutover | `active` | 현재 `QP-KER-010 accepted_unmerged`; 아래 커널 서브로드맵 수행 |
+| 3 | Execution Kernel v2 단일 순수 판단 경계와 단계별 cutover | `active` | `QP-KER-010 integrated` (2026-07-14, main `fed4ed6`); 현재 게이트는 `QP-KER-015` |
 | 4 | Transactional outbox와 계좌별 single writer | `open` | `QP-KER-080` 완료 후 시작 |
 | 5 | Execution/Position/Cash authoritative ledger와 reconciliation break | `open` | outbox와 canonical event 계약 안정화 |
 | 6 | Continuous OMS/Risk/Reconciliation runtime | `open` | authoritative ledger와 worker 복구 계약 완료 |
@@ -163,10 +148,10 @@ docs/execution_kernel_v2_workboard.md
 | Gate | 내용 | 상태 | 핵심 수용 조건 |
 |---|---|---|---|
 | `QP-KER-000A~000E` | 저장소 기반 계약, Claude 최종 리뷰, 정적 purity closure | `integrated` | main `f8162e2`에 포함 |
-| `QP-KER-010A` | low-recursion containment 계약 보강 | `accepted_unmerged` | `b70d848`와 child `0419707` |
-| `QP-KER-010B` | Claude recursion counterpart review | `review_incomplete` | `083b55a`는 unbound. final hash-bound follow-up 필요 |
-| `QP-KER-010` | 순수 frozen model/evaluator, 결정적 fingerprint, zero I/O | `accepted_unmerged` | `61a4f93`, 파일 hash 일치, Claude+Codex P0/P1=0 후 통합 |
-| `QP-KER-015` | temporal/durable expiry와 strategy version totality hardening | `blocked_on_010` | 기존 schema v11 payload 사용, migration 없음; 양쪽 expiry fence, restart/pre-POST, Unicode version corpus |
+| `QP-KER-010A` | low-recursion containment 계약 보강 | `integrated` | `b70d848`와 child `0419707`; merge `a9a15d3` |
+| `QP-KER-010B` | Claude recursion counterpart review | `integrated` | `083b55a` + hash-bound follow-up `76fdef8` + P2 폐쇄 `28ba4c3`; P0=0/P1=0/P2=0 |
+| `QP-KER-010` | 순수 frozen model/evaluator, 결정적 fingerprint, zero I/O | `integrated` | `61a4f93`, merge `fed4ed6`; 파일 hash 일치, Claude+Codex P0/P1=0 |
+| `QP-KER-015` | temporal/durable expiry와 strategy version totality hardening | `ready` | 기존 schema v11 payload 사용, migration 없음; 양쪽 expiry fence, restart/pre-POST, Unicode version corpus |
 | `QP-KER-020` | 기본 off인 shadow runner | `open` | authoritative mutation 0, broker callable 0, unknown mode fail-closed |
 | `QP-KER-030` | L1~L5 exhaustive legacy-vs-kernel parity | `open` | blocked/success/dry-run corpus, shadow counters 0 |
 | `QP-KER-035` | common authoritative facade | `open` | 모든 level adapter가 같은 facade 사용, 새 broker authority 없음 |
@@ -315,6 +300,6 @@ smoke는 `broker=mock`, `live_trading_enabled=false`, operator blocked, submitte
 
 ## 8. 다음 채팅에 전달할 한 문장
 
-> `docs/roadmap_continuation_handoff.md`를 기준으로 main/worktree/hash를 먼저 재검증하고,
-> `QP-KER-010B` Claude 최종 해시 결속 리뷰를 완료·재감사한 뒤에만 Gate 010을 main에 통합하고
-> `QP-KER-015`로 진행하라. live/KIS network/market order 권한은 없다.
+> Gate 010은 2026-07-14 main `fed4ed6`에 통합 완료됐다. `docs/execution_kernel_v2_contract.md`의
+> `QP-KER-015` 소유 범위와 수용 조건을 기준으로 temporal/durable expiry hardening을 별도
+> worktree에서 시작하라. live/KIS network/market order 권한은 없다.

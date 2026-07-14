@@ -20,6 +20,10 @@
 **main에는 아직 없다**. Claude Code의 최종 파일 해시 결속 리뷰가 남았으므로 상태는
 `accepted_unmerged`이며 `done`이나 `integrated`가 아니다.
 
+세 Codex 감사 판정은 당시 운영 기록에 있었고, 이 인계서가 그 요약을 저장소에 처음 남긴 문서다.
+인계 정확성은 별도 Claude artifact `docs/roadmap_continuation_handoff_claude_review.md`가 재현 검증했지만,
+이 문서 감사는 runtime용 `QP-KER-010B` 최종 hash-bound follow-up을 대체하지 않는다.
+
 다음 채팅의 첫 임무는 새 기능 구현이 아니라 다음 순서다.
 
 1. 기존 Claude recursion-review worktree에서 최종 해시 결속 follow-up을 Claude가 직접 커밋한다.
@@ -76,6 +80,7 @@ BROKER_MODE=mock
 
 ```text
 61a4f93a222b936459681f592a8ce71ba9bd11fc
+parent: 7af13b02348691c8839ee9229b6a13c5af2188f5
 ```
 
 파일 SHA256:
@@ -101,6 +106,9 @@ quantpilot/tests/unit/test_execution_kernel_v2.py
 - contract/test: P0=0/P1=0/P2=1
 - 유일한 P2는 Python AST schema/minor-version 변경 시 digest를 명시적으로 재산출하고 독립 재검토해야
   한다는 운영 제약이다. digest 자동 갱신은 금지한다.
+- 위 세 Codex 감사의 원래 별도 저장소 artifact는 없었다. 현재 저장소 증거는 이 인계서의 요약과
+  `docs/roadmap_continuation_handoff_claude_review.md`의 독립 재현 기록이며, runtime 통합 승인 증거는
+  다음 채팅에서 Claude `QP-KER-010B` follow-up과 Codex 재감사로 새로 남겨야 한다.
 
 ### 2.2 아직 사용하면 안 되는 Claude 초안
 
@@ -179,7 +187,7 @@ quantpilot/packages/core/execution/state_machine.py
 quantpilot/packages/db/sqlite_repositories.py
 quantpilot/jobs/run_kis_paper_session.py
 focused expiry/coordinator/session tests
-quantpilot/tests/unit/test_strategy_version_matching.py
+quantpilot/tests/unit/test_strategy_version_matching.py  # planned-new
 ```
 
 ## 5. Gate 010을 이어가는 정확한 순서
@@ -237,14 +245,21 @@ docs/execution_kernel_v2_workboard.md
 ### 5.3 Codex 재감사와 통합
 
 Claude follow-up이 P0=0/P1=0이면 Codex 미션 리드는 새 clean integration worktree를 main에서 만들고
-다음 계보를 검토·적용한다.
+다음 두 병렬 계보를 검토한다. `61a4f93`의 parent는 `7af13b0`이므로 recursion 문서 계보의 후손이
+아니다. 아래 순서는 Git 조상 관계가 아니라 mainline에 적용할 순서다.
 
 ```text
+recursion docs branch:
 b70d8482fa59fd9cd11e84431ad1e40af75b0ba1
   -> 0419707e940f381d6e348a28a3b5a994ed6016a3
   -> 083b55a1bb17f1e33311396ca616ab1c1f97ec33
   -> <Claude final hash-bound follow-up>
-  -> 61a4f93a222b936459681f592a8ce71ba9bd11fc
+
+parallel runtime branch, parent 7af13b02348691c8839ee9229b6a13c5af2188f5:
+61a4f93a222b936459681f592a8ce71ba9bd11fc
+
+mainline apply order:
+recursion docs branch commits -> 61a4f93a222b936459681f592a8ce71ba9bd11fc
 ```
 
 각 커밋의 변경 경로를 먼저 확인한다. 문서 계보는 Kernel 계약/작업보드만, runtime 커밋은

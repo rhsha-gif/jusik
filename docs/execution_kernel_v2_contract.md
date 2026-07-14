@@ -27,7 +27,40 @@ ADR only). The mission-lead integration commit `9fbf035` incorporates the
 reviewed lineage, and `61bccac` records the safe handoff: docs-only scope,
 mock broker, live disabled, and Level 5 blocked with zero submitted operator
 orders. `QP-KER-010` may therefore begin, but no runtime implementation is
-part of this contract gate.
+part of this contract gate. During `QP-KER-010`, an adversarial low-recursion
+test demonstrated that the depth budget alone cannot contain recursive descent
+when the validator has entered normally but the configured recursion limit is
+reduced to 65.
+`QP-KER-010A` is the docs-only safety correction below: it adds one narrowly
+specified `RecursionError` containment form without permitting a broad catch,
+raw error payload, retry, mutation, or new trading authority. This correction
+must receive independent P0/P1=0 and Claude counterpart review before the
+runtime slice can be accepted. The Claude Code (`claude-fable-5`)
+`QP-KER-010B` counterpart review (commit `083b55a`) independently reproduced
+the reduced-limit containment, the exact recursive-argument and handler forms,
+and the raw value/path mutation rejections; it found P0=0/P1=0/P2=1. Its P2 —
+reduced-headroom containment exercised only through the dict recursive
+variant — was accepted in that commit as a contract requirement by binding the
+list/tuple variant into the fixture corpus below, but the matching runtime
+regression did not yet exist, so the P2 remained open for Gate-010 acceptance
+at that time. Because `083b55a` reviewed an unbound snapshot (it recorded no
+runtime file hashes), its snapshot wording is superseded by the hash-bound
+`QP-KER-010B` re-review. An interim re-review pass bound a pre-final
+snapshot (`kernel.py` SHA256 `9a694a85…f613`, tests SHA256 `77b1ff92…9c8c`)
+that was itself superseded when the runtime candidate advanced; no earlier
+hash acceptance carries forward. The frozen runtime candidate is exactly
+commit `61a4f93a222b936459681f592a8ce71ba9bd11fc` (parent `7af13b02…`):
+`quantpilot/packages/core/execution/kernel.py` SHA256
+`fa84badc2710fa8e53ba9ebf002c4dd6f39f5d2ecc163b3a282ec3fde791a7e1` and
+`quantpilot/tests/unit/test_execution_kernel_v2.py` SHA256
+`8e9b320cdb9daa84fd08b9984cafc8c2a5ee44e874f97c1a7e0d2a0c576c3bac`, verified
+byte-identical before and after the re-review's test runs, with the
+test-bound normalized semantic AST SHA256
+`750680273FB34423CD095E8C8E64B384D2ECB6FBD9154271A03CC104C6065102`
+independently recomputed from that source. That frozen candidate contains
+the dict/list/tuple-parametrized reduced-headroom regression under
+`sys.setrecursionlimit(65)`, which closes the former P2; the hash-bound
+counterpart verdict on exactly these two hashes is P0=0/P1=0/P2=0.
 
 ## 1. Purpose and governing baseline
 
@@ -288,16 +321,29 @@ denylist:
   violations even before the forbidden callable-name loads are considered.
 - Function bodies use a closed statement grammar: optional docstring, simple
   local assignment/unpacking, `if`, finite `for` over an approved typed/local
-  iterable, `return`, and only the two exact `try` forms required by v1.
+  iterable, `return`, and only the three exact `try` forms required by v1.
   `validate_kernel_input_v1` may catch imported `ValidationError`.
   Only `validate_kernel_input_v1` may raise
   `KernelEvidenceValidationError`, built once from the fully aggregated,
   sanitized local code/path tuple with the cause expression exactly `None` so
   a rejected raw or Pydantic validation exception cannot leak through chained
-  traceback. `_copy_raw_value` never raises;
-  the version helper may catch only `ValueError` and return mismatch. Neither
-  form has `else`/`finally` or a broad handler, and no other raise/cause form
-  is allowed. Every
+  traceback. The version helper may catch only `ValueError` and return
+  mismatch. The third form exists only inside `_copy_raw_value`: a `try` body
+  contains exactly one tuple assignment from its sole recursive
+  `_copy_raw_value(...)` call. The dict variant's six arguments are exactly
+  `(raw_item, child_path, raw_key, depth + 1, remaining_budget,
+  child_ancestors)`; the list/tuple variant's are exactly
+  `(raw_item, path + "[]", field_name, depth + 1, remaining_budget,
+  child_ancestors)`. No constant, reset budget, alternate path, or ancestor
+  substitution is equivalent. One unnamed `except RecursionError` handler
+  assigns exactly `copied_item = None`, `remaining_budget = 0`, and one
+  sanitized finding. In the dict branch that finding path is the already
+  allowlisted local `child_path`; in the list/tuple branch it is exactly
+  `path + "[]"`. The handler may not read `value`, `raw_item`, an exception
+  object, or any other raw value; may not call, format, stringify, or hash;
+  and has no `else`/`finally`. The other two forms likewise have no
+  `else`/`finally` or broad handler. `_copy_raw_value` never leaks a recursion
+  exception, and no other raise/cause/handler form is allowed. Every
   other `Raise`, `Assert`, `Yield`/`YieldFrom`, `With`, `While`, `Match`,
   function-local import, nested function/class, async construct, `break`/
   `continue`, deletion, or augmented assignment is forbidden. Assignment
@@ -363,7 +409,15 @@ denylist:
   may call `utcoffset`/`astimezone`. A custom `tzinfo` subclass is rejected
   without invoking it. Fixed-offset built-in `timezone` values remain valid,
   preserving the equal-instant/different-offset fingerprint case.
-- Preflight is total over cyclic and oversized exact containers. Immutable
+- Within the supported validation runtime, preflight is total over cyclic,
+  deeply nested, and oversized exact containers. The support premise is that
+  `validate_kernel_input_v1` and the first `_copy_raw_value` invocation have
+  entered and the interpreter retains enough frames to run the fixed
+  non-recursive handler and sanitized validation-error path. The binding
+  reduced-limit regression is `sys.setrecursionlimit(65)` from the focused
+  test stack. V1 makes no claim when Python cannot enter that boundary or
+  construct its exception because the process is already at the absolute
+  recursion limit. Immutable
   module constants bind `MAX_RAW_DEPTH=64`, `MAX_RAW_NODES=50000`,
   `MAX_RAW_CONTAINER_ITEMS=10000`, `MAX_RAW_TEXT_CHARS=65536`, and
   `MAX_RAW_BYTES=65536`, `MAX_RAW_ABS_INT=9223372036854775807`,
@@ -372,9 +426,13 @@ denylist:
   returns the detached value, remaining budget, and immutable finding tuple;
   no mutable seen-set is
   required. It checks depth/budget before descent and container/text/bytes size only
-  after the exact-type branch. A self-referential dict/list therefore reaches
-  the depth guard and records a structural finding rather than raising
-  `RecursionError`. Exact ints are range-checked before later use. Exact finite
+  after the exact-type branch. Ancestor identity detects cycles before
+  recursive descent; ordinary deep inputs reach the depth guard; and if the
+  interpreter raises earlier because remaining stack headroom is smaller,
+  the exact recursive-call handler above records the same sanitized structural
+  family and returns through safe ancestors. Under the stated premise, no
+  recursive-descent `RecursionError` or raw path object escapes. Exact ints
+  are range-checked before later use. Exact finite
   Decimals are checked via `as_tuple()` for digit count and exponent range,
   without Decimal arithmetic or global context. Depth, node, item, text,
   numeric-range, naive-time, and non-finite failures
@@ -441,9 +499,11 @@ guess provenance from value type:
 
 - It exempts only the exact interpreter-created names `__name__`, `__doc__`,
   `__package__`, `__loader__`, `__spec__`, `__file__`, `__cached__`, and
-  `__builtins__`, after checking their normal shapes and that source code never
-  loads or assigns them. `__loader__` must be `None` or identical to
-  `__spec__.loader`; `__builtins__` must be the actual `builtins` module or an
+  `__builtins__`, after checking their source-derived exact values and that
+  source code never loads or assigns them. Name, docstring, package, source
+  path, and cache path must equal the AST/module path values; `__spec__` has
+  exact `ModuleSpec` type with matching name/parent/origin; and `__loader__`
+  must be identical to `__spec__.loader`. `__builtins__` must be the actual `builtins` module or an
   exact dict whose entries for **every** permitted built-in name loaded by the
   valid source (calls, raw type comparisons such as `dict`/`list`, class bases
   such as `ValueError`, and exception handlers) are identical to the
@@ -457,10 +517,11 @@ guess provenance from value type:
   covers the imported typing special form `Literal` without
   exempting a rebound value.
 - Each AST class/function name must resolve to a class/function respectively.
-  Function `__defaults__` must be `None` or a tuple recursively satisfying the
-  immutable-constant runtime types. `__kwdefaults__` must be `None` or an exact
-  dict whose string-key set equals the AST keyword-only parameters with
-  defaults and whose values recursively satisfy the immutable-constant types;
+  Function `__defaults__` must be `None` or a tuple exactly equal to the AST
+  positional-default constants and recursively satisfying the immutable-
+  constant runtime types. `__kwdefaults__` must be `None` or an exact dict
+  whose string-key/value pairs equal the AST keyword-only defaults and whose
+  values recursively satisfy the immutable-constant types;
   this narrowly allowed interpreter-created dict is not a general mutable-
   global exemption. Every remaining runtime name must be
   an AST-declared constant whose value is `None`, `bool`, `int`, `str`,
@@ -479,10 +540,17 @@ _default_encoder`, an unapproved imported attribute read, and a tampered
 `__builtins__` binding. Raw validation fixtures include objects whose `__iter__`,
 `__getitem__`, comparison, `__str__`, `__repr__`, `__format__`, and `__call__`
 all explode, plus an exact `datetime` carrying a hostile custom `tzinfo`;
-none is invoked and no attacker text appears. Self-referential
-dict/list, depth/node/item/text overflow, and naive/non-finite values all
+none is invoked and no attacker text appears. Self-referential dict/list,
+70-level acyclic input under deliberately reduced recursion headroom — in
+both the exact-dict recursive variant and the exact-list/tuple recursive
+variant, under the same `sys.setrecursionlimit(65)` premise; the frozen
+runtime candidate bound by the hash-recorded `QP-KER-010B` re-review satisfies
+this with a dict/list/tuple-parametrized regression —
+depth/node/item/text overflow, and naive/non-finite values all
 return the same sanitized structural-error family without an uncaught
-exception. Two binding aggregation fixtures require: two naive timestamps
+exception. A source-mutation fixture replacing the recursion handler's
+allowlisted path with raw `value` must fail the AST gate. Two binding
+aggregation fixtures require: two naive timestamps
 produce `naive_or_invalid_timestamp` with sorted allowlisted paths, while one
 naive timestamp plus any non-timestamp defect produces
 `invalid_evidence_schema`; preflight may not stop at the first naive field.

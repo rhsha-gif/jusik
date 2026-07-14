@@ -36,11 +36,31 @@ specified `RecursionError` containment form without permitting a broad catch,
 raw error payload, retry, mutation, or new trading authority. This correction
 must receive independent P0/P1=0 and Claude counterpart review before the
 runtime slice can be accepted. The Claude Code (`claude-fable-5`)
-`QP-KER-010B` counterpart review independently reproduced the reduced-limit
-containment, the exact recursive-argument and handler forms, and the raw
-value/path mutation rejections against the frozen runtime candidate; it found
-P0=0/P1=0/P2=1 and closed the P2 here by binding the list/tuple recursive
-variant into the reduced-headroom fixture corpus below.
+`QP-KER-010B` counterpart review (commit `083b55a`) independently reproduced
+the reduced-limit containment, the exact recursive-argument and handler forms,
+and the raw value/path mutation rejections; it found P0=0/P1=0/P2=1. Its P2 —
+reduced-headroom containment exercised only through the dict recursive
+variant — was accepted in that commit as a contract requirement by binding the
+list/tuple variant into the fixture corpus below, but the matching runtime
+regression did not yet exist, so the P2 remained open for Gate-010 acceptance
+at that time. Because `083b55a` reviewed an unbound snapshot (it recorded no
+runtime file hashes), its snapshot wording is superseded by the hash-bound
+`QP-KER-010B` re-review. An interim re-review pass bound a pre-final
+snapshot (`kernel.py` SHA256 `9a694a85…f613`, tests SHA256 `77b1ff92…9c8c`)
+that was itself superseded when the runtime candidate advanced; no earlier
+hash acceptance carries forward. The frozen runtime candidate is exactly
+commit `61a4f93a222b936459681f592a8ce71ba9bd11fc` (parent `7af13b02…`):
+`quantpilot/packages/core/execution/kernel.py` SHA256
+`fa84badc2710fa8e53ba9ebf002c4dd6f39f5d2ecc163b3a282ec3fde791a7e1` and
+`quantpilot/tests/unit/test_execution_kernel_v2.py` SHA256
+`8e9b320cdb9daa84fd08b9984cafc8c2a5ee44e874f97c1a7e0d2a0c576c3bac`, verified
+byte-identical before and after the re-review's test runs, with the
+test-bound normalized semantic AST SHA256
+`750680273FB34423CD095E8C8E64B384D2ECB6FBD9154271A03CC104C6065102`
+independently recomputed from that source. That frozen candidate contains
+the dict/list/tuple-parametrized reduced-headroom regression under
+`sys.setrecursionlimit(65)`, which closes the former P2; the hash-bound
+counterpart verdict on exactly these two hashes is P0=0/P1=0/P2=0.
 
 ## 1. Purpose and governing baseline
 
@@ -523,7 +543,9 @@ all explode, plus an exact `datetime` carrying a hostile custom `tzinfo`;
 none is invoked and no attacker text appears. Self-referential dict/list,
 70-level acyclic input under deliberately reduced recursion headroom — in
 both the exact-dict recursive variant and the exact-list/tuple recursive
-variant, under the same `sys.setrecursionlimit(65)` premise —
+variant, under the same `sys.setrecursionlimit(65)` premise; the frozen
+runtime candidate bound by the hash-recorded `QP-KER-010B` re-review satisfies
+this with a dict/list/tuple-parametrized regression —
 depth/node/item/text overflow, and naive/non-finite values all
 return the same sanitized structural-error family without an uncaught
 exception. A source-mutation fixture replacing the recursion handler's

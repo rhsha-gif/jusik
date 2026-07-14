@@ -2,10 +2,12 @@
 
 ## Document edit lease
 
-- Lease status: `held`
+- Lease status: `released`
 - Document editor: `Codex GPT-5.6`
 - Mission/task ID: `QP-ROADMAP-HANDOFF-20260714`
 - Acquired at: `2026-07-14 KST`
+- Released at: `2026-07-14 KST`, after docs-only main fast-forward to
+  `e7a5d8f2357a17b52ff10dc81f77067bd6428e93`
 
 한 번에 한 에이전트만 이 문서를 수정한다. Claude counterpart는 별도 review artifact만 소유한다.
 
@@ -53,9 +55,9 @@
 | Task ID | Owner/model | Reviewer/model | Depends on | Worktree/branch | Owned paths | Status | Acceptance | Evidence/commit |
 |---|---|---|---|---|---|---|---|---|
 | `QP-HO-000` | Codex GPT-5.6 | Claude Fable 5 | none | `주식트레이더-roadmap-handoff-20260714` / `codex/qp-roadmap-handoff-20260714` | this workboard, repository inventory | done | main/worktree/commit/hash/test facts grounded; no user files touched | main `1046/2`; runtime `1289/2`; safe smoke both; topology verified |
-| `QP-HO-010` | Codex GPT-5.6 | Claude Fable 5 | `QP-HO-000` | same | `docs/roadmap_continuation_handoff.md`, this workboard | review | self-contained roadmap/status/commands/risks; exact full hashes; accepted vs integrated separated | `349421c`; Claude P2 3건 반영 중 |
+| `QP-HO-010` | Codex GPT-5.6 | Claude Fable 5 | `QP-HO-000` | same | `docs/roadmap_continuation_handoff.md`, this workboard | done | self-contained roadmap/status/commands/risks; exact full hashes; accepted vs integrated separated | `349421c`; P2 resolution `e7a5d8f` |
 | `QP-HO-020` | Claude Code `claude-fable-5` | Codex mission lead | `QP-HO-010` | `C:\qp-claude-handoff-review-20260714` / `claude/qp-roadmap-handoff-20260714-ascii` | `docs/roadmap_continuation_handoff_claude_review.md` only | done | substantive P0/P1/P2 audit, exact source commit/hash binding, direct commit | direct `04217f37cc633965ea50da34f9d3f6cf04d3b586`; Codex cherry-pick `daa83ef`; ACCEPT P0=0/P1=0/P2=3 |
-| `QP-HO-030` | Codex mission lead | independent Claude artifact | `QP-HO-020` | Codex worktree then clean main integration | exact three handoff docs only | in_progress | counterpart findings resolved, link/hash/diff checks, docs-only commit and main integration, user status preserved | P2 3건 반영 및 최종 검증 중 |
+| `QP-HO-030` | Codex mission lead | independent Claude artifact | `QP-HO-020` | Codex worktree then clean main integration | exact three handoff docs only | done | counterpart findings resolved, link/hash/diff checks, docs-only commit and main integration, user status preserved | main fast-forward `e7a5d8f2357a17b52ff10dc81f77067bd6428e93`; allowlist 3 paths; user untracked preserved |
 
 ## Integration requests
 
@@ -80,6 +82,9 @@
   direct commit `04217f37cc633965ea50da34f9d3f6cf04d3b586`, ACCEPT P0=0/P1=0/P2=3.
 - `2026-07-14 KST` — Codex GPT-5.6 — Claude one-file commit을 `daa83ef`로 통합하고 P2 3건을
   인계서에 반영했다.
+- `2026-07-14 KST` — Codex GPT-5.6 — `git show --check` 3개 커밋 통과, main 대비 변경 경로가
+  인계 문서 3개뿐임을 확인하고 main을 `e7a5d8f2357a17b52ff10dc81f77067bd6428e93`으로
+  fast-forward했다. `.omo/`와 `CLAUDE.md.20260705.bak`는 그대로 untracked 상태다.
 
 ## Handoff record
 
@@ -89,28 +94,31 @@ agent_and_model: Codex GPT-5.6 lead + Claude Code claude-fable-5 reviewer
 commits:
   - 349421cee602aa601ea21828b6c30e5297c68adc (Codex handoff draft)
   - 04217f37cc633965ea50da34f9d3f6cf04d3b586 (Claude direct review source)
-  - daa83ef (Claude review cherry-pick on Codex branch)
+  - daa83eff1d2c03d9f549061fa34fe8f1fed60009 (Claude review cherry-pick on Codex branch)
+  - e7a5d8f2357a17b52ff10dc81f77067bd6428e93 (P2 resolution and first main integration tip)
 owned_paths:
   - docs/roadmap_continuation_handoff.md
   - docs/roadmap_continuation_handoff_workboard.md
   - docs/roadmap_continuation_handoff_claude_review.md (Claude only)
-acceptance_met: counterpart ACCEPT P0=0/P1=0; P2 3건 반영; final docs-only audit pending
+acceptance_met: yes; counterpart ACCEPT P0=0/P1=0; P2 3건 반영;
+  three-path docs-only audit and main fast-forward complete
 exact_checks: main 1046 passed/2 skipped; runtime 1289 passed/2 skipped;
   safe smoke both; full Gate 010 hashes/topology verified
 known_limits: no runtime integration or KIS/manual action; Gate 010 Claude
   hash-bound runtime review remains a separate blocker
-integration_requests: integrate only the three handoff docs; preserve user status
+integration_requests: complete; only the three handoff docs integrated; user status preserved
 ```
 
 ## Mission retrospective
 
 | Task ID | Task class | Agent/model | First-pass | P0 | P1 | P2 | Rework cycles | Required checks | Elapsed | Rating |
 |---|---|---|---|---:|---:|---:|---:|---|---|---:|
-| `QP-HO-010` | repository-grounded handoff | Codex GPT-5.6 | accepted with clarifications | 0 | 0 | 3 | 1 | exact facts, links, diff, counterpart review | final audit in progress | 4.7 |
+| `QP-HO-010` | repository-grounded handoff | Codex GPT-5.6 | accepted with clarifications | 0 | 0 | 3 | 1 | exact facts, links, diff, counterpart review | complete | 4.7 |
 | `QP-HO-020` | independent documentation audit | Claude Fable 5 | yes | 0 | 0 | 3 | 0 | one-file artifact + direct commit | complete | 4.8 |
+| `QP-HO-030` | docs-only main integration | Codex GPT-5.6 | yes | 0 | 0 | 0 | 0 | three-path allowlist, links, hashes, safety defaults, user status | complete | 5.0 |
 
 - Routing decision quality: accepted; Claude independently reproduced the critical status, topology, hashes, and
   test evidence, then identified three non-blocking clarity gaps.
 - Capability scorecard update: documentation-only one-off; no persistent scorecard mutation required.
-- User-owned changes preserved: main remains outside this mission with `.omo/` and backup untracked.
+- User-owned changes preserved: main integration 후에도 `.omo/`와 backup은 untracked 그대로다.
 - Remaining limitations: Gate 010 and all later runtime gates remain outside this documentation mission.

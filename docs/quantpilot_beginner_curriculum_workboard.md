@@ -41,8 +41,8 @@
 
 | Task ID | Owner/model | Reviewer/model | Depends on | Worktree/branch | Owned paths | Status | Acceptance | Evidence/commit |
 |---|---|---|---|---|---|---|---|---|
-| `QP-LRN-00` 미션 보드 | Codex GPT-5.6 | Claude Code | none | `C:/qp-learning-curriculum-core` / `codex/qp-learning-curriculum-core` | `docs/quantpilot_beginner_curriculum_workboard.md` | in_progress | 목표·범위·작업 그래프·라우팅·검증이 확정됨 | 이 문서 |
-| `QP-LRN-01` 학습 공백 증거 | Claude Code / resolved model pending | Codex GPT-5.6 | `QP-LRN-00` | `C:/qp-learning-curriculum-claude` / `claude/qp-learning-curriculum-evidence` | `docs/quantpilot_beginner_learning_gap_evidence.md` | proposed | 실제 커밋·작업보드에서 문제 패턴, 필요한 지식, 초보자 우선순위를 근거와 함께 제시하고 직접 커밋함 | pending |
+| `QP-LRN-00` 미션 보드 | Codex GPT-5.6 | Claude Code | none | `C:/qp-learning-curriculum-core` / `codex/qp-learning-curriculum-core` | `docs/quantpilot_beginner_curriculum_workboard.md` | done | 목표·범위·작업 그래프·라우팅·검증이 확정됨 | `08e3e29` |
+| `QP-LRN-01` 학습 공백 증거 | Claude Code / resolved model pending | Codex GPT-5.6 | `QP-LRN-00` | `C:/qp-learning-curriculum-claude` / `claude/qp-learning-curriculum-evidence` | `docs/quantpilot_beginner_learning_gap_evidence.md` | ready | 실제 커밋·작업보드에서 문제 패턴, 필요한 지식, 초보자 우선순위를 근거와 함께 제시하고 직접 커밋함 | pending |
 | `QP-LRN-02` 커리큘럼 | Codex GPT-5.6 | Claude Code | `QP-LRN-01` | `C:/qp-learning-curriculum-core` / `codex/qp-learning-curriculum-core` | `docs/quantpilot_beginner_developer_curriculum.md` | proposed | 0지식 전제, 단계별 목표·실습·완료 기준·안전 경계·문제-학습 매핑·운영 방법을 포함함 | pending |
 | `QP-LRN-03` 최종 검증·통합 | Codex GPT-5.6 | Claude Code | `QP-LRN-01`, `QP-LRN-02` | `C:/qp-learning-curriculum-core` / `codex/qp-learning-curriculum-core` | 위 세 문서 | proposed | 상대 커밋 검토, 링크·형식·경로 검증, 사용자 변경 보존 증거 기록 | pending |
 
@@ -57,6 +57,7 @@
 ## Checkpoint log
 
 - 2026-07-16 — Codex GPT-5.6 — 증거 범위를 2026-06-16~2026-07-16으로 확정. main은 사용자 변경(`paper_submission.py`, `.omo/`, 백업·handoff 파일)이 있어 `0494b57`에서 별도 worktree 두 개를 생성함.
+- 2026-07-16 — Codex GPT-5.6 — `QP-LRN-00`을 `08e3e29`로 커밋하고 `QP-LRN-01`을 Claude Code에 ready 상태로 인계함.
 
 ## Handoff record
 

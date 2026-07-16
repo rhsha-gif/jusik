@@ -174,7 +174,9 @@ rg --version
   `Get-ChildItem -Recurse -File .\quantpilot | Select-Object -First 30`을 사용해도 된다.
 - 도구를 새로 설치해야 한다면 공식 배포처를 사용하고, 설치 범위를 에이전트나 경험자와 먼저 확인한다.
 
-백엔드 의존성이 아직 설치되지 않았다면 저장소 루트에서 전용 가상환경을 만든다.
+백엔드 의존성이 아직 설치되지 않았다면 저장소 루트에서 전용 가상환경을 만든다. 아래 설치는 9절의
+노랑 활동이다. 실행 전에 에이전트나 경험자에게 “`.venv`에 `.[test]` 의존성만 설치하고 프로젝트 파일·lockfile·
+거래 설정은 바꾸지 않는가?”를 확인한다. 확인할 수 없으면 설치 명령을 실행하지 않는다.
 
 ```powershell
 python -m venv .venv
@@ -598,6 +600,10 @@ python -m quantpilot.jobs.run_smoke
 - [`apps/web/src/test/safety-banner.test.tsx`](../quantpilot/apps/web/src/test/safety-banner.test.tsx)
 
 **안전 실습**
+
+`npm ci`도 9절의 노랑 활동이다. 실행 전에 에이전트나 경험자에게 “현재 `package-lock.json`을 기준으로
+`node_modules`만 재구성하고 lockfile·소스·거래 설정은 바꾸지 않는가?”를 확인한다. 확인할 수 없으면
+`npm ci`를 실행하지 말고 프론트엔드 실습을 보류한다.
 
 ```powershell
 Set-Location "C:\Users\goyan\OneDrive\문서\코덱스\주식트레이더"

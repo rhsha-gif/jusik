@@ -245,8 +245,8 @@
 실제 KIS 호출·실주문·플래그 변경은 실습 대상이 **아니다**.
 
 - **테스트 스위트 관찰(2단계)**: `python -m pytest quantpilot/tests`를 실행하고 통과 수를
-  읽는다. (참고: 로컬 temp 잠금 시 `--basetemp=.pytest_tmp --junitxml=...` 우회 —
-  프로젝트 관례.)
+  읽는다. 로컬 temp 잠금 시
+  `python -m pytest quantpilot/tests -p no:cacheprovider --basetemp=.pytest_tmp`를 사용한다.
 - **스모크의 안전 출력 확인(4단계)**: `python -m quantpilot.jobs.run_smoke`를 실행해
   `broker=mock`, `live_trading_enabled=false`, operator `blocked`를 눈으로 확인.
 - **부동소수점 실습(3단계)**: 파이썬에서 `0.1 + 0.2`, 그리고 `Decimal("0.1")+Decimal("0.2")`를

@@ -3,7 +3,8 @@
 > 대상: 개발 경험이 전혀 없지만 QuantPilot의 방향을 결정하고, AI 에이전트가 만든 결과를 검토하며,
 > 안전하게 프로젝트를 운영하고 싶은 사람
 >
-> 권장 기간: **16주, 주 6시간**(개념 2시간 + 코드 읽기 2시간 + 실습·회고 2시간)
+> 권장 기간: **준비주 1주 + 본과정 16주(총 17주), 주 6시간**
+> (개념 2시간 + 코드 읽기 2시간 + 실습·회고 2시간)
 >
 > 기준일: 2026-07-16
 
@@ -51,8 +52,10 @@ QuantPilot은 초보 프로젝트가 아니다. Python, FastAPI, React, SQLite, 
 | 검사 뒤 만료되는 주문 계획 | `QP-KER-015`, `588f4df` | TOCTOU, 신선도, 만료 시각 | 10주차 |
 | 당일 미완성 봉·체결 가정·비용 민감도 | `QP-030`, `4068d22`, 백테스트 검증 보고서 | look-ahead, 체결 모델, 비용, 편향 | 12주차 |
 | dirty main·worktree·Windows 경로 마찰 | 능력 점수표의 COLLAB-V1 회고 | Git, worktree, 현재 경로, 권한 | 1~2주차 |
-| API·DB·UI 계약을 함께 맞춰야 하는 변경 | `openapi.json`, router 분리, 타입 재생성 이력 | HTTP, 스키마, 계층 경계 | 7·14주차 |
 | 계약·작업보드가 여러 차례 수정됨 | 협업 프로토콜·커널·이벤트 작업보드 | 명세 우선, 독립 검토, 증거 기반 승인 | 15주차 |
+
+API와 프론트엔드는 반복 결함의 학습 공백으로 분류한 것이 아니다. 현재 QuantPilot의 실제 기술 스택과
+변경 영향 범위를 이해하기 위해 7·14주차에 포함했다.
 
 ## 3. 학습 운영 원칙
 
@@ -64,7 +67,8 @@ QuantPilot은 초보 프로젝트가 아니다. Python, FastAPI, React, SQLite, 
 - 2회차 2시간: QuantPilot 코드와 테스트에서 그 개념의 실제 위치 찾기
 - 3회차 2시간: fixture/mock 기반 실습, 결과 기록, 모르는 점 질문 만들기
 
-16주는 마감일이 아니라 권장 순서다. 주차별 통과 기준을 충족하지 못하면 다음 주제로 넘어가지 않는다.
+준비주를 포함한 17주는 마감일이 아니라 권장 순서다. 주차별 통과 기준을 충족하지 못하면 다음 주제로
+넘어가지 않는다.
 주 3시간만 가능하면 각 주차를 2주에 걸쳐 진행하면 된다.
 
 ### 학습의 증거
@@ -106,10 +110,10 @@ DATA_MODE=fixture
 - mock, fixture, paper trading, live trading의 차이
 
 시작 전에 [README](../README.md), [현재 워크플로우](current_project_workflow.md),
-[안전 체크리스트](safety_checklist.md)는 내용이 이해되지 않아도 한 번 훑는다. 16주 뒤 같은 문서를 다시 읽어
+[안전 체크리스트](safety_checklist.md)는 내용이 이해되지 않아도 한 번 훑는다. 본과정 16주 뒤 같은 문서를 다시 읽어
 이해 범위가 얼마나 넓어졌는지 비교한다.
 
-## 5. 16주 전체 지도
+## 5. 준비주 + 16주 전체 지도
 
 | 주차 | 핵심 주제 | 그 주에 답할 수 있어야 하는 질문 |
 |---:|---|---|
@@ -141,14 +145,51 @@ DATA_MODE=fixture
 - PowerShell에서 명령·옵션·출력·종료 코드의 의미
 - `fixture`, `mock`, `paper`, `live`의 차이
 - “읽기”, “로컬 실행”, “외부 상태 변경”의 위험 차이
+- fail-closed의 첫 정의: 확신이 없거나 오류가 나면 위험 행동을 허용하지 않고 차단함
+
+**최초 1회 환경 준비**
+
+이 문서의 상대 경로 명령은 별도 안내가 없으면 항상 **저장소 루트**에서 실행한다. 현재 설치 위치에서는
+다음과 같이 이동한다. 프로젝트를 옮겼다면 첫 줄만 실제 저장소 절대 경로로 바꾼다.
+
+```powershell
+Set-Location "C:\Users\goyan\OneDrive\문서\코덱스\주식트레이더"
+Test-Path .\pyproject.toml
+Test-Path .\quantpilot
+```
+
+두 `Test-Path` 결과가 모두 `True`여야 한다. 그런 다음 필수 도구를 확인한다.
+
+```powershell
+python --version
+git --version
+node --version
+npm --version
+rg --version
+```
+
+- Python은 3.11 이상을 사용한다.
+- Node/npm은 14주차 프론트엔드 실습에 필요하다.
+- `rg`가 없으면 1주차 파일 목록 명령 대신
+  `Get-ChildItem -Recurse -File .\quantpilot | Select-Object -First 30`을 사용해도 된다.
+- 도구를 새로 설치해야 한다면 공식 배포처를 사용하고, 설치 범위를 에이전트나 경험자와 먼저 확인한다.
+
+백엔드 의존성이 아직 설치되지 않았다면 저장소 루트에서 전용 가상환경을 만든다.
+
+```powershell
+python -m venv .venv
+.\.venv\Scripts\Activate.ps1
+python -m pip install -e ".[test]"
+```
+
+PowerShell을 다시 열면 테스트 전에 `.\.venv\Scripts\Activate.ps1`을 다시 실행한다. 실제 broker 자격증명이나
+live 관련 환경변수는 설정하지 않는다.
 
 **안전 실습**
 
 ```powershell
 Get-Location
 Get-ChildItem
-python --version
-git --version
 git status --short --branch
 ```
 
@@ -158,7 +199,10 @@ git status --short --branch
 **통과 기준**
 
 - 명령 실행 전 현재 폴더를 확인할 수 있다.
+- `pyproject.toml`과 `quantpilot` 폴더로 저장소 루트를 확인할 수 있다.
+- Python 가상환경을 활성화하고 필수 도구의 설치 여부를 확인할 수 있다.
 - `BROKER_MODE=mock`과 `LIVE_TRADING_ENABLED=false`의 의미를 설명한다.
+- fail-closed를 “확신 없으면 위험 행동을 차단”이라고 자기 말로 설명한다.
 - 실제 자격증명이 왜 학습 파일과 Git에 들어가면 안 되는지 설명한다.
 
 ### 1주차: 프로젝트 지도와 Git 읽기
@@ -306,6 +350,7 @@ QuantPilot 코드는 아직 수정하지 않는다.
 - 단위·통합·smoke 테스트의 차이
 - arrange-act-assert, fixture, fake client, mock
 - happy path, 오류 경로, 경계값, 재시작 테스트
+- 0주차의 fail-closed 기본값을 오류 경로 테스트에 적용하는 법
 - 실패한 테스트를 약화하지 않고 원인을 고치는 원칙
 
 **안전 실습**
@@ -555,7 +600,9 @@ python -m quantpilot.jobs.run_smoke
 **안전 실습**
 
 ```powershell
+Set-Location "C:\Users\goyan\OneDrive\문서\코덱스\주식트레이더"
 Set-Location quantpilot/apps/web
+npm ci
 npm run test
 npm run build
 ```

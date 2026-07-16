@@ -127,8 +127,10 @@
 ### 3.5 fail-closed(안전 실패) 기본값 사고  — 우선순위: 상 (거의 모든 작업에 등장)
 
 - **증거**
-  - `AGENTS.md`·`agent_collaboration_protocol.md §8`·전역 규칙 `security.md`:
-    "**fail-open 기본값을 피하고 인증·권한·위험 판정 실패 시 안전하게 중단**".
+  - `AGENTS.md` "QuantPilot safety adapter"·`README.md` "Safe Defaults":
+    `LIVE_TRADING_ENABLED`·`GUARDED_AUTOPILOT_ENABLED`·`FULLY_AUTOMATED_OPERATOR_ENABLED`·
+    `MARKET_ORDERS_ENABLED`가 모두 기본 `false`이고 `BROKER_MODE=mock` — 위험 동작이
+    기본적으로 차단되는 fail-closed 기본값.
   - `scorecard §8` `QP-050`: **`signals/service.py:341` NameError in fail-closed branch**
     — 가장 덜 실행되는 안전 분기에서 기초 오류가 표출(외부 진단으로 발견).
   - `25182df`(bind performance evidence fail closed): 증거 열화 시 티켓 만료 대신
@@ -214,7 +216,7 @@
 
 | 순위 | 학습 공백 | 대표 증거 | 이 지식이 막았을 재작업 |
 |---|---|---|---|
-| 1 | **fail-closed 안전 기본값 사고** | `security.md`; `QP-050` fail-closed 분기 NameError; `25182df` | 안전 분기의 기초 오류, 위험 판정 재발명 |
+| 1 | **fail-closed 안전 기본값 사고** | `AGENTS.md` "QuantPilot safety adapter" / `README.md` "Safe Defaults"(거래·오토파일럿·마켓오더 플래그 모두 기본 `false`, `BROKER_MODE=mock`); `QP-050` fail-closed 분기 NameError; `25182df` | 안전 분기의 기초 오류, 위험 판정 재발명 |
 | 2 | **금액의 부동소수점 → 정수/Decimal** | `QP-RM-00A` P1 float persistence; reservation 감사 `1e-6`/`0.01` 제거; `QP-RES-A1`(`a892210`) | 화폐 계산 P1, 잘못된 예약 |
 | 3 | **멱등성 + 트랜잭션 원자성/크래시 복구** | `QP-040` fingerprint P2; `atomic_risk_reservation` 감사 §3(1)(5)(8)(9); `QP-020` 재시작 복구 | 중복 주문, 부분 쓰기, 재시작 손상 |
 | 4 | **순수 함수·부작용 격리·결정론** | `execution_kernel_v2_workboard.md` 순수성 감사 6+라운드; `QP-KER-010`(`61a4f93`) | 모듈 전역 가변·정의시점 부작용 누수 |

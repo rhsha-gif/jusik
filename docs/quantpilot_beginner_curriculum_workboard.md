@@ -44,7 +44,7 @@
 | `QP-LRN-00` 미션 보드 | Codex GPT-5.6 | Claude Code | none | `C:/qp-learning-curriculum-core` / `codex/qp-learning-curriculum-core` | `docs/quantpilot_beginner_curriculum_workboard.md` | done | 목표·범위·작업 그래프·라우팅·검증이 확정됨 | `08e3e29` |
 | `QP-LRN-01` 학습 공백 증거 | Claude Code / `claude-opus-4-8` | Codex GPT-5.6 | `QP-LRN-00` | `C:/qp-learning-curriculum-claude` / `claude/qp-learning-curriculum-evidence` | `docs/quantpilot_beginner_learning_gap_evidence.md` | done | 실제 커밋·작업보드에서 문제 패턴, 필요한 지식, 초보자 우선순위를 근거와 함께 제시함 | Claude 작성·stage 후 lead commit `da24b3b`, citation fix `748ccda`; integrated `3c06282`, `7701079` |
 | `QP-LRN-02` 커리큘럼 | Codex GPT-5.6 | 독립 Codex GPT-5.6 gate reviewer | `QP-LRN-01` | `C:/qp-learning-curriculum-core` / `codex/qp-learning-curriculum-core` | `docs/quantpilot_beginner_developer_curriculum.md` | done | 0지식 전제, 단계별 목표·실습·완료 기준·안전 경계·문제-학습 매핑·운영 방법을 포함함 | `b620fb3`, fixes `c995370`, `75f777e`; final P0/P1/P2=0 |
-| `QP-LRN-03` 최종 검증·통합 | Codex GPT-5.6 | 독립 Codex GPT-5.6 gate reviewer | `QP-LRN-01`, `QP-LRN-02` | `C:/qp-learning-curriculum-core` / `codex/qp-learning-curriculum-core` | 위 세 문서 | review | 링크·형식·경로 검증과 reviewer ACCEPT 완료, main 통합 및 사용자 변경 보존 재확인만 남음 | 60 links/0 errors; `git diff --check` clean; final gate ACCEPT |
+| `QP-LRN-03` 최종 검증·통합 | Codex GPT-5.6 | 독립 Codex GPT-5.6 gate reviewer | `QP-LRN-01`, `QP-LRN-02` | `C:/qp-learning-curriculum-core` / `codex/qp-learning-curriculum-core` | 위 세 문서 | done | 링크·형식·경로 검증, reviewer ACCEPT, main 통합, 사용자 변경 보존 재확인 완료 | 60 links/0 errors; `git diff --check` clean; final gate ACCEPT; main `d1a6d63` |
 
 ## Integration requests
 
@@ -66,6 +66,7 @@
 - 2026-07-16 — 독립 Codex gate reviewer — 초기 판정 P0=0/P1=3/P2=3. 환경 bootstrap, 선수 개념 순서, 기간, 근거 분류, pytest 명령을 수정한 `c995370` 검토에서 P0=0/P1=0/P2=1.
 - 2026-07-16 — Codex GPT-5.6 + 독립 gate reviewer — 의존성 설치 확인 게이트를 `75f777e`로 추가. 최종 focused verdict `ACCEPT`, P0=0/P1=0/P2=0.
 - 2026-07-16 — Codex GPT-5.6 — 세 문서 UTF-8, 로컬 Markdown 링크 60개/오류 0, `git diff --check 0494b57..HEAD` clean, unsafe activation example 0을 확인. main 통합 전 상태.
+- 2026-07-16 — Codex GPT-5.6 — `d1a6d63`으로 main 통합. 통합 전후 사용자 변경 목록이 동일함: modified `quantpilot/packages/core/execution/paper_submission.py`; untracked `.omo/`, `CLAUDE.md.20260705.bak`, `docs/qp_ker015_codex_handoff.md`.
 
 ## Handoff record
 
@@ -86,7 +87,7 @@ owned_paths: docs/quantpilot_beginner_developer_curriculum.md
 acceptance_met: yes
 exact_checks: 60 local Markdown links/0 errors; git diff --check clean; unsafe activation examples 0; independent final gate P0/P1/P2=0 ACCEPT
 known_limits: docs-only mission, runtime project tests not required or executed; live readiness explicitly out of scope
-integration_requests: main integration and final dirty-status comparison
+integration_requests: none; main integration `d1a6d63` and dirty-status comparison completed
 ```
 
 ## Mission retrospective
@@ -99,5 +100,5 @@ integration_requests: main integration and final dirty-status comparison
 
 - Routing decision quality: correct for evidence research and lead integration; explicit Claude final audit could not complete within harness limits, so final gate used an independent Codex verifier.
 - Capability scorecard update: no update; one small docs mission and harness commit-permission exception are insufficient to change task-class preference.
-- User-owned changes preserved: pre-integration baseline recorded; final `git status` comparison required after main integration.
+- User-owned changes preserved: yes. 통합 전후 `git status`의 사용자 modified/untracked 경로가 정확히 동일하며 stage·수정·삭제하지 않았다.
 - Remaining limitations: Claude initial decomposition prose and final audit output were unavailable due tool limits; Codex independent gate substituted. No backend/frontend runtime behavior changed, so project test suites were not run.

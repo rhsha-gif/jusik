@@ -2,10 +2,11 @@
 
 ## Document edit lease
 
-- Lease status: `held`
-- Document editor: `Codex / GPT-5.6`
+- Lease status: `released`
+- Document editor: `none`
 - Mission/task ID: `HP2REF-001/LEAD`
 - Acquired at: `2026-07-17 Asia/Seoul`
+- Released at: `2026-07-17 Asia/Seoul`
 
 ## Mission charter
 
@@ -44,7 +45,7 @@
 | Task ID | Owner/model | Reviewer/model | Depends on | Worktree/branch | Owned paths | Status | Acceptance | Evidence/commit |
 |---|---|---|---|---|---|---|---|---|
 | `AUDIT` | Claude Code / claude-fable-5 | Codex / GPT-5.6 | none | `C:/Users/goyan/OneDrive/문서/코덱스/주식트레이더/.claude/worktrees/harness-p2-gpt-reference-review` / `claude/harness-p2-gpt-reference-review` | `docs/claude/harness_p2_source_inventory_review.md` | integrated | 코드·계약·테스트 근거로 하네스와 P2 범위, 상태, 누락 위험을 표로 제공하고 직접 커밋한다. | Claude `b022d25`, final review `fa7a6c5`; lead scope/diff review passed; cherry-picks `48a1c91`, `1492ba0` |
-| `DOC` | Codex / GPT-5.6 | Claude Code / claude-fable-5 | `AUDIT` | `C:/Users/goyan/OneDrive/문서/코덱스/주식트레이더/.codex/worktrees/harness-p2-gpt-reference-doc` / `codex/harness-p2-gpt-reference-doc` | `docs/current_harness_and_p2_gpt_source_reference.md`, this workboard | ready_to_integrate | GPT가 첨부할 소스 묶음과 읽기 순서, 실행 흐름, 안전 경계, P2 상태를 단일 문서에서 이해한다. 모든 경로가 snapshot별로 존재한다. | 361-line document `4c5d8ec`; `git diff --check` passed; 52 main/branch manifest objects exist; Claude final verdict ACCEPT, P0/P1/P2=`0/0/0` in `fa7a6c5` |
+| `DOC` | Codex / GPT-5.6 | Claude Code / claude-fable-5 | `AUDIT` | `C:/Users/goyan/OneDrive/문서/코덱스/주식트레이더/.codex/worktrees/harness-p2-gpt-reference-doc` / `codex/harness-p2-gpt-reference-doc` | `docs/current_harness_and_p2_gpt_source_reference.md`, this workboard | integrated | GPT가 첨부할 소스 묶음과 읽기 순서, 실행 흐름, 안전 경계, P2 상태를 단일 문서에서 이해한다. 모든 경로가 snapshot별로 존재한다. | branch `4c5d8ec`, main `22b50dc`; 361 lines; all checks passed; Claude final verdict ACCEPT, P0/P1/P2=`0/0/0` in `fa7a6c5` / main `803f19a` |
 
 ## Integration requests
 
@@ -63,18 +64,19 @@
 - `2026-07-17` — Codex / GPT-5.6 — 최종 문서를 361줄로 정리해 `4c5d8ec`에 커밋했다. staged `git diff --check`와 Markdown 구조 수동 검사를 통과했다.
 - `2026-07-17` — Claude Code / claude-fable-5 — `4c5d8ec`을 독립 재검토하고 P0/P1/P2=`0/0/0`, `ACCEPT`로 판정했다. 50개 파일과 API router 디렉터리, branch-only test, Kernel 도달성, KER-015 7-file diff를 재검증해 `fa7a6c5`에 기록했다.
 - `2026-07-17` — Codex / GPT-5.6 — 최종 리뷰 커밋을 `1492ba0`으로 통합하고 단일 소유 파일·clean status를 확인했다.
+- `2026-07-17` — Codex / GPT-5.6 — 격리된 문서 커밋만 main `4ebbf40`, `22b50dc`, `803f19a`, `99217d4`로 순서대로 통합했다. 통합 전후 사용자 소유 dirty 파일 목록은 동일하다.
 
 ## Handoff record
 
 ```text
 task_id: AUDIT -> DOC
 agent_and_model: Claude Code / claude-fable-5 -> Codex / GPT-5.6
-commit: b022d25 + fa7a6c5 -> 48a1c91 + 1492ba0; DOC 4c5d8ec
+commit: Claude b022d25 + fa7a6c5 -> branch 48a1c91 + 1492ba0; DOC 4c5d8ec; main 4ebbf40 + 22b50dc + 803f19a + 99217d4
 owned_paths: docs/claude/harness_p2_source_inventory_review.md -> docs/current_harness_and_p2_gpt_source_reference.md and this workboard
 acceptance_met: yes; final counterpart verdict ACCEPT with P0/P1/P2=0/0/0
 exact_checks: snapshot-scoped git cat-file path checks; KER-015 seven-file diff; Kernel runtime import grep; sole KIS POST call-site check; git patch-id; staged git diff --check; manual Markdown review
 known_limits: docs-only change, so backend pytest/smoke were not run; six documented P2 follow-ups remain open by design
-integration_requests: lead may integrate only the isolated documentation commits; preserve the pre-existing dirty main working tree
+integration_requests: completed; only the isolated documentation commits were integrated and the pre-existing dirty main working tree was preserved
 ```
 
 ## Mission retrospective

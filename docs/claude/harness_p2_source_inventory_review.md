@@ -246,3 +246,76 @@ safety flag, runtime file, or workboard was changed. Known limit: the identity
 of the second `949aa7d` audit P2 (§6 item 5) is unrecoverable from committed
 history alone; closing it requires the Codex lead to durably record the audit
 findings when integrating `QP-KER-015`.
+
+## 11. Final DOC review (HP2REF-001 `DOC` counterpart review)
+
+| Field | Value |
+|---|---|
+| Reviewer | Claude Code, exact model `claude-fable-5` |
+| Reviewed commit | `4c5d8ec30fe933c9f0196e2ab4cf211e06e155df` (tip of `codex/harness-p2-gpt-reference-doc`; parent `48a1c91`) |
+| Reviewed files | `docs/current_harness_and_p2_gpt_source_reference.md`, `docs/harness_p2_gpt_reference_workboard.md` — read via `git show 4c5d8ec:<path>`, no checkout, no network |
+| Date | 2026-07-17 KST |
+| Findings | **P0 = 0, P1 = 0, P2 = 0**; two P3 informational notes below |
+| Verdict | **ACCEPT** |
+
+### Verification performed (all read-only, offline, from this worktree)
+
+1. **Snapshot precedence** — DOC §1/§6/§12 pin main `4241dc4` as default
+   authority, `31ac3a1` as accepted-unmerged candidate, and exclude the dirty
+   main working tree; matches §5 of this audit exactly. `31ac3a1` re-confirmed
+   as the branch tip of `claude/qp-ker015-expiry-hardening` and not an
+   ancestor of main.
+2. **Disambiguation** — DOC §2 reproduces the §4 table (P2 severity vs
+   Roadmap Gate 2 vs Gate P vs `QP-KER-0xx` vs schema v9–v11), including the
+   "`015` is a task number, not a severity" caveat.
+3. **Open P2 inventory** — DOC §8 carries all six §6 items with identical
+   statuses plus the same closed/not-P2 exclusion list. Spot re-verified:
+   `REVIEWED_KERNEL_AST_SHA256` lives only in
+   `quantpilot/tests/unit/test_execution_kernel_v2.py` (lines 24/2860);
+   `OperatorService._submit_proposals` captures `authorization_time` once and
+   reuses it (`operator/service.py:781/827/880`); QP-RES-A2 "reservations
+   carry no `policy_id`" matches the `paper_risk_reservations` schema and the
+   accepted A2 audit wording.
+4. **Source attachment manifest** — every §9.1/§9.2/§9.3 path (50 files +
+   `quantpilot/services/api/routers/` directory) existence-checked with
+   `git cat-file -e` at `4241dc4`: all present.
+   `test_strategy_version_matching.py` confirmed present at `31ac3a1` and
+   absent on main, and the DOC labels it branch-only as required.
+5. **KER-015 changed-file set** — re-derived from
+   `git diff --name-only $(git merge-base 4241dc4 31ac3a1)..31ac3a1`
+   (merge-base `76ee0e2`): exactly the seven files the DOC lists. The DOC
+   states integration/independent-re-audit as *pending* (avoids overclaim
+   §7 items 1/2/12).
+6. **Kernel runtime reachability** — `git grep` at `4241dc4` over
+   `quantpilot/packages`, `quantpilot/services`, `quantpilot/jobs`: zero
+   non-test imports of `execution.kernel`. Sole external order POST re-located
+   at `paper_submission.py:604` → `KisPaperClient.place_limit_cash_order`
+   (defined `kis_paper.py:764`). All runtime submission paths (operator
+   service, professional cycle, orders router, L4 internal) converge on
+   `HarnessService.submit_order_plan`, as the DOC claims.
+7. **Safety claims** — six-value `DataMode` enum verified in `schemas.py`;
+   `build_providers` fails closed with `ProviderError` for
+   `realtime_market_data`/`paper_trading`/`live_trading` (no fixture
+   fallback); `live_trading_candidate` blocks at `live_broker_unavailable`
+   (`harness_service.py:1563`). DOC §11 reproduces the §7 overclaim guard,
+   including no unbound test counts (§7 #10) and no claim that the Codex
+   KER-015 re-audit completed (§7 #12).
+8. **Lineage** — `git patch-id --stable` proves `48a1c91` is an identical
+   cherry-pick of my `b022d25` AUDIT commit; the DOC branch therefore
+   contains this audit unmodified.
+
+All five §9 integration requests are satisfied; no DOC sentence matches any
+§7 review-blocking item.
+
+### P3 informational notes (non-blocking; no correction required)
+
+1. DOC §5 renders workboard status `proposed` (Gates 020–080) as "open" and
+   `QP-KER-070` as "locked", and summarizes `QP-KER-000A~000E` as
+   "integrated". All three are semantically supported (contract §8: Gate 070
+   may not move to `ready` until the flag ADR P2 closes, "KIS is last";
+   contract integration `9fbf035`), but the vocabulary differs from the
+   committed workboard status column. A one-line mapping note would remove
+   any ambiguity for GPT readers.
+2. The workboard's handoff record and mission retrospective rows are still
+   `pending`; the lead should fill them when closing the mission with this
+   review result.

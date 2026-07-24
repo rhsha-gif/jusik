@@ -1,0 +1,14 @@
+{
+  "schema_version": 2,
+  "active_work_id": "collaboration-capacity-v2",
+  "works": {
+    "collaboration-capacity-v2": {
+      "work_id": "collaboration-capacity-v2",
+      "active_plan": ".omo/plans/collaboration-capacity-v2.md",
+      "plan_name": "collaboration-capacity-v2",
+      "session_ids": ["codex:root"],
+      "status": "active",
+      "worktree_path": "C:/Users/goyan/OneDrive/문서/코덱스/주식트레이더-collab-capacity-v2"
+    }
+  }
+}

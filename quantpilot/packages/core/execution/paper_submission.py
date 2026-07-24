@@ -106,6 +106,13 @@ class PaperDispatchStore(Protocol):
         claimed_at: datetime,
     ) -> PaperOrderDispatch: ...
 
+    def require_active_paper_execution_session(
+        self,
+        session: PaperExecutionSession,
+        *,
+        checked_at: datetime,
+    ) -> PaperExecutionSession: ...
+
     def update_paper_order_dispatch(
         self,
         dispatch: PaperOrderDispatch,
@@ -174,39 +181,45 @@ class DurablePaperSubmissionCoordinator:
     def expire_stale_prepared_dispatches(
         self,
     ) -> tuple[PaperOrderDispatch, ...]:
-        """Terminalize expired pre-POST records without crossing the broker boundary."""
+        """Fence expired durable rows without inventing broker outcomes."""
 
         now = self._now()
         expired: list[PaperOrderDispatch] = []
         for dispatch in self._store.list_paper_order_dispatches():
-            if (
-                dispatch.status != "prepared"
-                or dispatch.submission_evidence_expires_at > now
-            ):
+            if dispatch.status not in {
+                "prepared",
+                "dispatch_claimed",
+                "outcome_unknown",
+            }:
                 continue
-            current = dispatch
-            if (
-                current.session_id != self._session.session_id
-                or current.fencing_token != self._session.fencing_token
-            ):
-                current = self._store.takeover_prepared_paper_order_dispatch(
-                    current.order_plan_id,
-                    session=self._session,
-                    taken_over_at=max(
-                        now,
-                        current.updated_at + timedelta(microseconds=1),
-                    ),
+            try:
+                deadline = _effective_submission_deadline(dispatch)
+            except ValueError:
+                error_code = "durable_order_expiry_invalid"
+                clear_invalid_payload = True
+            else:
+                if deadline > now:
+                    continue
+                error_code = "submission_evidence_expired"
+                clear_invalid_payload = False
+
+            write_at = self._strictly_later(now, dispatch.updated_at)
+            if dispatch.status == "prepared":
+                expired.append(
+                    self._terminal_pre_dispatch(
+                        dispatch,
+                        status="expired_pre_dispatch",
+                        error_code=error_code,
+                        at=write_at,
+                        clear_invalid_payload=clear_invalid_payload,
+                    )
                 )
-            expired.append(
-                self._terminal_pre_dispatch(
-                    current,
-                    status="expired_pre_dispatch",
-                    error_code="submission_evidence_expired",
-                    at=max(
-                        now,
-                        current.updated_at + timedelta(microseconds=1),
-                    ),
-                )
+                continue
+            self._mark_reconciliation_required(
+                dispatch,
+                error_code=error_code,
+                at=write_at,
+                clear_invalid_payload=clear_invalid_payload,
             )
         return tuple(expired)
 
@@ -393,6 +406,7 @@ class DurablePaperSubmissionCoordinator:
         )
         provenance = self._store.provenance
         submission_evidence_expires_at = min(
+            order_plan.expires_at,
             order_plan.risk_check_expires_at,
             quote.as_of + timedelta(seconds=quote_max_age_seconds),
             snapshot.captured_at + timedelta(seconds=snapshot_max_age_seconds),
@@ -499,11 +513,48 @@ class DurablePaperSubmissionCoordinator:
         dispatch = self._store.load_paper_order_dispatch(order_plan.order_plan_id)
         if dispatch is None:
             raise RuntimeError("durable paper dispatch must be prepared before submission")
+        observed_at = self._now()
+        try:
+            deadline = _effective_submission_deadline(dispatch)
+        except ValueError:
+            if dispatch.status == "prepared":
+                invalid = self._terminal_pre_dispatch(
+                    dispatch,
+                    status="expired_pre_dispatch",
+                    error_code="durable_order_expiry_invalid",
+                    at=observed_at,
+                    clear_invalid_payload=True,
+                )
+                raise PaperPreDispatchFailure(
+                    invalid,
+                    "durable paper order expiry is invalid before dispatch",
+                )
+            if dispatch.status in {"dispatch_claimed", "outcome_unknown"}:
+                uncertain = self._mark_reconciliation_required(
+                    dispatch,
+                    error_code="durable_order_expiry_invalid",
+                    at=observed_at,
+                    clear_invalid_payload=True,
+                )
+                raise PaperSubmissionOutcomeUnknown(
+                    uncertain,
+                    "claimed paper order has invalid durable expiry; reconciliation is required",
+                )
+            raise ValueError("durable paper order expiry is invalid") from None
         self._require_order_matches_dispatch(order_plan, dispatch)
         if dispatch.status != "prepared":
+            if (
+                dispatch.status in {"dispatch_claimed", "outcome_unknown"}
+                and deadline <= observed_at
+            ):
+                dispatch = self._mark_reconciliation_required(
+                    dispatch,
+                    error_code="submission_evidence_expired",
+                    at=observed_at,
+                )
             return self._replay_without_post(dispatch)
 
-        now = self._now()
+        now = observed_at
         if self._store.paper_kill_blocks_submission():
             expired = self._terminal_pre_dispatch(
                 dispatch,
@@ -515,45 +566,64 @@ class DurablePaperSubmissionCoordinator:
                 expired,
                 "paper kill blocks the external dispatch claim",
             )
-        if (
-            dispatch.session_id != self._session.session_id
-            or dispatch.fencing_token != self._session.fencing_token
-        ):
-            dispatch = self._store.takeover_prepared_paper_order_dispatch(
-                dispatch.order_plan_id,
-                session=self._session,
-                taken_over_at=now,
-            )
-            now = self._strictly_later(self._now(), dispatch.updated_at)
-        if (
-            order_plan.risk_check_expires_at is None
-            or order_plan.risk_check_expires_at <= now
-            or dispatch.submission_evidence_expires_at <= now
-        ):
+        if deadline <= now:
             expired = self._terminal_pre_dispatch(
                 dispatch,
                 status="expired_pre_dispatch",
-                error_code="risk_check_expired",
+                error_code="submission_evidence_expired",
                 at=now,
             )
             raise PaperPreDispatchFailure(
                 expired,
                 "paper order expired before the external dispatch claim",
             )
+        if (
+            dispatch.session_id != self._session.session_id
+            or dispatch.fencing_token != self._session.fencing_token
+        ):
+            takeover_at = self._strictly_later(now, dispatch.updated_at)
+            if deadline <= takeover_at:
+                expired = self._terminal_pre_dispatch(
+                    dispatch,
+                    status="expired_pre_dispatch",
+                    error_code="submission_evidence_expired",
+                    at=takeover_at,
+                )
+                raise PaperPreDispatchFailure(
+                    expired,
+                    "paper order expired before session-fence takeover",
+                )
+            dispatch = self._store.takeover_prepared_paper_order_dispatch(
+                dispatch.order_plan_id,
+                session=self._session,
+                taken_over_at=takeover_at,
+            )
+            now = max(takeover_at, self._now())
+        claimed_at = self._strictly_later(max(now, self._now()), dispatch.updated_at)
+        if deadline <= claimed_at:
+            expired = self._terminal_pre_dispatch(
+                dispatch,
+                status="expired_pre_dispatch",
+                error_code="submission_evidence_expired",
+                at=claimed_at,
+            )
+            raise PaperPreDispatchFailure(
+                expired,
+                "paper order expired before the external dispatch claim",
+            )
 
-        claim_observed_at = self._now()
         try:
             open_session_date = self._session_authority.current_open_session_date(
-                claim_observed_at
+                claimed_at
             )
         except Exception:
             open_session_date = None
-        if open_session_date != claim_observed_at.astimezone(KST).date():
+        if open_session_date != claimed_at.astimezone(KST).date():
             closed = self._terminal_pre_dispatch(
                 dispatch,
                 status="failed_pre_dispatch",
                 error_code="paper_session_closed_before_dispatch",
-                at=claim_observed_at,
+                at=claimed_at,
             )
             raise PaperPreDispatchFailure(
                 closed,
@@ -563,10 +633,7 @@ class DurablePaperSubmissionCoordinator:
         claimed = self._store.claim_dispatch_attempt(
             dispatch.order_plan_id,
             session=self._session,
-            claimed_at=self._strictly_later(
-                claim_observed_at,
-                dispatch.updated_at,
-            ),
+            claimed_at=claimed_at,
         )
         if self._store.paper_kill_blocks_submission():
             rejected = self._definitive_rejection(
@@ -578,7 +645,7 @@ class DurablePaperSubmissionCoordinator:
                 rejected,
                 "paper kill engaged after claim and before broker POST",
             )
-        post_claim_observed_at = self._now()
+        post_claim_observed_at = max(claimed_at, self._now())
         try:
             post_claim_session_date = (
                 self._session_authority.current_open_session_date(
@@ -599,6 +666,42 @@ class DurablePaperSubmissionCoordinator:
             raise PaperSubmissionRejected(
                 rejected,
                 "paper trading session closed after claim and before broker POST",
+            )
+        pre_post_observed_at = max(post_claim_observed_at, self._now())
+        if deadline <= pre_post_observed_at:
+            rejected = self._definitive_rejection(
+                claimed,
+                error_code="submission_evidence_expired_after_claim",
+                mutation_origin="local_submission_guard",
+            )
+            raise PaperSubmissionRejected(
+                rejected,
+                "paper order expired after claim and before broker POST",
+            )
+        try:
+            self._store.require_active_paper_execution_session(
+                self._session,
+                checked_at=pre_post_observed_at,
+            )
+        except Exception:
+            rejected = self._definitive_rejection(
+                claimed,
+                error_code="paper_session_fence_invalid_after_claim",
+                mutation_origin="local_submission_guard",
+            )
+            raise PaperSubmissionRejected(
+                rejected,
+                "paper session fence changed after claim and before broker POST",
+            ) from None
+        if self._store.paper_kill_blocks_submission():
+            rejected = self._definitive_rejection(
+                claimed,
+                error_code="paper_kill_engaged_after_claim",
+                mutation_origin="local_submission_guard",
+            )
+            raise PaperSubmissionRejected(
+                rejected,
+                "paper kill engaged after claim and before broker POST",
             )
         try:
             result = self._client.place_limit_cash_order(
@@ -750,22 +853,58 @@ class DurablePaperSubmissionCoordinator:
         status: str,
         error_code: str,
         at: datetime,
+        clear_invalid_payload: bool = False,
     ) -> PaperOrderDispatch:
         updated_at = self._strictly_later(at, dispatch.updated_at)
+        updates: dict[str, object] = {
+            "status": status,
+            "reconciliation_status": "reconciled",
+            "last_error_code": error_code,
+            "updated_at": updated_at,
+            "reconciled_at": updated_at,
+            "revision": dispatch.revision + 1,
+        }
+        if clear_invalid_payload:
+            updates["order_plan_payload"] = None
         terminal = PaperOrderDispatch.model_validate(
             dispatch.model_copy(
-                update={
-                    "status": status,
-                    "reconciliation_status": "reconciled",
-                    "last_error_code": error_code,
-                    "updated_at": updated_at,
-                    "reconciled_at": updated_at,
-                    "revision": dispatch.revision + 1,
-                }
+                update=updates
             ).model_dump()
         )
         return self._store.update_paper_order_dispatch(
             terminal,
+            mutation_origin="local_submission_guard",
+        )
+
+    def _mark_reconciliation_required(
+        self,
+        dispatch: PaperOrderDispatch,
+        *,
+        error_code: str,
+        at: datetime,
+        clear_invalid_payload: bool = False,
+    ) -> PaperOrderDispatch:
+        if (
+            dispatch.status == "outcome_unknown"
+            and dispatch.reconciliation_status == "blocked"
+            and dispatch.last_error_code == error_code
+            and (not clear_invalid_payload or dispatch.order_plan_payload is None)
+        ):
+            return dispatch
+        updates: dict[str, object] = {
+            "status": "outcome_unknown",
+            "reconciliation_status": "blocked",
+            "last_error_code": error_code,
+            "updated_at": self._strictly_later(at, dispatch.updated_at),
+            "revision": dispatch.revision + 1,
+        }
+        if clear_invalid_payload:
+            updates["order_plan_payload"] = None
+        uncertain = PaperOrderDispatch.model_validate(
+            dispatch.model_copy(update=updates).model_dump()
+        )
+        return self._store.update_paper_order_dispatch(
+            uncertain,
             mutation_origin="local_submission_guard",
         )
 
@@ -839,6 +978,8 @@ class DurablePaperSubmissionCoordinator:
             raise ValueError("external paper dispatch supports limit orders only")
         if order_plan.risk_check_id is None or order_plan.risk_check_expires_at is None:
             raise ValueError("paper dispatch requires final risk-check evidence")
+        if order_plan.expires_at is None or order_plan.expires_at <= prepared_at:
+            raise ValueError("paper dispatch order plan is expired")
         if order_plan.risk_check_expires_at <= prepared_at:
             raise ValueError("paper dispatch final risk check is expired")
         if (
@@ -852,11 +993,11 @@ class DurablePaperSubmissionCoordinator:
             raise ValueError("paper dispatch quote symbol does not match")
         if quote.as_of > prepared_at or snapshot.captured_at > prepared_at:
             raise ValueError("paper dispatch quote and snapshot cannot be from the future")
-        if (prepared_at - quote.as_of).total_seconds() > quote_max_age_seconds:
+        if (prepared_at - quote.as_of).total_seconds() >= quote_max_age_seconds:
             raise ValueError("paper dispatch quote is stale")
         if (
             prepared_at - snapshot.captured_at
-        ).total_seconds() > snapshot_max_age_seconds:
+        ).total_seconds() >= snapshot_max_age_seconds:
             raise ValueError("paper dispatch snapshot is stale")
         if snapshot.user_id.strip() == "":
             raise ValueError("paper dispatch snapshot user is required")
@@ -867,6 +1008,10 @@ class DurablePaperSubmissionCoordinator:
         dispatch: PaperOrderDispatch,
     ) -> None:
         intent = order_plan.intent
+        try:
+            durable_order_expiry = _durable_order_expiry(dispatch.order_plan_payload)
+        except ValueError:
+            raise ValueError("durable paper order expiry is invalid") from None
         if (
             dispatch.order_plan_id != order_plan.order_plan_id
             or dispatch.idempotency_key != order_plan.idempotency_key
@@ -875,6 +1020,7 @@ class DurablePaperSubmissionCoordinator:
             or dispatch.purpose != order_plan.purpose
             or dispatch.risk_check_id != order_plan.risk_check_id
             or dispatch.risk_check_expires_at != order_plan.risk_check_expires_at
+            or order_plan.expires_at != durable_order_expiry
             or dispatch.symbol != intent.symbol.strip().upper()
             or dispatch.side != intent.side
             or not isclose(dispatch.quantity, intent.quantity, abs_tol=0.000001)
@@ -896,6 +1042,28 @@ class DurablePaperSubmissionCoordinator:
 
 def client_fingerprint(client: KisPaperClient) -> str:
     return client.account_scope_fingerprint
+
+
+def _durable_order_expiry(payload: object) -> datetime:
+    if not isinstance(payload, dict):
+        raise ValueError("durable paper order payload is missing")
+    raw_expiry = payload.get("expires_at")
+    if not isinstance(raw_expiry, str) or raw_expiry.strip() == "":
+        raise ValueError("durable paper order expiry is missing")
+    try:
+        expiry = datetime.fromisoformat(raw_expiry.replace("Z", "+00:00"))
+    except ValueError:
+        raise ValueError("durable paper order expiry is malformed") from None
+    if expiry.tzinfo is None or expiry.utcoffset() is None:
+        raise ValueError("durable paper order expiry must include a UTC offset")
+    return expiry
+
+
+def _effective_submission_deadline(dispatch: PaperOrderDispatch) -> datetime:
+    return min(
+        dispatch.submission_evidence_expires_at,
+        _durable_order_expiry(dispatch.order_plan_payload),
+    )
 
 
 def _whole_positive_number(value: float | None, label: str) -> float:

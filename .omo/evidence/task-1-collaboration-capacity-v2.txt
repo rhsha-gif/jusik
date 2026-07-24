@@ -1,0 +1,19 @@
+Task 1 evidence — 2026-07-13 KST
+
+Base: f8162e295850df7656a6816f2222282520d07f36
+
+Codex worktree:
+- Path: C:/Users/goyan/OneDrive/문서/코덱스/주식트레이더-collab-capacity-v2
+- Branch: codex/collab-capacity-v2-core
+- Status: clean
+
+Claude worktree:
+- Path: C:/Users/goyan/OneDrive/문서/코덱스/주식트레이더-claude-collab-capacity-v2-review
+- Branch: claude/collab-capacity-v2-review
+- Status: clean
+
+Main worktree after creation:
+- Branch: main, ahead of origin/main by 123
+- Untracked: .omo/
+- Pre-existing user-owned untracked: CLAUDE.md.20260705.bak
+- No tracked files modified, staged, stashed, reset, or cleaned.

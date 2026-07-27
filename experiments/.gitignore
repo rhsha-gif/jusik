@@ -1,0 +1,14 @@
+# Raw price data -- 184 MB, and every byte of it is regenerable:
+#   python trend_rebalance/fetch_pit.py      157 names, 10y, delisted included
+#   python trend_rebalance/fetch_long.py     234 names, full history to 1970
+#   python swing_overlay/fetch_data.py       30 names, 10y
+# The manifests are kept so a checkout records exactly which universe was used.
+trend_rebalance/data_pit/*.csv
+trend_rebalance/data_long/*.csv
+trend_rebalance/data_broad/*.csv
+swing_overlay/data/*.csv
+!**/_manifest.csv
+!**/_analyst.csv
+
+__pycache__/
+*.pyc

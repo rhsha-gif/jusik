@@ -7,8 +7,13 @@ trend_rebalance/data_pit/*.csv
 trend_rebalance/data_long/*.csv
 trend_rebalance/data_broad/*.csv
 swing_overlay/data/*.csv
-!**/_manifest.csv
-!**/_analyst.csv
+
+# Per-symbol price files are named for their ticker; everything the fetchers
+# derive is underscore-prefixed and IS kept. Those files are small (2-3 MB all
+# told) and expensive to rebuild -- the SEC pulls are throttled and take ~20
+# minutes each -- and the manifests are what let a checkout prove which universe
+# produced a given number.
+!**/_*.csv
 
 __pycache__/
 *.pyc

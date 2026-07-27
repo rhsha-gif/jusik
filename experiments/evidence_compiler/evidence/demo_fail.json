@@ -1,0 +1,11 @@
+{
+  "theme_id": "ai-dc-power",
+  "theme_node": "value-capture-compute",
+  "direction": "confirm",
+  "delta": "strengthened",
+  "source_accession": "0001045810-26-000052",
+  "exact_source_span": "Data Center revenue was $75.2 billion, up 45% from a year ago and up 21% sequentially, driven by the ramp of our Blackwell 300 products and demand for our InfiniBand, Spectrum-X Ethernet, and NVLink solutions.",
+  "xbrl_fact_ids": [],
+  "review_required": false,
+  "note": "deliberately corrupted demo -- the growth figure is fabricated (45% vs the filed 92%) and review_required is falsely unset. Both checks must catch it."
+}

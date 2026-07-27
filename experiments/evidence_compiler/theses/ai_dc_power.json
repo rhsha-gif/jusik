@@ -1,0 +1,39 @@
+{
+  "theme_id": "ai-dc-power",
+  "name": "AI 데이터센터 전력·냉각 병목",
+  "registered": "2026-07-28",
+  "importance": "high",
+  "horizon_months": 30,
+  "selection_reason": "예시 논지 — 스키마 검증과 추출 정확도 평가용. 실제 자본 배정 전에 사람이 다시 쓴다",
+  "realization_condition": "전력·냉각 공급망 매출 2년 연속 고성장 후 백로그 증가율이 정체로 전환",
+  "fatal_falsifiers": [
+    "하이퍼스케일러 2곳 이상이 같은 분기에 capex 가이던스를 하향",
+    "전력 조달이 병목이 아니게 되는 구조 변화(효율 혁신·규제 완화)가 공시에서 확인"
+  ],
+  "nodes": [
+    {
+      "node_id": "demand-capex",
+      "claim": "하이퍼스케일러의 AI 인프라 capex가 계속 증가한다",
+      "observable": "10-K/10-Q 설비투자 현금흐름과 capex 가이던스 문구",
+      "xbrl_tags": ["PaymentsToAcquirePropertyPlantAndEquipment"],
+      "confirm_if": "전년 동기 대비 증가 지속 또는 가이던스 상향",
+      "disconfirm_if": "가이던스 하향 또는 전년 대비 감소 전환"
+    },
+    {
+      "node_id": "value-capture-compute",
+      "claim": "가속 컴퓨팅 공급사가 그 지출을 데이터센터 매출로 포착한다",
+      "observable": "데이터센터 부문 매출과 그 서술의 변화",
+      "xbrl_tags": [],
+      "confirm_if": "부문 매출 성장 지속 + 수요 초과 서술 유지",
+      "disconfirm_if": "부문 성장 둔화 서술 등장, 재고·주문 취소 언급"
+    },
+    {
+      "node_id": "bottleneck-power",
+      "claim": "전력·냉각이 증설의 병목이 되어 관련 공급사에 가격 결정력이 생긴다",
+      "observable": "전력 확보·냉각 용량 관련 리스크 요인과 백로그/RPO 문구",
+      "xbrl_tags": ["RevenueRemainingPerformanceObligation"],
+      "confirm_if": "전력 확보를 제약으로 명시하는 문구 신규/강화, 백로그 증가",
+      "disconfirm_if": "해당 리스크 문구 제거, 백로그 감소"
+    }
+  ]
+}

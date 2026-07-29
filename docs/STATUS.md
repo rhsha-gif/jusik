@@ -2,7 +2,7 @@
 
 > 이 문서는 시점별 보고서가 아니라 **갱신형 현황판**입니다.
 > 스테이지가 끝날 때마다 이 파일을 덮어쓰고, 상세 근거는 기존 `docs/*_report.md`에 남깁니다.
-> 마지막 갱신: **2026-07-13**
+> 마지막 갱신: **2026-07-30**
 
 ## 목적 (한 줄)
 
@@ -30,6 +30,8 @@ Level 1~5 자율화 전 과정을 먼저 완성하고, 사람 승인 게이트�
 | KIS paper canonical execution events v1 | ✅ schema v11 Gate 2 fake-only 개발 완료 | schema v10 row가 계속 authoritative; append-only shadow journal/replay parity 완료, 실제 KIS Gate P는 미검증 |
 | Execution Kernel v2 계약 Gate | ✅ 계약·교차감사 완료, runtime 미착수 | Claude Code `c74a491`/`0bbec72` + Codex `6bfdb5d`/`2f0ab85`; 다음은 side-effect 없는 `QP-KER-010` 순수 모델, broker/store 권한 없음 |
 | 라이브 트레이딩 | ❌ 의도적 미구현 | `docs/live_trading_enablement_checklist.md` 12항목 전부 사람 체크 필요 (현재 0/12) |
+| 지식 vault (Foundation R1) | ✅ 로컬 배치 (git 미추적) | `quantpilot-foundation/` — 책 3권 61장 노트 + 검증기 3종 exit 0; 원문 PDF는 저장소·OneDrive 밖. 추가 절차: `docs/vault_book_ingestion_runbook.md` |
+| 연구 재현 장부 | ✅ EXP-002~018 전 스크립트 재현 | 18개 스크립트 실행, 결과 CSV 바이트 동일. `docs/vault_recheck_ledger_2026-07-29.md` |
 
 ## 안전 불변식 (변경 금지 기본값)
 
@@ -166,6 +168,38 @@ Level 1~5 자율화 전 과정을 먼저 완성하고, 사람 승인 게이트�
   ③ 동일 타임스탬프 체결 순서는 canonical event ordering 도입 대기.
   상세: `docs/qp_drift_daily_workboard.md` Known limits.
 
+## 최근 완료 (2026-07-30, 지식 vault 세팅 + 페이퍼 상태기계 수리)
+
+- **Foundation R1 지식 vault 로컬 배치** — 책 3권(Harris 2003 / Grinold-Kahn 2e /
+  QRM 2005) 챕터 노트 61장 + 종합 4편을 `quantpilot-foundation/`에 배치.
+  원문 PDF 3개는 `~\.local\qp-private-sources`(git·OneDrive 밖), SHA-256 대조로
+  결속. **vault 전체는 git 미추적** (상업 서적 파생 노트 — GitHub 미게시 결정).
+  Windows 이식: 인코딩 5건·모듈 섀도잉 2건·dataclass 로딩 1건 수정, 플랫폼이
+  픽스처를 만들 수 없는 11건은 능력 탐지 skip. 검증: vault unittest
+  `OK (146 passed, 11 skipped)`, 검증기 3종 exit 0 (`.obsidian` 호환성 갱신 포함).
+  절차서: `docs/vault_book_ingestion_runbook.md`
+- **페이퍼 실행 상태기계 수리 (WIP 커밋 `9703568` 후유증 3건)** — ① 픽스처에
+  `expires_at` 부재로 18개 테스트 사망 ② `require_active_paper_execution_session`
+  (pre-POST fence) 미구현 → 기존 `_require_exact_active_session` 노출로 복원
+  ③ `_mark_reconciliation_required`가 reducer가 허용 안 하는 delta를 써서 호출부
+  3곳 전부 도달-시-필패 → **`local_reconciliation_guard` origin 신설** (정확히
+  `dispatch_claimed → outcome_unknown/blocked` 한 전이만, 코드 2종 한정, payload
+  소거는 `durable_order_expiry_invalid`만). 격리된 행 재표시 금지로
+  `process_interrupted` 사유 보존. 검증: 백엔드 pytest 1297개 중 1297 passed·
+  2 skipped (junit, 신규 5), smoke OK (broker mock, live 비활성), Codex 독립 검토
+  4항목 PASS (capability leakage 없음 · 정보 손실 없음 · 상수 공유 적절 ·
+  takeover 도달불가 증명은 신뢰 시계 가정 하 유효 — docstring에 가정 명시).
+  branch head `02f47be`.
+- **연구 재현 장부 완결** — EXP-002~018 스크립트 18개 전부 이 저장소에서 실행,
+  결과 CSV 13개 바이트 동일 재생성. EXP-007 문서 수치(+0.044x)는 쌍별 차이
+  평균으로 판명(콘솔 표는 중앙값 기반) — 장부에 주기.
+  `docs/vault_recheck_ledger_2026-07-29.md` append.
+- **비차단 한계 (라이브 준비 주장 아님)**: ① reducer가 고아 위조
+  `RiskReservationReleased` replay를 단독으론 못 막음(프로덕션 append 경로가 차단;
+  Codex 지적, 기존) ② 세션 타임스탬프는 호출자 제공 — 신뢰 시계 가정 필요(기존)
+  ③ OneDrive가 `.git` 내부를 간섭 — 완화 제안서
+  `docs/onedrive_git_mitigation_proposal.md` (C안 권장, 실행 승인 대기).
+
 ## 다음 단계 후보 (우선순위 제안)
 
 > 제품 구상(대화형 전략 수립 → 전략 단위 승인 → 자동 운용)과의 정렬 설계 및
@@ -195,6 +229,8 @@ Level 1~5 자율화 전 과정을 먼저 완성하고, 사람 승인 게이트�
   체결모델 가정이 승인 여부를 가르므로 확정 전 체결버퍼 가정 확인 권장.
   CLI: `run_local_backtest --min-total-return 0 --max-drawdown 0.10
   --min-simplified-sharpe 0.3 --min-filled-trades 15 --max-turnover 4.0`
+- [ ] OneDrive `.git` 분리 (C안: separate git dir) 실행 여부 —
+  `docs/onedrive_git_mitigation_proposal.md` 검토 후 승인/보류/기각
 - [ ] 워크포워드 윈도 정책
 - [ ] 전략 승격(promotion) 승인자·증빙 형식 정책
 - [ ] 라이브 체크리스트 12항목 (전부 사람 서명 필요)

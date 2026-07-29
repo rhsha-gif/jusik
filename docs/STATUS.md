@@ -30,7 +30,7 @@ Level 1~5 자율화 전 과정을 먼저 완성하고, 사람 승인 게이트�
 | KIS paper canonical execution events v1 | ✅ schema v11 Gate 2 fake-only 개발 완료 | schema v10 row가 계속 authoritative; append-only shadow journal/replay parity 완료, 실제 KIS Gate P는 미검증 |
 | Execution Kernel v2 계약 Gate | ✅ 계약·교차감사 완료, runtime 미착수 | Claude Code `c74a491`/`0bbec72` + Codex `6bfdb5d`/`2f0ab85`; 다음은 side-effect 없는 `QP-KER-010` 순수 모델, broker/store 권한 없음 |
 | 라이브 트레이딩 | ❌ 의도적 미구현 | `docs/live_trading_enablement_checklist.md` 12항목 전부 사람 체크 필요 (현재 0/12) |
-| 지식 vault (Foundation R1) | ✅ 로컬 배치 (git 미추적) | `quantpilot-foundation/` — 책 3권 61장 노트 + 검증기 3종 exit 0; 원문 PDF는 저장소·OneDrive 밖. 추가 절차: `docs/vault_book_ingestion_runbook.md` |
+| 지식 vault (8권, Obsidian 개편) | ✅ 전면 개편 완료 (git 미추적) | `quantpilot-foundation/` — 책 8권 챕터 149편 전면 재작성 + 허브 8·연결 8·종합 10·주제 MOC 9·홈. 깨진 링크 0, claim 883개 원본 1:1. 메타·검증기는 `quantpilot-foundation-meta/`로 분리(검증기 은퇴). 절차: `docs/vault_book_ingestion_runbook.md` (v2) |
 | 연구 재현 장부 | ✅ EXP-002~018 전 스크립트 재현 | 18개 스크립트 실행, 결과 CSV 바이트 동일. `docs/vault_recheck_ledger_2026-07-29.md` |
 
 ## 안전 불변식 (변경 금지 기본값)
@@ -199,6 +199,26 @@ Level 1~5 자율화 전 과정을 먼저 완성하고, 사람 승인 게이트�
   Codex 지적, 기존) ② 세션 타임스탬프는 호출자 제공 — 신뢰 시계 가정 필요(기존)
   ③ OneDrive가 `.git` 내부를 간섭 — 완화 제안서
   `docs/onedrive_git_mitigation_proposal.md` (C안 권장, 실행 승인 대기).
+
+## 최근 완료 (2026-07-30, 지식 vault Obsidian 전면 개편 + R2 5권 통합)
+
+- **구조 개편** — 거버넌스·레지스트리·검증기·원본 노트 등 메타 220여 파일을
+  `quantpilot-foundation-meta/`로 분리(검증기 3종·테스트 157개는 **은퇴** 선언,
+  meta README에 기록). vault에는 지식 노트만 남김. 파일명은 `NN장 한글제목 (원제)`
+  규범으로 통일.
+- **8권 전면 재작성** — R1 3권(Harris·G&K·QRM) + R2 5권(Cochrane·Hamilton·Penman·
+  DDIA·Superforecasting) 챕터 149편을 승인된 규격(세 줄 요약 → 설명체 본문 →
+  접이식 근거 장부)으로 재작성. 샘플 2장 사용자 승인 게이트 통과 후 sonnet 워커
+  23개 병렬(사용자 승인 하 aorch 게이트 일시 해제). LaTeX 수식 렌더링,
+  dated 경고·needs_visual_check 승계.
+- **검증 (전수)** — 총 185편: claim 장부 **883개 전부 원본 북맵과 1:1**
+  (Harris 251 · G&K 95 · QRM 54 · Cochrane 84 · Hamilton 106 · Penman 99 ·
+  DDIA 54 · SF 39), 깨진 위키링크 0, 파일명 충돌 0 (G&K 1장 `서론`으로 개명 해소).
+  원문 PDF 8권은 `~\.local\qp-private-sources` (SHA-256 대장: meta source-ledger).
+- **비차단 한계**: ① Penman은 truncated PDF (1장 pp.1-9 등 결손 — 노트에 표시)
+  ② Hamilton은 스캔/OCR본이라 수식 대부분 서술형 유지 (원문 시각 확인 전 전사 금지
+  원칙 승계) ③ 노트 품질은 리뷰 기반 — 기계 검증기는 은퇴함 ④ LLM/RAG 검색 연결은
+  미착수 (사람 Obsidian 열람 + 에이전트 파일 직접 읽기까지).
 
 ## 다음 단계 후보 (우선순위 제안)
 

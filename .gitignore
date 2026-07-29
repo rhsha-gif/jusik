@@ -19,10 +19,10 @@ local_data/
 .playwright-mcp/
 *baseline*.png
 
-# Obsidian workspace state. Open THIS repository root as the Obsidian vault, not
-# quantpilot-foundation/ -- validate_vault.py rejects any file missing from the
-# release manifest, so an .obsidian/ directory written inside the vault fails the
-# check, and the validator itself is hash-frozen and cannot be taught to skip it.
+# Obsidian workspace state, wherever a vault is opened. quantpilot-foundation's
+# validate_vault.py excludes .obsidian/ from its payload inventory (recorded as a
+# compatibility refresh in its release manifest), so opening that folder directly
+# in Obsidian is supported.
 .obsidian/
 
 # Knowledge vault. The chapter notes under quantpilot-foundation/60-book-notes/

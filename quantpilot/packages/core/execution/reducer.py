@@ -208,7 +208,16 @@ _LOCAL_PRE_DISPATCH_STATUS_BY_CODE = {
     "paper_kill_engaged": "expired_pre_dispatch",
     "risk_check_expired": "expired_pre_dispatch",
     "submission_evidence_expired": "expired_pre_dispatch",
+    "durable_order_expiry_invalid": "expired_pre_dispatch",
     "paper_session_closed_before_dispatch": "failed_pre_dispatch",
+}
+# The only code that may clear the durable order payload: it marks a payload
+# whose expiry cannot even be computed, so the payload itself is the evidence
+# being condemned. Every other code must leave the payload untouched.
+_PAYLOAD_CLEARING_CODE = "durable_order_expiry_invalid"
+_LOCAL_RECONCILIATION_BLOCK_CODES = {
+    "submission_evidence_expired",
+    "durable_order_expiry_invalid",
 }
 _BROKER_RECONCILIATION_BLOCK_CODES = {
     "broker_amount_negative",
@@ -338,17 +347,27 @@ def _validate_dispatch_source(
             )
             if expected_status is None or after.status != expected_status:
                 raise PaperEventStreamCorruption("local submission guard delta is invalid")
+            updates: dict[str, Any] = {
+                "status": expected_status,
+                "reconciliation_status": "reconciled",
+                "last_error_code": after.last_error_code,
+                "updated_at": after.updated_at,
+                "reconciled_at": after.updated_at,
+                "revision": before.revision + 1,
+            }
+            if after.order_plan_payload != before.order_plan_payload:
+                if (
+                    after.order_plan_payload is not None
+                    or after.last_error_code != _PAYLOAD_CLEARING_CODE
+                ):
+                    raise PaperEventStreamCorruption(
+                        "local submission guard delta is invalid"
+                    )
+                updates["order_plan_payload"] = None
             _require_exact_dispatch_copy(
                 before,
                 after,
-                updates={
-                    "status": expected_status,
-                    "reconciliation_status": "reconciled",
-                    "last_error_code": after.last_error_code,
-                    "updated_at": after.updated_at,
-                    "reconciled_at": after.updated_at,
-                    "revision": before.revision + 1,
-                },
+                updates=updates,
                 error="local submission guard delta is invalid",
             )
             return
@@ -370,6 +389,43 @@ def _validate_dispatch_source(
                 "revision": before.revision + 1,
             },
             error="local submission guard delta is invalid",
+        )
+        return
+    if event.source == PAPER_MUTATION_ORIGIN_SOURCES["local_reconciliation_guard"]:
+        # Local evidence aged out after the order was claimed, so a broker POST
+        # may already have gone out. The only legal fact from this origin is the
+        # quarantine itself: outcome_unknown, blocked for query-only
+        # reconciliation, never a relabel to rejected and never a retry.
+        if (
+            event.event_type != "ReconciliationBlocked"
+            or before.status != "dispatch_claimed"
+            or before.attempt_count != 1
+            or after.last_error_code not in _LOCAL_RECONCILIATION_BLOCK_CODES
+        ):
+            raise PaperEventStreamCorruption(
+                "local reconciliation guard delta is invalid"
+            )
+        updates: dict[str, Any] = {
+            "status": "outcome_unknown",
+            "reconciliation_status": "blocked",
+            "last_error_code": after.last_error_code,
+            "updated_at": after.updated_at,
+            "revision": before.revision + 1,
+        }
+        if after.order_plan_payload != before.order_plan_payload:
+            if (
+                after.order_plan_payload is not None
+                or after.last_error_code != _PAYLOAD_CLEARING_CODE
+            ):
+                raise PaperEventStreamCorruption(
+                    "local reconciliation guard delta is invalid"
+                )
+            updates["order_plan_payload"] = None
+        _require_exact_dispatch_copy(
+            before,
+            after,
+            updates=updates,
+            error="local reconciliation guard delta is invalid",
         )
         return
     if event.source == PAPER_MUTATION_ORIGIN_SOURCES["broker_reconciliation"]:

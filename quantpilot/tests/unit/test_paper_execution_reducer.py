@@ -1215,3 +1215,251 @@ def test_read_only_join_preserves_independent_aggregate_streams() -> None:
         join_correlated_execution_projections(
             [cancel_projection, cancel_projection]
         )
+
+
+def _durable_payload(dispatch: PaperOrderDispatch) -> dict:
+    """A durable OrderPlan dump that satisfies the dispatch cross-checks.
+
+    expires_at stays None on purpose: that is exactly the legacy shape whose
+    expiry cannot be computed, which is what durable_order_expiry_invalid marks.
+    """
+
+    from quantpilot.packages.core.schemas import (
+        OrderIntent,
+        OrderPlan,
+        OrderStatus,
+        ProposalExplanation,
+    )
+
+    plan = OrderPlan(
+        order_plan_id=dispatch.order_plan_id,
+        policy_id=dispatch.policy_id,
+        policy_version=dispatch.policy_version,
+        purpose=dispatch.purpose,
+        status=OrderStatus.submitted,
+        idempotency_key=dispatch.idempotency_key,
+        risk_check_id=dispatch.risk_check_id,
+        risk_check_expires_at=dispatch.risk_check_expires_at,
+        intent=OrderIntent(
+            symbol=dispatch.symbol,
+            side=dispatch.side,
+            quantity=dispatch.quantity,
+            limit_price=dispatch.limit_price,
+            notional=dispatch.quantity * dispatch.limit_price,
+            target_weight=0.07,
+            reason="fixture",
+            quote_time=dispatch.quote_as_of,
+        ),
+        explanation=ProposalExplanation(
+            symbol=dispatch.symbol,
+            action=dispatch.side,
+            quantity=dispatch.quantity,
+            target_weight_delta=0.07,
+            reference_price=dispatch.limit_price,
+            estimated_cash_impact=dispatch.quantity * dispatch.limit_price,
+            strategy_id=dispatch.strategy_id,
+            strategy_version=dispatch.strategy_version,
+            signal_reason="fixture",
+            current_weight=0,
+            target_weight=0.07,
+            weight_delta=0.07,
+            quote_price=dispatch.limit_price,
+            quote_age_seconds=5,
+            limit_price=dispatch.limit_price,
+            estimated_notional=dispatch.quantity * dispatch.limit_price,
+            risk_checks_passed=["all"],
+            risk_check_id=dispatch.risk_check_id,
+            risk_check_expires_at=dispatch.risk_check_expires_at,
+            idempotency_key=dispatch.idempotency_key,
+            policy_version=dispatch.policy_version,
+        ),
+    )
+    return plan.model_dump(mode="json")
+
+
+def _claimed_with_payload() -> tuple[object, PaperOrderDispatch]:
+    prepared = _dispatch()
+    prepared = PaperOrderDispatch.model_validate(
+        prepared.model_copy(
+            update={"order_plan_payload": _durable_payload(prepared)}
+        ).model_dump()
+    )
+    claimed = _claimed(prepared)
+    events = [
+        build_paper_execution_event(
+            event_id="pevt-prepared",
+            aggregate_version=1,
+            event_type="OrderPrepared",
+            source="local_prepare",
+            after=prepared,
+            causation_id="pevt-risk-reserved",
+        ),
+        build_paper_execution_event(
+            event_id="pevt-claimed",
+            aggregate_version=2,
+            event_type="DispatchClaimed",
+            source="local_dispatch_claim",
+            after=claimed,
+            before=prepared,
+            causation_id="pevt-prepared",
+        ),
+    ]
+    return replay_paper_execution_events(events), claimed
+
+
+def _local_reconciliation_block(
+    claimed: PaperOrderDispatch,
+    *,
+    error_code: str,
+    clear_payload: bool = False,
+) -> PaperOrderDispatch:
+    blocked_at = claimed.updated_at + timedelta(seconds=1)
+    updates: dict[str, object] = {
+        "status": "outcome_unknown",
+        "reconciliation_status": "blocked",
+        "last_error_code": error_code,
+        "updated_at": blocked_at,
+        "revision": claimed.revision + 1,
+    }
+    if clear_payload:
+        updates["order_plan_payload"] = None
+    return PaperOrderDispatch.model_validate(
+        claimed.model_copy(update=updates).model_dump()
+    )
+
+
+def test_local_reconciliation_guard_quarantines_claimed_dispatch() -> None:
+    projection, claimed = _claimed_with_payload()
+
+    for suffix, error_code, clear_payload in (
+        ("evidence", "submission_evidence_expired", False),
+        ("expiry", "durable_order_expiry_invalid", True),
+    ):
+        blocked = _local_reconciliation_block(
+            claimed,
+            error_code=error_code,
+            clear_payload=clear_payload,
+        )
+        event = build_paper_execution_event(
+            event_id=f"pevt-local-recon-{suffix}",
+            aggregate_version=3,
+            event_type="ReconciliationBlocked",
+            source="local_reconciliation_guard",
+            after=blocked,
+            before=claimed,
+            causation_id="pevt-claimed",
+        )
+        assert reduce_paper_execution_event(projection, event).after == blocked
+
+
+def test_local_reconciliation_guard_rejects_foreign_deltas() -> None:
+    projection, claimed = _claimed_with_payload()
+
+    foreign_code = _local_reconciliation_block(
+        claimed, error_code="process_interrupted"
+    )
+    stolen_payload_clear = _local_reconciliation_block(
+        claimed,
+        error_code="submission_evidence_expired",
+        clear_payload=True,
+    )
+    for suffix, after in (
+        ("foreign-code", foreign_code),
+        ("payload-clear", stolen_payload_clear),
+    ):
+        event = build_paper_execution_event(
+            event_id=f"pevt-local-recon-{suffix}",
+            aggregate_version=3,
+            event_type="ReconciliationBlocked",
+            source="local_reconciliation_guard",
+            after=after,
+            before=claimed,
+            causation_id="pevt-claimed",
+        )
+        with pytest.raises(
+            PaperEventStreamCorruption, match="local reconciliation guard"
+        ):
+            reduce_paper_execution_event(projection, event)
+
+    # The same delta must not be accepted through the same-session guard origin.
+    valid_shape = _local_reconciliation_block(
+        claimed, error_code="submission_evidence_expired"
+    )
+    cross_origin = build_paper_execution_event(
+        event_id="pevt-local-recon-cross-origin",
+        aggregate_version=3,
+        event_type="ReconciliationBlocked",
+        source="local_submission_result",
+        after=valid_shape,
+        before=claimed,
+        causation_id="pevt-claimed",
+    )
+    with pytest.raises(
+        PaperEventStreamCorruption, match="local submission guard"
+    ):
+        reduce_paper_execution_event(projection, cross_origin)
+
+
+def test_prepared_invalid_expiry_terminalizes_with_cleared_payload() -> None:
+    prepared = _dispatch()
+    prepared = PaperOrderDispatch.model_validate(
+        prepared.model_copy(
+            update={"order_plan_payload": _durable_payload(prepared)}
+        ).model_dump()
+    )
+    projection = replay_paper_execution_events(
+        [
+            build_paper_execution_event(
+                event_id="pevt-prepared",
+                aggregate_version=1,
+                event_type="OrderPrepared",
+                source="local_prepare",
+                after=prepared,
+                causation_id="pevt-risk-reserved",
+            )
+        ]
+    )
+    expired_at = prepared.updated_at + timedelta(seconds=1)
+
+    def terminal(error_code: str, clear_payload: bool) -> PaperOrderDispatch:
+        updates: dict[str, object] = {
+            "status": "expired_pre_dispatch",
+            "reconciliation_status": "reconciled",
+            "last_error_code": error_code,
+            "updated_at": expired_at,
+            "reconciled_at": expired_at,
+            "revision": prepared.revision + 1,
+        }
+        if clear_payload:
+            updates["order_plan_payload"] = None
+        return PaperOrderDispatch.model_validate(
+            prepared.model_copy(update=updates).model_dump()
+        )
+
+    accepted = build_paper_execution_event(
+        event_id="pevt-expiry-invalid",
+        aggregate_version=2,
+        event_type="OrderExpiredPreDispatch",
+        source="local_submission_result",
+        after=terminal("durable_order_expiry_invalid", True),
+        before=prepared,
+        causation_id="pevt-prepared",
+    )
+    assert (
+        reduce_paper_execution_event(projection, accepted).after
+        == terminal("durable_order_expiry_invalid", True)
+    )
+
+    rejected = build_paper_execution_event(
+        event_id="pevt-evidence-steals-payload",
+        aggregate_version=2,
+        event_type="OrderExpiredPreDispatch",
+        source="local_submission_result",
+        after=terminal("submission_evidence_expired", True),
+        before=prepared,
+        causation_id="pevt-prepared",
+    )
+    with pytest.raises(
+        PaperEventStreamCorruption, match="local submission guard"
+    ):
+        reduce_paper_execution_event(projection, rejected)

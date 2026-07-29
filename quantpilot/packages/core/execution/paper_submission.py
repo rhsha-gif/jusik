@@ -903,12 +903,12 @@ class DurablePaperSubmissionCoordinator:
         at: datetime,
         clear_invalid_payload: bool = False,
     ) -> PaperOrderDispatch:
-        if (
-            dispatch.status == "outcome_unknown"
-            and dispatch.reconciliation_status == "blocked"
-            and dispatch.last_error_code == error_code
-            and (not clear_invalid_payload or dispatch.order_plan_payload is None)
-        ):
+        if dispatch.status == "outcome_unknown":
+            # Already quarantined: outcome_unknown means query-only
+            # reconciliation and never repost, so promoting again buys nothing
+            # and would overwrite the reason the row became unknown -- recovery
+            # records process_interrupted, which says a POST may have gone out,
+            # and this guard's codes do not.
             return dispatch
         updates: dict[str, object] = {
             "status": "outcome_unknown",
@@ -924,7 +924,7 @@ class DurablePaperSubmissionCoordinator:
         )
         return self._store.update_paper_order_dispatch(
             uncertain,
-            mutation_origin="local_submission_guard",
+            mutation_origin="local_reconciliation_guard",
         )
 
     def _replay_without_post(

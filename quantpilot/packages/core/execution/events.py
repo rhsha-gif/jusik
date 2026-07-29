@@ -45,6 +45,7 @@ PaperExecutionSource = Literal[
     "local_dispatch_claim",
     "local_session_takeover",
     "local_submission_result",
+    "local_reconciliation_guard",
     "broker_acceptance",
     "broker_reconciliation",
     "process_recovery",
@@ -58,6 +59,7 @@ PaperExecutionIdentityKind = Literal[
 PaperMutationOrigin = Literal[
     "broker_post_result",
     "local_submission_guard",
+    "local_reconciliation_guard",
     "broker_reconciliation",
     "kill_cancel_journal",
 ]
@@ -65,6 +67,11 @@ PaperMutationOrigin = Literal[
 PAPER_MUTATION_ORIGIN_SOURCES: dict[str, str] = {
     "broker_post_result": "broker_acceptance",
     "local_submission_guard": "local_submission_result",
+    # Local evidence aging out on an already-claimed order. Kept apart from
+    # local_submission_guard so ordinary guard code cannot manufacture an
+    # outcome_unknown quarantine, and from broker_reconciliation so the audit
+    # trail never attributes a local judgement to broker evidence.
+    "local_reconciliation_guard": "local_reconciliation_guard",
     "broker_reconciliation": "broker_reconciliation",
     "kill_cancel_journal": "kill_cancel",
 }

@@ -1090,3 +1090,133 @@ def test_no_other_production_module_calls_the_low_level_order_post() -> None:
         "core/kis_paper.py",
         "core/execution/paper_submission.py",
     }
+
+
+def test_expired_evidence_on_claimed_row_quarantines_without_relabelling(
+    tmp_path,
+) -> None:
+    """A claimed order whose local evidence aged out is quarantined, not rejected.
+
+    The POST may already have reached the broker, so the only legal local fact
+    is outcome_unknown/blocked -- and no second POST.
+    """
+
+    client = FakePaperClient()
+    client.order_outcome = KeyboardInterrupt()
+    clock = MutableClock()
+    path = tmp_path / "claimed-expiry.sqlite3"
+    with PaperStateStore(
+        path,
+        data_mode="paper_trading",
+        account_scope_fingerprint=FINGERPRINT,
+    ) as store:
+        coordinator = _coordinator(
+            store,
+            client,
+            clock,
+            lease_expires_at=NOW + timedelta(minutes=1),
+        )
+        order = _order()
+        coordinator.prepare_order(
+            order,
+            run_id="run-001",
+            user_id="paper-user",
+            snapshot=_snapshot(),
+            quote=_quote(),
+            entry_atr14=1200,
+            quote_max_age_seconds=30,
+            snapshot_max_age_seconds=30,
+            minimum_cash_reserve=200000,
+        )
+        with pytest.raises(KeyboardInterrupt):
+            coordinator.submit_prepared_order(order)
+        assert client.order_calls == 1
+
+        # No recovery pass ran; the row is still dispatch_claimed when a
+        # restarted coordinator retries long after the evidence deadline.
+        resumed_at = NOW + timedelta(minutes=10)
+        clock.now = resumed_at
+        successor = store.start_paper_execution_session(
+            started_at=resumed_at,
+            lease_expires_at=resumed_at + timedelta(hours=1),
+        )
+        restarted = DurablePaperSubmissionCoordinator(
+            store=store,
+            session=successor,
+            client=client,  # type: ignore[arg-type]
+            session_authority=FakeSessionAuthority(),
+            clock=clock,
+        )
+        with pytest.raises(PaperSubmissionOutcomeUnknown):
+            restarted.submit_prepared_order(order)
+
+        quarantined = store.load_paper_order_dispatch(order.order_plan_id)
+        assert quarantined is not None
+        assert quarantined.status == "outcome_unknown"
+        assert quarantined.reconciliation_status == "blocked"
+        assert quarantined.last_error_code == "submission_evidence_expired"
+        assert client.order_calls == 1
+
+
+def test_recovered_unknown_row_keeps_its_interruption_reason(tmp_path) -> None:
+    """Re-submitting a recovered order must not overwrite process_interrupted."""
+
+    client = FakePaperClient()
+    client.order_outcome = KeyboardInterrupt()
+    clock = MutableClock()
+    path = tmp_path / "reason-preserved.sqlite3"
+    with PaperStateStore(
+        path,
+        data_mode="paper_trading",
+        account_scope_fingerprint=FINGERPRINT,
+    ) as store:
+        coordinator = _coordinator(
+            store,
+            client,
+            clock,
+            lease_expires_at=NOW + timedelta(minutes=1),
+        )
+        order = _order()
+        coordinator.prepare_order(
+            order,
+            run_id="run-001",
+            user_id="paper-user",
+            snapshot=_snapshot(),
+            quote=_quote(),
+            entry_atr14=1200,
+            quote_max_age_seconds=30,
+            snapshot_max_age_seconds=30,
+            minimum_cash_reserve=200000,
+        )
+        with pytest.raises(KeyboardInterrupt):
+            coordinator.submit_prepared_order(order)
+
+        recovered_at = NOW + timedelta(minutes=2)
+        clock.now = recovered_at
+        successor = store.start_paper_execution_session(
+            started_at=recovered_at,
+            lease_expires_at=recovered_at + timedelta(hours=1),
+        )
+        recovered = store.recover_interrupted_dispatches(
+            session=successor,
+            recovered_at=recovered_at,
+        )
+        assert [item.last_error_code for item in recovered] == [
+            "process_interrupted"
+        ]
+
+        restarted = DurablePaperSubmissionCoordinator(
+            store=store,
+            session=successor,
+            client=client,  # type: ignore[arg-type]
+            session_authority=FakeSessionAuthority(),
+            clock=clock,
+        )
+        with pytest.raises(PaperSubmissionOutcomeUnknown):
+            restarted.submit_prepared_order(order)
+
+        preserved = store.load_paper_order_dispatch(order.order_plan_id)
+        assert preserved is not None
+        assert preserved.status == "outcome_unknown"
+        assert preserved.last_error_code == "process_interrupted"
+        assert client.order_calls == 1

@@ -560,10 +560,12 @@ class DurablePaperSubmissionCoordinator:
             raise ValueError("durable paper order expiry is invalid") from None
         self._require_order_matches_dispatch(order_plan, dispatch)
         if dispatch.status != "prepared":
-            if (
-                dispatch.status in {"dispatch_claimed", "outcome_unknown"}
-                and deadline <= observed_at
-            ):
+            # An outcome_unknown row is already quarantined for query-only
+            # reconciliation, so re-marking it buys nothing and costs the reason
+            # it became unknown: recovery records process_interrupted, and
+            # overwriting that with submission_evidence_expired hides that a POST
+            # may already have gone out. Only a still-claimed row needs promoting.
+            if dispatch.status == "dispatch_claimed" and deadline <= observed_at:
                 dispatch = self._mark_reconciliation_required(
                     dispatch,
                     error_code="submission_evidence_expired",

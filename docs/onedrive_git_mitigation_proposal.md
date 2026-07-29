@@ -1,6 +1,6 @@
-# OneDrive × git 간섭 완화 제안 (실행 전 — 승인 필요)
+# OneDrive × git 간섭 완화 제안 → C안 실행 완료
 
-작성 2026-07-30. 이 문서는 제안만 담는다. 어느 방안이든 실행은 별도 승인 후다.
+작성 2026-07-30. 같은 날 사용자 승인으로 **C안을 실행했다** — 기록은 문서 말미 §6.
 
 ## 1. 무엇이 일어나고 있나 (실측)
 
@@ -90,7 +90,29 @@ attrib +P -U "<repo>\.git" /S /D
 A안은 백업 재설계가 선행돼야 하므로 vault 백업 전략이 정해진 뒤의 후속 선택지로
 남긴다. D안은 C안 실행 전까지의 임시 완화로 병행 가능.
 
-## 5. 이 문서가 하지 않는 것
+## 5. 이 문서가 하지 않는 것 (실행 전 기준)
 
-- 어떤 방안도 실행하지 않았다. `.git`은 현재 위치 그대로다.
+- (실행 전) 어떤 방안도 실행하지 않았다.
 - 쓰레기 객체(`tmp_obj_oH5zp2`) 정리도 보류 — C안 실행 시 `git gc`로 함께 처리.
+
+## 6. 실행 기록 (2026-07-30, 사용자 승인)
+
+- 타이밍: push 직후 — 미푸시 커밋 0, dirty 0, fsck 깨끗한 상태에서 실행.
+- **제안과 한 가지 다름**: 대상 이름을 `주식트레이더.git`이 아닌 **`jusik.git`(ASCII)**
+  으로 했다. gitdir 경로가 worktree 포인터 파일 91개에 박히는데, 한글 절대경로에서
+  도구가 깨진 전력이 두 건 기록돼 있어(비대화형 세션 경로 매칭, openapi-typescript)
+  ASCII가 실질 개선이다.
+- 절차 실행: OneDrive `/shutdown` → `Move-Item .git → C:\Users\goyan\.local\git-meta\jusik.git`
+  → 루트에 `gitdir:` 포인터 파일 → `git worktree repair` (연결 worktree 90개 일괄)
+  → OneDrive 재시작.
+- 검증 (전부 실측):
+  - HEAD `0753365` 유지, `main...origin/main` 동기화 인식
+  - 연결 worktree **90/90** `rev-parse` 응답 (실패 0)
+  - `git fsck --no-dangling` exit 0 (이전 전·후 동일)
+  - `git gc` 후 `garbage: 0` — `tmp_obj_oH5zp2` 정리 확인
+  - `run_smoke` exit 0, 루트 `.git`은 한 줄짜리 파일, `git rev-parse --git-dir`가
+    OneDrive 밖 경로 반환
+- 되돌림: `C:\Users\goyan\.local\git-meta\jusik.git`을 `.git`으로 다시 옮기고
+  포인터 파일 삭제 후 `git worktree repair`.
+- 남는 운영 규율: git 메타는 이제 OneDrive 백업 밖이다. **push가 곧 백업**이므로
+  미푸시 커밋을 오래 쌓아두지 않는다.

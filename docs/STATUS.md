@@ -229,8 +229,10 @@ Level 1~5 자율화 전 과정을 먼저 완성하고, 사람 승인 게이트�
   체결모델 가정이 승인 여부를 가르므로 확정 전 체결버퍼 가정 확인 권장.
   CLI: `run_local_backtest --min-total-return 0 --max-drawdown 0.10
   --min-simplified-sharpe 0.3 --min-filled-trades 15 --max-turnover 4.0`
-- [ ] OneDrive `.git` 분리 (C안: separate git dir) 실행 여부 —
-  `docs/onedrive_git_mitigation_proposal.md` 검토 후 승인/보류/기각
+- [x] ~~OneDrive `.git` 분리 (C안) 실행 여부~~ → 2026-07-30 승인·실행 완료:
+  git 메타를 `C:\Users\goyan\.local\git-meta\jusik.git`으로 분리, worktree 90/90
+  재연결, fsck·gc·smoke 검증. 운영 규율: **push가 곧 git 메타의 백업**
+  (`docs/onedrive_git_mitigation_proposal.md` §6)
 - [ ] 워크포워드 윈도 정책
 - [ ] 전략 승격(promotion) 승인자·증빙 형식 정책
 - [ ] 라이브 체크리스트 12항목 (전부 사람 서명 필요)

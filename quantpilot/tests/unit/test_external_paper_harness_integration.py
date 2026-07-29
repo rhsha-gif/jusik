@@ -182,6 +182,10 @@ def _order(policy: UserPolicy) -> OrderPlan:
         idempotency_key="paper-order-key-001",
         risk_check_id="risk-001",
         risk_check_expires_at=NOW + timedelta(minutes=5),
+        # prepare_order requires an order-plan expiry; the harness always stamps
+        # one from policy.order_expiry_minutes. See the twin fixture in
+        # test_paper_submission_coordinator.py.
+        expires_at=NOW + timedelta(minutes=30),
         explanation=explanation,
     )
 

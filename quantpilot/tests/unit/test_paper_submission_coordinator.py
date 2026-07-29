@@ -174,6 +174,12 @@ def _order(**updates: object) -> OrderPlan:
         "idempotency_key": "paper-order-key-001",
         "risk_check_id": "risk-001",
         "risk_check_expires_at": NOW + timedelta(minutes=5),
+        # Every OrderPlan that reaches paper dispatch carries an expiry: the
+        # harness stamps `utc_now() + policy.order_expiry_minutes` when it builds
+        # one, and prepare_order rejects a plan without it. Hand-built fixtures
+        # have to say so too. Far enough out that the clock advances in this file
+        # (at most NOW + 6 minutes) still expire the risk check, not the plan.
+        "expires_at": NOW + timedelta(minutes=30),
         "explanation": _explanation(),
     }
     values.update(updates)

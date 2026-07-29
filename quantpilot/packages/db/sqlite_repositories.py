@@ -3420,10 +3420,13 @@ class PaperStateStore:
         admits one active session per store, starting a successor atomically
         abandons the predecessor, and a same-session takeover returns early
         above -- so an owner that is still "active" here implies direct database
-        tampering, which this check exists to catch. A future-shifted
-        taken_over_at instead fails closed: it can only make the caller's own
-        lease look expired in _require_exact_active_session and refuse the
-        takeover.
+        tampering, which this check exists to catch. That argument holds only
+        for timestamps drawn from one trustworthy clock: every session timestamp
+        is caller-supplied, so a caller that future-dates started_at can start a
+        successor over a genuinely live predecessor and then take over within
+        its invented lease. Nothing store-side can distinguish an honest clock
+        from a lying one; the store's guarantee is ordering and exclusivity, not
+        wall-time truth.
         """
 
         _require_aware_timestamp(taken_over_at, field_name="taken_over_at")

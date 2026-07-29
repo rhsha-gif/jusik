@@ -2757,6 +2757,26 @@ class PaperStateStore:
         self._validate_session_provenance(session)
         return session
 
+    def require_active_paper_execution_session(
+        self,
+        session: PaperExecutionSession,
+        *,
+        checked_at: datetime,
+    ) -> PaperExecutionSession:
+        """Re-assert that this exact session still holds the fence.
+
+        The submission coordinator calls this immediately before a broker POST,
+        where a stale read would let two processes both believe they hold the
+        sole-POST authority. Taking the same IMMEDIATE transaction as every other
+        fenced mutation serializes the check against a concurrent takeover; the
+        ownership, status and lease rules themselves are the ones already applied
+        wherever a session guards a write.
+        """
+
+        _require_aware_timestamp(checked_at, field_name="checked_at")
+        with self._transaction():
+            return self._require_exact_active_session(session, checked_at=checked_at)
+
     def list_paper_execution_sessions(self) -> list[PaperExecutionSession]:
         rows = self._connection.execute(
             """

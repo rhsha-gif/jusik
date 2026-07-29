@@ -1748,3 +1748,37 @@ def test_dispatch_model_and_schema_store_no_raw_secrets_or_account_id(tmp_path) 
     assert datetime.fromisoformat(
         dispatch_payload["submission_evidence_expires_at"].replace("Z", "+00:00")
     ) == NOW + timedelta(minutes=9)
+
+
+def test_require_active_paper_execution_session_guards_the_pre_post_fence(tmp_path) -> None:
+    """The submission coordinator re-checks the fence just before a broker POST.
+
+    It has to reject an expired lease and a superseded predecessor, because both
+    mean some other process may now hold the sole-POST authority.
+    """
+
+    path = tmp_path / "session-fence.sqlite3"
+    with _paper_store(path) as store:
+        session = _session(store, started_at=NOW, lease_expires_at=NOW + timedelta(minutes=5))
+
+        assert (
+            store.require_active_paper_execution_session(
+                session, checked_at=NOW + timedelta(minutes=1)
+            )
+            == session
+        )
+
+        with pytest.raises(PaperStateConflictError, match="lease is not active"):
+            store.require_active_paper_execution_session(
+                session, checked_at=NOW + timedelta(minutes=5)
+            )
+
+        successor = store.start_paper_execution_session(
+            started_at=NOW + timedelta(minutes=6),
+            lease_expires_at=NOW + timedelta(minutes=20),
+        )
+        assert successor.fencing_token > session.fencing_token
+        with pytest.raises(PaperStateConflictError):
+            store.require_active_paper_execution_session(
+                session, checked_at=NOW + timedelta(minutes=7)
+            )

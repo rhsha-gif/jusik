@@ -205,9 +205,26 @@ class DurablePaperSubmissionCoordinator:
 
             write_at = self._strictly_later(now, dispatch.updated_at)
             if dispatch.status == "prepared":
+                current = dispatch
+                # A row left behind by a dead predecessor still carries its fence,
+                # and the event guard delta is computed per session -- so writing
+                # the terminal event under this session without rebinding first
+                # produces a stream the reducer reads as corrupt. Rebind exactly
+                # as the kill path does; the store refuses the takeover unless the
+                # row is still unattempted and its owner's lease is really gone.
+                if (
+                    current.session_id != self._session.session_id
+                    or current.fencing_token != self._session.fencing_token
+                ):
+                    current = self._store.takeover_prepared_paper_order_dispatch(
+                        current.order_plan_id,
+                        session=self._session,
+                        taken_over_at=write_at,
+                    )
+                    write_at = self._strictly_later(self._now(), current.updated_at)
                 expired.append(
                     self._terminal_pre_dispatch(
-                        dispatch,
+                        current,
                         status="expired_pre_dispatch",
                         error_code=error_code,
                         at=write_at,

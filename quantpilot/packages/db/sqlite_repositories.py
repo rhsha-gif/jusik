@@ -3410,7 +3410,21 @@ class PaperStateStore:
         session: PaperExecutionSession,
         taken_over_at: datetime,
     ) -> PaperOrderDispatch:
-        """Rebind only an unattempted prepared row from an expired predecessor."""
+        """Rebind only an unattempted prepared row from an expired predecessor.
+
+        taken_over_at serves two roles here: it advances durable state, and the
+        owner-liveness comparison below reads it as "now". Callers derive it via
+        _strictly_later(now, row.updated_at), so it can lead real time -- but
+        that cannot resurrect a live predecessor through this API. Reaching the
+        owner check at all requires the caller's session to be active, the store
+        admits one active session per store, starting a successor atomically
+        abandons the predecessor, and a same-session takeover returns early
+        above -- so an owner that is still "active" here implies direct database
+        tampering, which this check exists to catch. A future-shifted
+        taken_over_at instead fails closed: it can only make the caller's own
+        lease look expired in _require_exact_active_session and refuse the
+        takeover.
+        """
 
         _require_aware_timestamp(taken_over_at, field_name="taken_over_at")
         session = PaperExecutionSession.model_validate(session.model_dump())

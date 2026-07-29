@@ -2765,12 +2765,17 @@ class PaperStateStore:
     ) -> PaperExecutionSession:
         """Re-assert that this exact session still holds the fence.
 
-        The submission coordinator calls this immediately before a broker POST,
-        where a stale read would let two processes both believe they hold the
-        sole-POST authority. Taking the same IMMEDIATE transaction as every other
-        fenced mutation serializes the check against a concurrent takeover; the
-        ownership, status and lease rules themselves are the ones already applied
-        wherever a session guards a write.
+        The submission coordinator calls this immediately before a broker POST.
+        IMMEDIATE serializes the read itself against a concurrent takeover or
+        lease mutation, which a deferred snapshot would not; it does not close
+        the gap between this check and the POST, because it commits first.
+        Nothing here can -- that interval is covered by the durable claim, the
+        fencing token and idempotency, not by a lock.
+
+        Call this only outside a transaction. sqlite3 cannot nest one on a
+        connection, so an inner call raises OperationalError rather than the
+        PaperStateConflictError a caller would expect; the 12 in-transaction
+        guard sites use _require_exact_active_session directly for that reason.
         """
 
         _require_aware_timestamp(checked_at, field_name="checked_at")

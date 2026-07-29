@@ -25,13 +25,14 @@ local_data/
 # in Obsidian is supported.
 .obsidian/
 
-# Knowledge vault. The chapter notes under quantpilot-foundation/60-book-notes/
-# are original prose, but they are derived chapter by chapter from three
-# commercially published books, so the vault stays local and is never pushed to
-# GitHub. It keeps its own integrity mechanism -- 00-governance/release-manifest.md
-# hashes every file and tools/validate_vault.py enforces it -- so leaving it
-# untracked costs no verifiability. See docs/vault_book_ingestion_runbook.md.
+# Knowledge vault and its meta layer. The notes are original prose but are
+# derived chapter by chapter from three commercially published books, so both
+# folders stay local and are never pushed to GitHub. The vault holds only
+# knowledge notes for Obsidian; the meta folder holds the retired governance,
+# registry, validator, and original-note layers split out on 2026-07-30.
+# See docs/vault_book_ingestion_runbook.md.
 quantpilot-foundation/
+quantpilot-foundation-meta/
 
 # The owner-designated book PDFs live outside this repository entirely, at
 # ~/.local/qp-private-sources, so that neither git history nor OneDrive sync ever

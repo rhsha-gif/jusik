@@ -1,11 +1,12 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { apiFetch, ApiError } from "@/lib/api";
+import { apiFetch, ApiError, setOperatorToken } from "@/lib/api";
 import { clearActivity, getActivityEntries } from "@/lib/activity-log";
 
 describe("apiFetch", () => {
   beforeEach(() => {
     clearActivity();
     localStorage.clear();
+    setOperatorToken("");
   });
 
   afterEach(() => {
@@ -64,5 +65,27 @@ describe("apiFetch", () => {
     }
 
     expect(getActivityEntries()[0].status).toBeNull();
+  });
+
+  it("sends the in-memory bearer token on mutations but not GET requests", async () => {
+    const fetchMock = vi.fn().mockResolvedValue(
+      new Response(JSON.stringify({ status: "ok" }), {
+        status: 200,
+        headers: { "Content-Type": "application/json" },
+      }),
+    );
+    vi.stubGlobal("fetch", fetchMock);
+    const storageSetSpy = vi.spyOn(Storage.prototype, "setItem");
+
+    setOperatorToken("operator-secret");
+    await apiFetch("/api/policies/confirm", { method: "POST", body: { policy_id: "x" } });
+    await apiFetch("/api/health");
+
+    expect(fetchMock.mock.calls[0][1]?.headers).toMatchObject({
+      Authorization: "Bearer operator-secret",
+      "Content-Type": "application/json",
+    });
+    expect(fetchMock.mock.calls[1][1]?.headers).toBeUndefined();
+    expect(storageSetSpy).not.toHaveBeenCalled();
   });
 });

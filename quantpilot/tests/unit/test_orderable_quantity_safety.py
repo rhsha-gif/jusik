@@ -201,7 +201,9 @@ def test_external_whole_share_planner_caps_sell_to_orderable_quantity() -> None:
 
 def test_professional_exit_caps_to_orderable_while_attribution_uses_holding(
     tmp_path,
+    monkeypatch: pytest.MonkeyPatch,
 ) -> None:
+    monkeypatch.setenv("FULLY_AUTOMATED_OPERATOR_ENABLED", "true")
     policy = UserPolicy(
         execution_mode=ExecutionMode.fully_automated,
         broker=BrokerMode.mock,

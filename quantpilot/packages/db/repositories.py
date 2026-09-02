@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from copy import deepcopy
+from threading import RLock
 from typing import Callable, Generic, Protocol, TypeVar
 
 from pydantic import BaseModel
@@ -38,6 +39,8 @@ class RepositoryInterface(Protocol[T]):
 
     def update(self, item: T) -> T: ...
 
+    def compare_and_update_status(self, item: T, *, expected_status: object) -> T | None: ...
+
     def clear(self) -> None: ...
 
 
@@ -49,6 +52,7 @@ class InMemoryRepository(Generic[T]):
     def __init__(self, id_getter: Callable[[T], str]) -> None:
         self._id_getter = id_getter
         self._items: dict[str, T] = {}
+        self._lock = RLock()
 
     @staticmethod
     def _snapshot(item: T) -> T:
@@ -59,14 +63,16 @@ class InMemoryRepository(Generic[T]):
     def add(self, item: T) -> T:
         stored = self._snapshot(item)
         item_id = self._id_getter(stored)
-        if item_id in self._items:
-            raise RepositoryError(f"duplicate id: {item_id}")
-        self._items[item_id] = stored
-        return self._snapshot(stored)
+        with self._lock:
+            if item_id in self._items:
+                raise RepositoryError(f"duplicate id: {item_id}")
+            self._items[item_id] = stored
+            return self._snapshot(stored)
 
     def get(self, item_id: str) -> T | None:
-        item = self._items.get(item_id)
-        return None if item is None else self._snapshot(item)
+        with self._lock:
+            item = self._items.get(item_id)
+            return None if item is None else self._snapshot(item)
 
     def require(self, item_id: str) -> T:
         item = self.get(item_id)
@@ -75,18 +81,38 @@ class InMemoryRepository(Generic[T]):
         return item
 
     def list(self) -> list[T]:
-        return [self._snapshot(item) for item in self._items.values()]
+        with self._lock:
+            return [self._snapshot(item) for item in self._items.values()]
 
     def update(self, item: T) -> T:
         stored = self._snapshot(item)
         item_id = self._id_getter(stored)
-        if item_id not in self._items:
-            raise RepositoryError(f"cannot update missing item: {item_id}")
-        self._items[item_id] = stored
-        return self._snapshot(stored)
+        with self._lock:
+            if item_id not in self._items:
+                raise RepositoryError(f"cannot update missing item: {item_id}")
+            self._items[item_id] = stored
+            return self._snapshot(stored)
+
+    def compare_and_update_status(
+        self,
+        item: T,
+        *,
+        expected_status: object,
+    ) -> T | None:
+        stored = self._snapshot(item)
+        item_id = self._id_getter(stored)
+        with self._lock:
+            current = self._items.get(item_id)
+            if current is None:
+                raise RepositoryError(f"cannot update missing item: {item_id}")
+            if getattr(current, "status", None) != expected_status:
+                return None
+            self._items[item_id] = stored
+            return self._snapshot(stored)
 
     def clear(self) -> None:
-        self._items.clear()
+        with self._lock:
+            self._items.clear()
 
 
 class RepositoryRegistry:

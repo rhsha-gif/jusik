@@ -17,7 +17,7 @@ from quantpilot.packages.core.execution.reducer import (
     join_correlated_execution_projections,
     replay_paper_execution_events,
 )
-from quantpilot.packages.core.kis_paper import KisPaperClient
+from quantpilot.packages.core.kis_paper import KisPaperClient, StrictUrllibKisPaperTransport
 from quantpilot.packages.core.operator.position_ledger import (
     PaperCancelRequest,
     PaperDispatchFillEvidence,
@@ -1280,11 +1280,15 @@ def test_restart_shadow_rebuild_is_read_only_and_has_zero_broker_authority(
         "get_daily_orders_and_fills",
         "get_cancelable_orders",
         "get_buying_power",
-        "place_limit_cash_order",
         "cancel_full_remaining_order",
     )
     for name in broker_methods:
         monkeypatch.setattr(KisPaperClient, name, broker_call_forbidden)
+    monkeypatch.setattr(
+        StrictUrllibKisPaperTransport,
+        "request_json",
+        broker_call_forbidden,
+    )
 
     with paper_store(path) as reopened:
         changes_before = reopened._connection.total_changes  # noqa: SLF001

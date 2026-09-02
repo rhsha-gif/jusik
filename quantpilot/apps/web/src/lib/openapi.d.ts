@@ -966,7 +966,7 @@ export interface components {
          * DataMode
          * @enum {string}
          */
-        DataMode: "fixture" | "local_historical" | "external_historical" | "realtime_market_data" | "paper_trading" | "live_trading";
+        DataMode: "fixture" | "local_historical" | "external_historical" | "realtime_market_data" | "paper_trading" | "live_trading" | "live_trading_candidate" | "live_canary" | "live_scaled";
         /** EvidenceFreshness */
         EvidenceFreshness: {
             /**
@@ -1019,6 +1019,12 @@ export interface components {
             status: string;
             /** Live Trading Enabled */
             live_trading_enabled: boolean;
+            /** Market Orders Enabled */
+            market_orders_enabled: boolean;
+            /** Guarded Autopilot Enabled */
+            guarded_autopilot_enabled: boolean;
+            /** Fully Automated Operator Enabled */
+            fully_automated_operator_enabled: boolean;
             /** Default Broker */
             default_broker: string;
             /** Data Mode */
@@ -1112,7 +1118,7 @@ export interface components {
         /** OperatorDecision */
         OperatorDecision: {
             /** Decision Id */
-            decision_id?: string;
+            decision_id: string;
             /** Run Id */
             run_id: string;
             /** Policy Id */
@@ -1120,9 +1126,9 @@ export interface components {
             /** Policy Version */
             policy_version: number;
             /** Strategy Id */
-            strategy_id?: string | null;
+            strategy_id: string | null;
             /** Order Plan Id */
-            order_plan_id?: string | null;
+            order_plan_id: string | null;
             /**
              * Action
              * @enum {string}
@@ -1131,12 +1137,12 @@ export interface components {
             /** Reason */
             reason: string;
             /** Risk Check Id */
-            risk_check_id?: string | null;
+            risk_check_id: string | null;
             /**
              * Created At
              * Format: date-time
              */
-            created_at?: string;
+            created_at: string;
         };
         /**
          * OperatorNotification
@@ -1183,7 +1189,7 @@ export interface components {
         /** OperatorReport */
         OperatorReport: {
             /** Report Id */
-            report_id?: string;
+            report_id: string;
             /** Run Id */
             run_id: string;
             /** User Id */
@@ -1210,15 +1216,15 @@ export interface components {
             strategy_selection: components["schemas"]["StrategySelectionDecision"];
             /** Decisions */
             decisions: components["schemas"]["OperatorDecision"][];
-            fallback?: components["schemas"]["FallbackDecision"] | null;
+            fallback: components["schemas"]["FallbackDecision"] | null;
             /** Order Plan Ids */
-            order_plan_ids?: string[];
+            order_plan_ids: string[];
             /** Broker Order Ids */
-            broker_order_ids?: string[];
+            broker_order_ids: string[];
             /** Risk Check Ids */
-            risk_check_ids?: string[];
+            risk_check_ids: string[];
             /** Safety Flags */
-            safety_flags?: {
+            safety_flags: {
                 [key: string]: boolean | string;
             };
             /**
@@ -1267,10 +1273,10 @@ export interface components {
              */
             status: "completed" | "blocked" | "fallback" | "failed";
             /** Submitted Order Plan Ids */
-            submitted_order_plan_ids?: string[];
+            submitted_order_plan_ids: string[];
             /** Blocked Order Plan Ids */
-            blocked_order_plan_ids?: string[];
-            fallback?: components["schemas"]["FallbackDecision"] | null;
+            blocked_order_plan_ids: string[];
+            fallback: components["schemas"]["FallbackDecision"] | null;
             report: components["schemas"]["OperatorReport"];
         };
         /** OrderIntent */
@@ -2406,7 +2412,9 @@ export interface operations {
     run_smoke_api_harness_run_smoke_post: {
         parameters: {
             query?: never;
-            header?: never;
+            header?: {
+                authorization?: string | null;
+            };
             path?: never;
             cookie?: never;
         };
@@ -2421,6 +2429,15 @@ export interface operations {
                     "application/json": {
                         [key: string]: unknown;
                     };
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
                 };
             };
         };
@@ -2463,7 +2480,9 @@ export interface operations {
     parse_policy_api_policies_parse_post: {
         parameters: {
             query?: never;
-            header?: never;
+            header?: {
+                authorization?: string | null;
+            };
             path?: never;
             cookie?: never;
         };
@@ -2496,7 +2515,9 @@ export interface operations {
     confirm_policy_api_policies_confirm_post: {
         parameters: {
             query?: never;
-            header?: never;
+            header?: {
+                authorization?: string | null;
+            };
             path?: never;
             cookie?: never;
         };
@@ -2529,7 +2550,9 @@ export interface operations {
     run_level_1_2_api_level_1_2_run_post: {
         parameters: {
             query?: never;
-            header?: never;
+            header?: {
+                authorization?: string | null;
+            };
             path?: never;
             cookie?: never;
         };
@@ -2564,7 +2587,9 @@ export interface operations {
     run_level_1_2_mock_execute_api_level_1_2_mock_execute_post: {
         parameters: {
             query?: never;
-            header?: never;
+            header?: {
+                authorization?: string | null;
+            };
             path?: never;
             cookie?: never;
         };
@@ -2619,7 +2644,9 @@ export interface operations {
     research_universe_api_research_universe_post: {
         parameters: {
             query?: never;
-            header?: never;
+            header?: {
+                authorization?: string | null;
+            };
             path?: never;
             cookie?: never;
         };
@@ -2654,7 +2681,9 @@ export interface operations {
     analyst_reports_api_research_analyst_post: {
         parameters: {
             query?: never;
-            header?: never;
+            header?: {
+                authorization?: string | null;
+            };
             path?: never;
             cookie?: never;
         };
@@ -2689,7 +2718,9 @@ export interface operations {
     signal_board_api_signals_board_post: {
         parameters: {
             query?: never;
-            header?: never;
+            header?: {
+                authorization?: string | null;
+            };
             path?: never;
             cookie?: never;
         };
@@ -2724,7 +2755,9 @@ export interface operations {
     rebalance_suggestions_api_portfolio_rebalance_suggestions_post: {
         parameters: {
             query?: never;
-            header?: never;
+            header?: {
+                authorization?: string | null;
+            };
             path?: never;
             cookie?: never;
         };
@@ -2759,7 +2792,9 @@ export interface operations {
     research_signal_daily_report_api_reports_research_signal_daily_post: {
         parameters: {
             query?: never;
-            header?: never;
+            header?: {
+                authorization?: string | null;
+            };
             path?: never;
             cookie?: never;
         };
@@ -2794,7 +2829,9 @@ export interface operations {
     run_signals_api_signals_run_post: {
         parameters: {
             query?: never;
-            header?: never;
+            header?: {
+                authorization?: string | null;
+            };
             path?: never;
             cookie?: never;
         };
@@ -2809,12 +2846,23 @@ export interface operations {
                     "application/json": components["schemas"]["Signal"][];
                 };
             };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
         };
     };
     create_portfolio_plan_api_portfolio_plan_post: {
         parameters: {
             query?: never;
-            header?: never;
+            header?: {
+                authorization?: string | null;
+            };
             path?: never;
             cookie?: never;
         };
@@ -2847,7 +2895,9 @@ export interface operations {
     create_order_plans_api_orders_plan_post: {
         parameters: {
             query?: never;
-            header?: never;
+            header?: {
+                authorization?: string | null;
+            };
             path?: never;
             cookie?: never;
         };
@@ -2880,7 +2930,9 @@ export interface operations {
     generate_order_proposals_api_orders_generate_proposals_post: {
         parameters: {
             query?: never;
-            header?: never;
+            header?: {
+                authorization?: string | null;
+            };
             path?: never;
             cookie?: never;
         };
@@ -2933,7 +2985,9 @@ export interface operations {
     approve_order_api_orders__order_plan_id__approve_post: {
         parameters: {
             query?: never;
-            header?: never;
+            header?: {
+                authorization?: string | null;
+            };
             path: {
                 order_plan_id: string;
             };
@@ -2964,7 +3018,9 @@ export interface operations {
     reject_order_api_orders__order_plan_id__reject_post: {
         parameters: {
             query?: never;
-            header?: never;
+            header?: {
+                authorization?: string | null;
+            };
             path: {
                 order_plan_id: string;
             };
@@ -2999,7 +3055,9 @@ export interface operations {
     modify_order_api_orders__order_plan_id__modify_post: {
         parameters: {
             query?: never;
-            header?: never;
+            header?: {
+                authorization?: string | null;
+            };
             path: {
                 order_plan_id: string;
             };
@@ -3034,7 +3092,9 @@ export interface operations {
     submit_order_api_orders__order_plan_id__submit_post: {
         parameters: {
             query?: never;
-            header?: never;
+            header?: {
+                authorization?: string | null;
+            };
             path: {
                 order_plan_id: string;
             };
@@ -3100,7 +3160,9 @@ export interface operations {
     guarded_run_once_api_autopilot_guarded_run_once_post: {
         parameters: {
             query?: never;
-            header?: never;
+            header?: {
+                authorization?: string | null;
+            };
             path?: never;
             cookie?: never;
         };
@@ -3135,7 +3197,9 @@ export interface operations {
     pause_guarded_api_autopilot_guarded_pause_post: {
         parameters: {
             query?: never;
-            header?: never;
+            header?: {
+                authorization?: string | null;
+            };
             path?: never;
             cookie?: never;
         };
@@ -3170,7 +3234,9 @@ export interface operations {
     resume_guarded_api_autopilot_guarded_resume_post: {
         parameters: {
             query?: never;
-            header?: never;
+            header?: {
+                authorization?: string | null;
+            };
             path?: never;
             cookie?: never;
         };
@@ -3205,7 +3271,9 @@ export interface operations {
     kill_switch_api_autopilot_kill_switch_post: {
         parameters: {
             query?: never;
-            header?: never;
+            header?: {
+                authorization?: string | null;
+            };
             path?: never;
             cookie?: never;
         };
@@ -3240,7 +3308,9 @@ export interface operations {
     release_kill_switch_api_autopilot_kill_switch_release_post: {
         parameters: {
             query?: never;
-            header?: never;
+            header?: {
+                authorization?: string | null;
+            };
             path?: never;
             cookie?: never;
         };
@@ -3297,7 +3367,9 @@ export interface operations {
     generate_approval_tickets_api_execution_approval_tickets_generate_post: {
         parameters: {
             query?: never;
-            header?: never;
+            header?: {
+                authorization?: string | null;
+            };
             path?: never;
             cookie?: never;
         };
@@ -3350,7 +3422,9 @@ export interface operations {
     approve_and_submit_approval_ticket_api_execution_approval_tickets__ticket_id__approve_and_submit_post: {
         parameters: {
             query?: never;
-            header?: never;
+            header?: {
+                authorization?: string | null;
+            };
             path: {
                 ticket_id: string;
             };
@@ -3387,7 +3461,9 @@ export interface operations {
     reject_approval_ticket_api_execution_approval_tickets__ticket_id__reject_post: {
         parameters: {
             query?: never;
-            header?: never;
+            header?: {
+                authorization?: string | null;
+            };
             path: {
                 ticket_id: string;
             };
@@ -3422,7 +3498,9 @@ export interface operations {
     create_strategy_ticket_api_execution_strategy_tickets_create_post: {
         parameters: {
             query?: never;
-            header?: never;
+            header?: {
+                authorization?: string | null;
+            };
             path?: never;
             cookie?: never;
         };
@@ -3509,7 +3587,9 @@ export interface operations {
     approve_strategy_ticket_api_execution_strategy_tickets__ticket_id__approve_post: {
         parameters: {
             query?: never;
-            header?: never;
+            header?: {
+                authorization?: string | null;
+            };
             path: {
                 ticket_id: string;
             };
@@ -3544,7 +3624,9 @@ export interface operations {
     reject_strategy_ticket_api_execution_strategy_tickets__ticket_id__reject_post: {
         parameters: {
             query?: never;
-            header?: never;
+            header?: {
+                authorization?: string | null;
+            };
             path: {
                 ticket_id: string;
             };
@@ -3579,7 +3661,9 @@ export interface operations {
     revoke_strategy_ticket_api_execution_strategy_tickets__ticket_id__revoke_post: {
         parameters: {
             query?: never;
-            header?: never;
+            header?: {
+                authorization?: string | null;
+            };
             path: {
                 ticket_id: string;
             };
@@ -3614,7 +3698,9 @@ export interface operations {
     record_strategy_performance_api_execution_strategy_performance_post: {
         parameters: {
             query?: never;
-            header?: never;
+            header?: {
+                authorization?: string | null;
+            };
             path?: never;
             cookie?: never;
         };
@@ -3647,7 +3733,9 @@ export interface operations {
     refresh_strategy_performance_api_execution_strategy_performance_refresh_post: {
         parameters: {
             query?: never;
-            header?: never;
+            header?: {
+                authorization?: string | null;
+            };
             path?: never;
             cookie?: never;
         };
@@ -3662,12 +3750,23 @@ export interface operations {
                     "application/json": components["schemas"]["StrategyPerformanceRecord"][];
                 };
             };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
         };
     };
     create_strategy_draft_api_strategy_studio_draft_post: {
         parameters: {
             query?: never;
-            header?: never;
+            header?: {
+                authorization?: string | null;
+            };
             path?: never;
             cookie?: never;
         };
@@ -3731,7 +3830,9 @@ export interface operations {
     validate_strategy_draft_api_strategy_studio_drafts__draft_id__validate_post: {
         parameters: {
             query?: never;
-            header?: never;
+            header?: {
+                authorization?: string | null;
+            };
             path: {
                 draft_id: string;
             };
@@ -3795,7 +3896,9 @@ export interface operations {
     acknowledge_notification_api_notifications__notification_id__acknowledge_post: {
         parameters: {
             query?: never;
-            header?: never;
+            header?: {
+                authorization?: string | null;
+            };
             path: {
                 notification_id: string;
             };
@@ -3826,7 +3929,9 @@ export interface operations {
     operator_run_once_api_operator_run_once_post: {
         parameters: {
             query?: never;
-            header?: never;
+            header?: {
+                authorization?: string | null;
+            };
             path?: never;
             cookie?: never;
         };
@@ -3923,7 +4028,9 @@ export interface operations {
     daily_report_api_reports_daily_post: {
         parameters: {
             query?: never;
-            header?: never;
+            header?: {
+                authorization?: string | null;
+            };
             path?: never;
             cookie?: never;
         };

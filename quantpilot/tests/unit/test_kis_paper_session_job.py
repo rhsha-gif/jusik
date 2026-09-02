@@ -26,7 +26,11 @@ from quantpilot.packages.core.execution.paper_reconciliation import (
 from quantpilot.packages.core.execution.paper_reconciliation_apply import (
     PaperReconciliationApplyResult,
 )
-from quantpilot.packages.core.kis_paper import KisBalanceResult, KisBalanceSummary
+from quantpilot.packages.core.kis_paper import (
+    KisBalanceResult,
+    KisBalanceSummary,
+    paper_account_scope_fingerprint,
+)
 from quantpilot.packages.core.schemas import (
     BrokerMode,
     ExecutionMode,
@@ -55,6 +59,10 @@ NOW = datetime(2026, 7, 10, 1, 0, tzinfo=timezone.utc)
 
 def _enabled_environment(tmp_path) -> dict[str, str]:
     return {
+        "QUANTPILOT_RUNTIME_ROLE": "paper-session",
+        "KIS_PAPER_ACCOUNT_FINGERPRINT_ALLOWLIST": (
+            paper_account_scope_fingerprint("12345678", "01")
+        ),
         "KIS_PAPER_SESSION_ENABLED": "true",
         "KIS_PAPER_ORDER_SUBMISSION_ENABLED": "true",
         "FULLY_AUTOMATED_OPERATOR_ENABLED": "true",
@@ -73,6 +81,38 @@ def _enabled_environment(tmp_path) -> dict[str, str]:
         "KIS_PAPER_PRODUCT_CODE": "01",
         "KIS_PAPER_ACCESS_TOKEN": "secret-access-token",
     }
+
+
+@pytest.mark.parametrize(
+    ("removed", "reason"),
+    [
+        ("QUANTPILOT_RUNTIME_ROLE", "paper_session_runtime_role_required"),
+        (
+            "KIS_PAPER_ACCOUNT_FINGERPRINT_ALLOWLIST",
+            "paper_account_fingerprint_allowlist_required",
+        ),
+    ],
+)
+def test_paper_session_requires_role_and_fingerprint_allowlist(
+    tmp_path,
+    removed: str,
+    reason: str,
+) -> None:
+    environment = _enabled_environment(tmp_path)
+    environment.pop(removed)
+
+    assert paper_session_gate_reason(environment) == reason
+
+
+def test_paper_session_rejects_account_outside_fingerprint_allowlist(tmp_path) -> None:
+    environment = _enabled_environment(tmp_path)
+    environment["KIS_PAPER_ACCOUNT_FINGERPRINT_ALLOWLIST"] = "sha256:" + "f" * 64
+
+    with pytest.raises(
+        PaperSessionError,
+        match="^paper_account_fingerprint_not_allowlisted$",
+    ):
+        KisPaperSessionConfig.from_environment(environment)
 
 
 def _policy() -> UserPolicy:

@@ -1284,14 +1284,16 @@ class HarnessService:
             )
         return risk_check
 
-    def approve_order_plan(self, order_plan_id: str) -> OrderPlan:
+    def approve_order_plan(self, order_plan_id: str, *, approved_by: str | None = None) -> OrderPlan:
         order_plan = self.repositories.order_plans.require(order_plan_id)
         policy = self.repositories.policies.require(order_plan.policy_id)
+        actor_id = approved_by or policy.user_id
+        order_plan.approved_by = actor_id
         transition_order_plan(
             order_plan=order_plan,
             new_status=OrderStatus.user_approved,
             audit=self.audit,
-            user_id=policy.user_id,
+            user_id=actor_id,
             source="user_approval",
             action="proposal_approved",
         )
@@ -3032,15 +3034,28 @@ class HarnessService:
         if final_safety_failures:
             fail_final_submission(final_safety_failures)
 
-        broker = self._broker_for_policy(policy)
-        transition_order_plan(
-            order_plan=order_plan,
-            new_status=OrderStatus.submitted,
-            audit=self.audit,
+        before_submit = order_plan.model_copy(deep=True)
+        order_plan.status = OrderStatus.submitted
+        order_plan.updated_at = utc_now()
+        claimed_order_plan = self.repositories.order_plans.compare_and_update_status(
+            order_plan,
+            expected_status=OrderStatus.user_approved,
+        )
+        if claimed_order_plan is None:
+            raise ApprovalRequired(
+                "an executable order must be in user_approved state"
+            )
+        order_plan = claimed_order_plan
+        self.audit.emit(
             user_id=policy.user_id,
+            entity_type="order_plan",
+            entity_id=order_plan.order_plan_id,
+            action="order_submitted",
+            before_state=before_submit,
+            after_state=order_plan,
             source="execution_service",
         )
-        self.repositories.order_plans.update(order_plan)
+        broker = self._broker_for_policy(policy)
         if before_broker_submit is not None:
             try:
                 before_broker_submit(order_plan.model_copy(deep=True))
@@ -3561,7 +3576,15 @@ class HarnessService:
         return report
 
     def run_smoke(self, *, user_id: str = "fixture-user") -> dict[str, object]:
-        self.repositories.clear()
+        smoke_service = HarnessService(
+            RepositoryRegistry(),
+            security_provider=self.security_provider,
+            market_data_provider=self.market_data_provider,
+            data_mode=self.data_mode,
+        )
+        return smoke_service._run_smoke_in_place(user_id=user_id)
+
+    def _run_smoke_in_place(self, *, user_id: str) -> dict[str, object]:
         policy = self.parse_policy(DEFAULT_POLICY_TEXT, user_id=user_id)
         self.confirm_policy(policy.policy_id)
         signals = self.run_signals()

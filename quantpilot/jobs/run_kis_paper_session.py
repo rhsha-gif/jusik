@@ -36,7 +36,11 @@ from quantpilot.packages.core.execution.paper_submission import (
     DurablePaperSubmissionCoordinator,
 )
 from quantpilot.packages.core.harness_service import HarnessService
-from quantpilot.packages.core.kis_paper import KisPaperClient, KisPaperConfig
+from quantpilot.packages.core.kis_paper import (
+    KisPaperClient,
+    KisPaperConfig,
+    paper_account_scope_fingerprint,
+)
 from quantpilot.packages.core.marketdata.kis_paper import (
     KisPaperMarketDataProvider,
 )
@@ -90,6 +94,8 @@ from quantpilot.packages.db.sqlite_repositories import PaperStateStore
 
 KST = ZoneInfo("Asia/Seoul")
 _MAX_POLICY_BYTES = 1_000_000
+_PAPER_RUNTIME_ROLE = "paper-session"
+_ACCOUNT_FINGERPRINT_ALLOWLIST_ENV = "KIS_PAPER_ACCOUNT_FINGERPRINT_ALLOWLIST"
 _SAFE_CONTINUE_POSITION_STATUSES = {
     "no_action",
     "not_due",
@@ -153,6 +159,14 @@ class KisPaperSessionConfig:
             or not 60 <= lease_seconds <= 900
         ):
             raise PaperSessionError("paper_session_configuration_invalid")
+        fingerprint = paper_account_scope_fingerprint(account_number, product_code)
+        allowed_fingerprints = {
+            item.strip()
+            for item in env.get(_ACCOUNT_FINGERPRINT_ALLOWLIST_ENV, "").split(",")
+            if item.strip()
+        }
+        if fingerprint not in allowed_fingerprints:
+            raise PaperSessionError("paper_account_fingerprint_not_allowlisted")
         return cls(
             database_path=database_path,
             policy_path=policy_path,
@@ -200,6 +214,10 @@ class PaperSessionCycleResult:
 def paper_session_gate_reason(environment: Mapping[str, str]) -> str | None:
     if _flag(environment, "KIS_PAPER_SESSION_ENABLED") is not True:
         return "paper_session_disabled"
+    if environment.get("QUANTPILOT_RUNTIME_ROLE", "").strip() != _PAPER_RUNTIME_ROLE:
+        return "paper_session_runtime_role_required"
+    if not environment.get(_ACCOUNT_FINGERPRINT_ALLOWLIST_ENV, "").strip():
+        return "paper_account_fingerprint_allowlist_required"
     if _flag(environment, "KIS_PAPER_ORDER_SUBMISSION_ENABLED") is not True:
         return "paper_order_submission_gate_disabled"
     if _flag(environment, "FULLY_AUTOMATED_OPERATOR_ENABLED") is not True:

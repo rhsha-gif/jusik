@@ -1,6 +1,8 @@
 from __future__ import annotations
 
+from concurrent.futures import ThreadPoolExecutor
 from datetime import timedelta
+from threading import Barrier
 
 import pytest
 
@@ -141,3 +143,45 @@ def test_duplicate_idempotency_key_cannot_submit_twice() -> None:
 
     with pytest.raises(RiskCheckRequired):
         service.submit_order_plan(duplicate.order_plan_id)
+
+
+def test_concurrent_submit_claims_approved_order_exactly_once() -> None:
+    first_service, plan_id = _service_with_plan()
+    second_service = HarnessService(first_service.repositories)
+    proposal = first_service.generate_order_proposals(portfolio_plan_id=plan_id)[0]
+    first_service.approve_order_plan(proposal.order_plan_id)
+    ready_to_claim = Barrier(2)
+    original_compare_and_update = (
+        first_service.repositories.order_plans.compare_and_update_status
+    )
+
+    def synchronized_compare_and_update(item, *, expected_status):
+        ready_to_claim.wait(timeout=5)
+        return original_compare_and_update(item, expected_status=expected_status)
+
+    first_service.repositories.order_plans.compare_and_update_status = (  # type: ignore[method-assign]
+        synchronized_compare_and_update
+    )
+
+    def submit(service: HarnessService) -> str:
+        try:
+            service.submit_order_plan(proposal.order_plan_id)
+        except ApprovalRequired:
+            return "approval_required"
+        return "submitted"
+
+    with ThreadPoolExecutor(max_workers=2) as executor:
+        futures = [
+            executor.submit(submit, first_service),
+            executor.submit(submit, second_service),
+        ]
+        results = [future.result(timeout=10) for future in futures]
+
+    broker_orders = first_service.repositories.broker_orders.list()
+    fills = first_service.repositories.fills.list()
+    assert sorted(results) == ["approval_required", "submitted"]
+    assert len(broker_orders) == 1
+    assert len(fills) == 1
+    assert broker_orders[0].order_plan_id == proposal.order_plan_id
+    assert fills[0].order_plan_id == proposal.order_plan_id
+    assert first_service.repositories.order_plans.require(proposal.order_plan_id).status == OrderStatus.filled

@@ -16,7 +16,7 @@ from quantpilot.packages.core.portfolio.planner import fixture_portfolio_snapsho
 from quantpilot.packages.core.schemas import BrokerMode, ExecutionMode, PortfolioSnapshot, UserPolicy, utc_now
 from quantpilot.packages.core.strategies.promotion import load_lifecycle_fixture
 from quantpilot.packages.core.strategies.registry import StrategyRegistry, StrategyRegistryEntry
-from quantpilot.services.api.dependencies import get_operator_service
+from quantpilot.services.api.dependencies import get_operator_service, require_operator_actor
 from quantpilot.services.api.main import app
 
 
@@ -142,8 +142,8 @@ def test_level5_dry_run_creates_proposals_but_submits_nothing(operator_enabled: 
         assert service.repositories.order_plans.require(order_plan_id).status.value == "cancelled"
 
 
-def test_level5_policy_flag_alone_enables_run_without_env(monkeypatch: pytest.MonkeyPatch) -> None:
-    monkeypatch.delenv("FULLY_AUTOMATED_OPERATOR_ENABLED", raising=False)
+def test_level5_run_requires_env_and_policy_flags(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setenv("FULLY_AUTOMATED_OPERATOR_ENABLED", "true")
     monkeypatch.setattr(
         "quantpilot.packages.core.execution.state_machine.is_krx_auto_order_window",
         lambda now=None: True,
@@ -468,6 +468,7 @@ def test_level5_fixture_policy_and_registry_fall_back_to_level4(operator_enabled
 def test_operator_api_run_once_is_blocked_by_default() -> None:
     service = OperatorService(HarnessService())
     app.dependency_overrides[get_operator_service] = lambda: service
+    app.dependency_overrides[require_operator_actor] = lambda: "test-operator"
     try:
         response = TestClient(app).post(
             "/api/operator/run-once",

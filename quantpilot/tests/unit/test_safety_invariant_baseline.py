@@ -7,6 +7,10 @@ from __future__ import annotations
 
 import pytest
 
+from quantpilot.packages.core.execution.state_machine import (
+    fully_automated_operator_flag_enabled,
+    guarded_autopilot_flag_enabled,
+)
 from quantpilot.packages.core.harness_service import HarnessService
 from quantpilot.packages.core.portfolio.planner import fixture_portfolio_snapshot
 from quantpilot.packages.core.risk.gatekeeper import allowed_execution_modes, run_risk_check
@@ -64,6 +68,30 @@ def test_allowed_execution_modes_excludes_fully_automated_by_default(
     assert ExecutionMode.approval_required in modes
     assert ExecutionMode.paper_trading in modes
     assert ExecutionMode.guarded_autopilot in modes
+
+
+def test_policy_fields_alone_cannot_enable_automated_modes(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.delenv("GUARDED_AUTOPILOT_ENABLED", raising=False)
+    monkeypatch.delenv("FULLY_AUTOMATED_OPERATOR_ENABLED", raising=False)
+    policy = UserPolicy(
+        guarded_autopilot_enabled=True,
+        fully_automated_operator_enabled=True,
+    )
+
+    assert guarded_autopilot_flag_enabled(policy) is False
+    assert fully_automated_operator_flag_enabled(policy) is False
+    assert ExecutionMode.fully_automated not in allowed_execution_modes(policy)
+
+
+def test_environment_cannot_enable_level5_without_policy_consent(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setenv("FULLY_AUTOMATED_OPERATOR_ENABLED", "true")
+    policy = UserPolicy(fully_automated_operator_enabled=False)
+
+    assert fully_automated_operator_flag_enabled(policy) is False
 
 
 def test_risk_check_execution_mode_allowed_blocks_fully_automated_without_flag(

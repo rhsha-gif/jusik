@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import json
 import os
+import ssl
 import time
 import urllib.error
 import urllib.parse
@@ -23,6 +24,7 @@ from quantpilot.packages.core.data.quality import ExchangeCalendar, SimpleKrxCal
 
 KIS_DOMESTIC_DAILY_ENDPOINT = "/uapi/domestic-stock/v1/quotations/inquire-daily-itemchartprice"
 KIS_DOMESTIC_DAILY_TR_ID = "FHKST03010100"
+KIS_PRODUCTION_BASE_URL = "https://openapi.koreainvestment.com:9443"
 KIS_DAILY_BAR_ALIASES: dict[str, tuple[str, ...]] = {
     "symbol": ("symbol", "ticker", "pdno", "mksc_shrn_iscd"),
     "date": ("date", "stck_bsop_date"),
@@ -46,7 +48,57 @@ class JsonGetTransport(Protocol):
     ) -> dict[str, Any]: ...
 
 
+class _RejectRedirects(urllib.request.HTTPRedirectHandler):
+    def redirect_request(
+        self,
+        req: Any,
+        fp: Any,
+        code: int,
+        msg: str,
+        headers: Any,
+        newurl: str,
+    ) -> None:
+        return None
+
+
+def _require_historical_capability() -> None:
+    if os.environ.get("KIS_HISTORICAL_ENABLED", "false").strip().lower() != "true":
+        raise ProviderError(
+            "KIS historical transport requires KIS_HISTORICAL_ENABLED=true"
+        )
+
+
+def _validate_production_url(url: str, expected_path: str) -> None:
+    parsed = urllib.parse.urlsplit(url)
+    if (
+        parsed.scheme != "https"
+        or parsed.hostname != "openapi.koreainvestment.com"
+        or parsed.port != 9443
+        or parsed.username is not None
+        or parsed.password is not None
+        or parsed.path != expected_path
+        or parsed.fragment
+    ):
+        raise ProviderError(
+            "KIS historical transport is pinned to the production origin"
+        )
+
+
+def _strict_opener() -> urllib.request.OpenerDirector:
+    context = ssl.create_default_context()
+    context.minimum_version = ssl.TLSVersion.TLSv1_2
+    return urllib.request.build_opener(
+        urllib.request.ProxyHandler({}),
+        _RejectRedirects(),
+        urllib.request.HTTPSHandler(context=context),
+    )
+
+
 class UrllibJsonTransport:
+    def __init__(self) -> None:
+        _require_historical_capability()
+        self._opener = _strict_opener()
+
     def get_json(
         self,
         url: str,
@@ -55,10 +107,11 @@ class UrllibJsonTransport:
         params: dict[str, str],
         timeout_seconds: float,
     ) -> dict[str, Any]:
+        _validate_production_url(url, KIS_DOMESTIC_DAILY_ENDPOINT)
         query = urllib.parse.urlencode(params)
         request = urllib.request.Request(f"{url}?{query}", headers=headers, method="GET")
         try:
-            with urllib.request.urlopen(request, timeout=timeout_seconds) as response:
+            with self._opener.open(request, timeout=timeout_seconds) as response:
                 raw = response.read().decode("utf-8")
         except urllib.error.HTTPError as exc:
             raise ProviderError(f"KIS HTTP {exc.code}: {exc.reason}")
@@ -86,6 +139,10 @@ class JsonPostTransport(Protocol):
 
 
 class UrllibJsonPostTransport:
+    def __init__(self) -> None:
+        _require_historical_capability()
+        self._opener = _strict_opener()
+
     def post_json(
         self,
         url: str,
@@ -94,11 +151,12 @@ class UrllibJsonPostTransport:
         body: dict[str, Any],
         timeout_seconds: float,
     ) -> dict[str, Any]:
+        _validate_production_url(url, KIS_TOKEN_ENDPOINT)
         payload = json.dumps(body).encode("utf-8")
         merged_headers = {"content-type": "application/json", **headers}
         request = urllib.request.Request(url, data=payload, headers=merged_headers, method="POST")
         try:
-            with urllib.request.urlopen(request, timeout=timeout_seconds) as response:
+            with self._opener.open(request, timeout=timeout_seconds) as response:
                 raw = response.read().decode("utf-8")
         except urllib.error.HTTPError as exc:
             raise ProviderError(f"KIS HTTP {exc.code}: {exc.reason}")
@@ -129,7 +187,7 @@ def request_access_token(
     *,
     app_key: str,
     app_secret: str,
-    base_url: str = "https://openapi.koreainvestment.com:9443",
+    base_url: str = KIS_PRODUCTION_BASE_URL,
     transport: JsonPostTransport | None = None,
     timeout_seconds: float = 10.0,
 ) -> KisAccessToken:
@@ -142,6 +200,10 @@ def request_access_token(
         raise ProviderError("KIS app key is required")
     if not app_secret.strip():
         raise ProviderError("KIS app secret is required")
+    if transport is None and base_url.rstrip("/") != KIS_PRODUCTION_BASE_URL:
+        raise ProviderError(
+            "KIS historical token transport is pinned to the production origin"
+        )
     active_transport = transport or UrllibJsonPostTransport()
     response = active_transport.post_json(
         f"{base_url.rstrip('/')}{KIS_TOKEN_ENDPOINT}",
@@ -167,10 +229,11 @@ def request_access_token(
 def request_access_token_from_env(
     *, transport: JsonPostTransport | None = None
 ) -> KisAccessToken:
+    _require_historical_environment()
     return request_access_token(
         app_key=_required_env("KIS_APP_KEY"),
         app_secret=_required_env("KIS_APP_SECRET"),
-        base_url=_optional_env("KIS_BASE_URL", "https://openapi.koreainvestment.com:9443"),
+        base_url=KIS_PRODUCTION_BASE_URL,
         transport=transport,
     )
 
@@ -180,7 +243,7 @@ class KisOpenApiConfig:
     app_key: str
     app_secret: str
     access_token: str
-    base_url: str = "https://openapi.koreainvestment.com:9443"
+    base_url: str = KIS_PRODUCTION_BASE_URL
     customer_type: str = "P"
     timeout_seconds: float = 10.0
     max_retries: int = 2
@@ -202,6 +265,10 @@ class KisOpenApiHistoricalClient:
             raise ProviderError("KIS app secret is required")
         if not config.access_token.strip():
             raise ProviderError("KIS access token is required")
+        if transport is None and config.base_url.rstrip("/") != KIS_PRODUCTION_BASE_URL:
+            raise ProviderError(
+                "KIS historical transport is pinned to the production origin"
+            )
         self._config = config
         self._transport = transport or UrllibJsonTransport()
 
@@ -328,6 +395,14 @@ def _optional_env(name: str, default: str) -> str:
     return os.environ.get(name, default).strip() or default
 
 
+def _require_historical_environment() -> None:
+    _require_historical_capability()
+    if "KIS_BASE_URL" in os.environ:
+        raise ProviderError(
+            "KIS_BASE_URL override is forbidden for KIS historical access"
+        )
+
+
 def _env_bool(name: str, default: bool = False) -> bool:
     raw = os.environ.get(name)
     if raw is None or not raw.strip():
@@ -368,12 +443,13 @@ def _env_symbols() -> tuple[str, ...]:
 
 
 def build_kis_historical_client_from_env() -> KisOpenApiHistoricalClient:
+    _require_historical_environment()
     return KisOpenApiHistoricalClient(
         KisOpenApiConfig(
             app_key=_required_env("KIS_APP_KEY"),
             app_secret=_required_env("KIS_APP_SECRET"),
             access_token=_required_env("KIS_ACCESS_TOKEN"),
-            base_url=_optional_env("KIS_BASE_URL", "https://openapi.koreainvestment.com:9443"),
+            base_url=KIS_PRODUCTION_BASE_URL,
         )
     )
 

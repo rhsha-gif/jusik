@@ -27,15 +27,43 @@
       "post": {
         "summary": "Run Smoke",
         "operationId": "run_smoke_api_harness_run_smoke_post",
+        "parameters": [
+          {
+            "name": "authorization",
+            "in": "header",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Authorization"
+            }
+          }
+        ],
         "responses": {
           "200": {
             "description": "Successful Response",
             "content": {
               "application/json": {
                 "schema": {
-                  "additionalProperties": true,
                   "type": "object",
+                  "additionalProperties": true,
                   "title": "Response Run Smoke Api Harness Run Smoke Post"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
                 }
               }
             }
@@ -87,15 +115,33 @@
       "post": {
         "summary": "Parse Policy",
         "operationId": "parse_policy_api_policies_parse_post",
+        "parameters": [
+          {
+            "name": "authorization",
+            "in": "header",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Authorization"
+            }
+          }
+        ],
         "requestBody": {
+          "required": true,
           "content": {
             "application/json": {
               "schema": {
                 "$ref": "#/components/schemas/ParsePolicyRequest"
               }
             }
-          },
-          "required": true
+          }
         },
         "responses": {
           "200": {
@@ -125,15 +171,33 @@
       "post": {
         "summary": "Confirm Policy",
         "operationId": "confirm_policy_api_policies_confirm_post",
+        "parameters": [
+          {
+            "name": "authorization",
+            "in": "header",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Authorization"
+            }
+          }
+        ],
         "requestBody": {
+          "required": true,
           "content": {
             "application/json": {
               "schema": {
                 "$ref": "#/components/schemas/ConfirmPolicyRequest"
               }
             }
-          },
-          "required": true
+          }
         },
         "responses": {
           "200": {
@@ -163,15 +227,33 @@
       "post": {
         "summary": "Run Level 1 2",
         "operationId": "run_level_1_2_api_level_1_2_run_post",
+        "parameters": [
+          {
+            "name": "authorization",
+            "in": "header",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Authorization"
+            }
+          }
+        ],
         "requestBody": {
+          "required": true,
           "content": {
             "application/json": {
               "schema": {
                 "$ref": "#/components/schemas/Level12Request"
               }
             }
-          },
-          "required": true
+          }
         },
         "responses": {
           "200": {
@@ -179,8 +261,8 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "additionalProperties": true,
                   "type": "object",
+                  "additionalProperties": true,
                   "title": "Response Run Level 1 2 Api Level 1 2 Run Post"
                 }
               }
@@ -203,15 +285,33 @@
       "post": {
         "summary": "Run Level 1 2 Mock Execute",
         "operationId": "run_level_1_2_mock_execute_api_level_1_2_mock_execute_post",
+        "parameters": [
+          {
+            "name": "authorization",
+            "in": "header",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Authorization"
+            }
+          }
+        ],
         "requestBody": {
+          "required": true,
           "content": {
             "application/json": {
               "schema": {
                 "$ref": "#/components/schemas/Level12MockExecuteRequest"
               }
             }
-          },
-          "required": true
+          }
         },
         "responses": {
           "200": {
@@ -219,8 +319,8 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "additionalProperties": true,
                   "type": "object",
+                  "additionalProperties": true,
                   "title": "Response Run Level 1 2 Mock Execute Api Level 1 2 Mock Execute Post"
                 }
               }
@@ -266,15 +366,33 @@
       "post": {
         "summary": "Research Universe",
         "operationId": "research_universe_api_research_universe_post",
+        "parameters": [
+          {
+            "name": "authorization",
+            "in": "header",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Authorization"
+            }
+          }
+        ],
         "requestBody": {
+          "required": true,
           "content": {
             "application/json": {
               "schema": {
                 "$ref": "#/components/schemas/Level12Request"
               }
             }
-          },
-          "required": true
+          }
         },
         "responses": {
           "200": {
@@ -282,8 +400,8 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "additionalProperties": true,
                   "type": "object",
+                  "additionalProperties": true,
                   "title": "Response Research Universe Api Research Universe Post"
                 }
               }
@@ -306,15 +424,33 @@
       "post": {
         "summary": "Analyst Reports",
         "operationId": "analyst_reports_api_research_analyst_post",
+        "parameters": [
+          {
+            "name": "authorization",
+            "in": "header",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Authorization"
+            }
+          }
+        ],
         "requestBody": {
+          "required": true,
           "content": {
             "application/json": {
               "schema": {
                 "$ref": "#/components/schemas/Level12Request"
               }
             }
-          },
-          "required": true
+          }
         },
         "responses": {
           "200": {
@@ -322,8 +458,8 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "additionalProperties": true,
                   "type": "object",
+                  "additionalProperties": true,
                   "title": "Response Analyst Reports Api Research Analyst Post"
                 }
               }
@@ -346,15 +482,33 @@
       "post": {
         "summary": "Signal Board",
         "operationId": "signal_board_api_signals_board_post",
+        "parameters": [
+          {
+            "name": "authorization",
+            "in": "header",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Authorization"
+            }
+          }
+        ],
         "requestBody": {
+          "required": true,
           "content": {
             "application/json": {
               "schema": {
                 "$ref": "#/components/schemas/Level12Request"
               }
             }
-          },
-          "required": true
+          }
         },
         "responses": {
           "200": {
@@ -362,8 +516,8 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "additionalProperties": true,
                   "type": "object",
+                  "additionalProperties": true,
                   "title": "Response Signal Board Api Signals Board Post"
                 }
               }
@@ -386,15 +540,33 @@
       "post": {
         "summary": "Rebalance Suggestions",
         "operationId": "rebalance_suggestions_api_portfolio_rebalance_suggestions_post",
+        "parameters": [
+          {
+            "name": "authorization",
+            "in": "header",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Authorization"
+            }
+          }
+        ],
         "requestBody": {
+          "required": true,
           "content": {
             "application/json": {
               "schema": {
                 "$ref": "#/components/schemas/Level12Request"
               }
             }
-          },
-          "required": true
+          }
         },
         "responses": {
           "200": {
@@ -402,8 +574,8 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "additionalProperties": true,
                   "type": "object",
+                  "additionalProperties": true,
                   "title": "Response Rebalance Suggestions Api Portfolio Rebalance Suggestions Post"
                 }
               }
@@ -426,15 +598,33 @@
       "post": {
         "summary": "Research Signal Daily Report",
         "operationId": "research_signal_daily_report_api_reports_research_signal_daily_post",
+        "parameters": [
+          {
+            "name": "authorization",
+            "in": "header",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Authorization"
+            }
+          }
+        ],
         "requestBody": {
+          "required": true,
           "content": {
             "application/json": {
               "schema": {
                 "$ref": "#/components/schemas/Level12Request"
               }
             }
-          },
-          "required": true
+          }
         },
         "responses": {
           "200": {
@@ -442,8 +632,8 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "additionalProperties": true,
                   "type": "object",
+                  "additionalProperties": true,
                   "title": "Response Research Signal Daily Report Api Reports Research Signal Daily Post"
                 }
               }
@@ -466,17 +656,45 @@
       "post": {
         "summary": "Run Signals",
         "operationId": "run_signals_api_signals_run_post",
+        "parameters": [
+          {
+            "name": "authorization",
+            "in": "header",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Authorization"
+            }
+          }
+        ],
         "responses": {
           "200": {
             "description": "Successful Response",
             "content": {
               "application/json": {
                 "schema": {
+                  "type": "array",
                   "items": {
                     "$ref": "#/components/schemas/Signal"
                   },
-                  "type": "array",
                   "title": "Response Run Signals Api Signals Run Post"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
                 }
               }
             }
@@ -488,15 +706,33 @@
       "post": {
         "summary": "Create Portfolio Plan",
         "operationId": "create_portfolio_plan_api_portfolio_plan_post",
+        "parameters": [
+          {
+            "name": "authorization",
+            "in": "header",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Authorization"
+            }
+          }
+        ],
         "requestBody": {
+          "required": true,
           "content": {
             "application/json": {
               "schema": {
                 "$ref": "#/components/schemas/PortfolioPlanRequest"
               }
             }
-          },
-          "required": true
+          }
         },
         "responses": {
           "200": {
@@ -526,15 +762,33 @@
       "post": {
         "summary": "Create Order Plans",
         "operationId": "create_order_plans_api_orders_plan_post",
+        "parameters": [
+          {
+            "name": "authorization",
+            "in": "header",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Authorization"
+            }
+          }
+        ],
         "requestBody": {
+          "required": true,
           "content": {
             "application/json": {
               "schema": {
                 "$ref": "#/components/schemas/OrderPlanRequest"
               }
             }
-          },
-          "required": true
+          }
         },
         "responses": {
           "200": {
@@ -542,10 +796,10 @@
             "content": {
               "application/json": {
                 "schema": {
+                  "type": "array",
                   "items": {
                     "$ref": "#/components/schemas/OrderPlan"
                   },
-                  "type": "array",
                   "title": "Response Create Order Plans Api Orders Plan Post"
                 }
               }
@@ -568,15 +822,33 @@
       "post": {
         "summary": "Generate Order Proposals",
         "operationId": "generate_order_proposals_api_orders_generate_proposals_post",
+        "parameters": [
+          {
+            "name": "authorization",
+            "in": "header",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Authorization"
+            }
+          }
+        ],
         "requestBody": {
+          "required": true,
           "content": {
             "application/json": {
               "schema": {
                 "$ref": "#/components/schemas/OrderPlanRequest"
               }
             }
-          },
-          "required": true
+          }
         },
         "responses": {
           "200": {
@@ -584,10 +856,10 @@
             "content": {
               "application/json": {
                 "schema": {
+                  "type": "array",
                   "items": {
                     "$ref": "#/components/schemas/OrderPlan"
                   },
-                  "type": "array",
                   "title": "Response Generate Order Proposals Api Orders Generate Proposals Post"
                 }
               }
@@ -641,6 +913,22 @@
               "type": "string",
               "title": "Order Plan Id"
             }
+          },
+          {
+            "name": "authorization",
+            "in": "header",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Authorization"
+            }
           }
         ],
         "responses": {
@@ -679,6 +967,22 @@
             "schema": {
               "type": "string",
               "title": "Order Plan Id"
+            }
+          },
+          {
+            "name": "authorization",
+            "in": "header",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Authorization"
             }
           }
         ],
@@ -729,6 +1033,22 @@
               "type": "string",
               "title": "Order Plan Id"
             }
+          },
+          {
+            "name": "authorization",
+            "in": "header",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Authorization"
+            }
           }
         ],
         "requestBody": {
@@ -777,6 +1097,22 @@
             "schema": {
               "type": "string",
               "title": "Order Plan Id"
+            }
+          },
+          {
+            "name": "authorization",
+            "in": "header",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Authorization"
             }
           }
         ],
@@ -853,15 +1189,33 @@
       "post": {
         "summary": "Guarded Run Once",
         "operationId": "guarded_run_once_api_autopilot_guarded_run_once_post",
+        "parameters": [
+          {
+            "name": "authorization",
+            "in": "header",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Authorization"
+            }
+          }
+        ],
         "requestBody": {
+          "required": true,
           "content": {
             "application/json": {
               "schema": {
                 "$ref": "#/components/schemas/AutopilotPolicyRequest"
               }
             }
-          },
-          "required": true
+          }
         },
         "responses": {
           "200": {
@@ -869,8 +1223,8 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "additionalProperties": true,
                   "type": "object",
+                  "additionalProperties": true,
                   "title": "Response Guarded Run Once Api Autopilot Guarded Run Once Post"
                 }
               }
@@ -893,15 +1247,33 @@
       "post": {
         "summary": "Pause Guarded",
         "operationId": "pause_guarded_api_autopilot_guarded_pause_post",
+        "parameters": [
+          {
+            "name": "authorization",
+            "in": "header",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Authorization"
+            }
+          }
+        ],
         "requestBody": {
+          "required": true,
           "content": {
             "application/json": {
               "schema": {
                 "$ref": "#/components/schemas/AutopilotPolicyRequest"
               }
             }
-          },
-          "required": true
+          }
         },
         "responses": {
           "200": {
@@ -909,8 +1281,8 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "additionalProperties": true,
                   "type": "object",
+                  "additionalProperties": true,
                   "title": "Response Pause Guarded Api Autopilot Guarded Pause Post"
                 }
               }
@@ -933,15 +1305,33 @@
       "post": {
         "summary": "Resume Guarded",
         "operationId": "resume_guarded_api_autopilot_guarded_resume_post",
+        "parameters": [
+          {
+            "name": "authorization",
+            "in": "header",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Authorization"
+            }
+          }
+        ],
         "requestBody": {
+          "required": true,
           "content": {
             "application/json": {
               "schema": {
                 "$ref": "#/components/schemas/AutopilotPolicyRequest"
               }
             }
-          },
-          "required": true
+          }
         },
         "responses": {
           "200": {
@@ -949,8 +1339,8 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "additionalProperties": true,
                   "type": "object",
+                  "additionalProperties": true,
                   "title": "Response Resume Guarded Api Autopilot Guarded Resume Post"
                 }
               }
@@ -973,15 +1363,33 @@
       "post": {
         "summary": "Kill Switch",
         "operationId": "kill_switch_api_autopilot_kill_switch_post",
+        "parameters": [
+          {
+            "name": "authorization",
+            "in": "header",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Authorization"
+            }
+          }
+        ],
         "requestBody": {
+          "required": true,
           "content": {
             "application/json": {
               "schema": {
                 "$ref": "#/components/schemas/KillSwitchRequest"
               }
             }
-          },
-          "required": true
+          }
         },
         "responses": {
           "200": {
@@ -989,8 +1397,8 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "additionalProperties": true,
                   "type": "object",
+                  "additionalProperties": true,
                   "title": "Response Kill Switch Api Autopilot Kill Switch Post"
                 }
               }
@@ -1013,15 +1421,33 @@
       "post": {
         "summary": "Release Kill Switch",
         "operationId": "release_kill_switch_api_autopilot_kill_switch_release_post",
+        "parameters": [
+          {
+            "name": "authorization",
+            "in": "header",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Authorization"
+            }
+          }
+        ],
         "requestBody": {
+          "required": true,
           "content": {
             "application/json": {
               "schema": {
                 "$ref": "#/components/schemas/ReleaseKillSwitchRequest"
               }
             }
-          },
-          "required": true
+          }
         },
         "responses": {
           "200": {
@@ -1029,8 +1455,8 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "additionalProperties": true,
                   "type": "object",
+                  "additionalProperties": true,
                   "title": "Response Release Kill Switch Api Autopilot Kill Switch Release Post"
                 }
               }
@@ -1073,15 +1499,33 @@
       "post": {
         "summary": "Generate Approval Tickets",
         "operationId": "generate_approval_tickets_api_execution_approval_tickets_generate_post",
+        "parameters": [
+          {
+            "name": "authorization",
+            "in": "header",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Authorization"
+            }
+          }
+        ],
         "requestBody": {
+          "required": true,
           "content": {
             "application/json": {
               "schema": {
                 "$ref": "#/components/schemas/ApprovalTicketGenerateRequest"
               }
             }
-          },
-          "required": true
+          }
         },
         "responses": {
           "200": {
@@ -1089,10 +1533,10 @@
             "content": {
               "application/json": {
                 "schema": {
+                  "type": "array",
                   "items": {
                     "$ref": "#/components/schemas/TradeApprovalTicket"
                   },
-                  "type": "array",
                   "title": "Response Generate Approval Tickets Api Execution Approval Tickets Generate Post"
                 }
               }
@@ -1146,6 +1590,22 @@
               "type": "string",
               "title": "Ticket Id"
             }
+          },
+          {
+            "name": "authorization",
+            "in": "header",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Authorization"
+            }
           }
         ],
         "requestBody": {
@@ -1197,6 +1657,22 @@
               "type": "string",
               "title": "Ticket Id"
             }
+          },
+          {
+            "name": "authorization",
+            "in": "header",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Authorization"
+            }
           }
         ],
         "requestBody": {
@@ -1237,15 +1713,33 @@
       "post": {
         "summary": "Create Strategy Ticket",
         "operationId": "create_strategy_ticket_api_execution_strategy_tickets_create_post",
+        "parameters": [
+          {
+            "name": "authorization",
+            "in": "header",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Authorization"
+            }
+          }
+        ],
         "requestBody": {
+          "required": true,
           "content": {
             "application/json": {
               "schema": {
                 "$ref": "#/components/schemas/StrategyTicketCreateRequest"
               }
             }
-          },
-          "required": true
+          }
         },
         "responses": {
           "200": {
@@ -1361,6 +1855,22 @@
               "type": "string",
               "title": "Ticket Id"
             }
+          },
+          {
+            "name": "authorization",
+            "in": "header",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Authorization"
+            }
           }
         ],
         "requestBody": {
@@ -1409,6 +1919,22 @@
             "schema": {
               "type": "string",
               "title": "Ticket Id"
+            }
+          },
+          {
+            "name": "authorization",
+            "in": "header",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Authorization"
             }
           }
         ],
@@ -1459,6 +1985,22 @@
               "type": "string",
               "title": "Ticket Id"
             }
+          },
+          {
+            "name": "authorization",
+            "in": "header",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Authorization"
+            }
           }
         ],
         "requestBody": {
@@ -1499,15 +2041,33 @@
       "post": {
         "summary": "Record Strategy Performance",
         "operationId": "record_strategy_performance_api_execution_strategy_performance_post",
+        "parameters": [
+          {
+            "name": "authorization",
+            "in": "header",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Authorization"
+            }
+          }
+        ],
         "requestBody": {
+          "required": true,
           "content": {
             "application/json": {
               "schema": {
                 "$ref": "#/components/schemas/StrategyPerformanceRequest"
               }
             }
-          },
-          "required": true
+          }
         },
         "responses": {
           "200": {
@@ -1538,17 +2098,45 @@
         "summary": "Refresh Strategy Performance",
         "description": "Recompute realized performance from attributed fills (auto feed).",
         "operationId": "refresh_strategy_performance_api_execution_strategy_performance_refresh_post",
+        "parameters": [
+          {
+            "name": "authorization",
+            "in": "header",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Authorization"
+            }
+          }
+        ],
         "responses": {
           "200": {
             "description": "Successful Response",
             "content": {
               "application/json": {
                 "schema": {
+                  "type": "array",
                   "items": {
                     "$ref": "#/components/schemas/StrategyPerformanceRecord"
                   },
-                  "type": "array",
                   "title": "Response Refresh Strategy Performance Api Execution Strategy Performance Refresh Post"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
                 }
               }
             }
@@ -1560,15 +2148,33 @@
       "post": {
         "summary": "Create Strategy Draft",
         "operationId": "create_strategy_draft_api_strategy_studio_draft_post",
+        "parameters": [
+          {
+            "name": "authorization",
+            "in": "header",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Authorization"
+            }
+          }
+        ],
         "requestBody": {
+          "required": true,
           "content": {
             "application/json": {
               "schema": {
                 "$ref": "#/components/schemas/StrategyDraftRequest"
               }
             }
-          },
-          "required": true
+          }
         },
         "responses": {
           "200": {
@@ -1645,6 +2251,22 @@
             "schema": {
               "type": "string",
               "title": "Draft Id"
+            }
+          },
+          {
+            "name": "authorization",
+            "in": "header",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Authorization"
             }
           }
         ],
@@ -1731,6 +2353,22 @@
               "type": "string",
               "title": "Notification Id"
             }
+          },
+          {
+            "name": "authorization",
+            "in": "header",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Authorization"
+            }
           }
         ],
         "responses": {
@@ -1761,15 +2399,33 @@
       "post": {
         "summary": "Operator Run Once",
         "operationId": "operator_run_once_api_operator_run_once_post",
+        "parameters": [
+          {
+            "name": "authorization",
+            "in": "header",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Authorization"
+            }
+          }
+        ],
         "requestBody": {
+          "required": true,
           "content": {
             "application/json": {
               "schema": {
                 "$ref": "#/components/schemas/OperatorRunRequest"
               }
             }
-          },
-          "required": true
+          }
         },
         "responses": {
           "200": {
@@ -1857,15 +2513,33 @@
       "post": {
         "summary": "Daily Report",
         "operationId": "daily_report_api_reports_daily_post",
+        "parameters": [
+          {
+            "name": "authorization",
+            "in": "header",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Authorization"
+            }
+          }
+        ],
         "requestBody": {
+          "required": true,
           "content": {
             "application/json": {
               "schema": {
                 "$ref": "#/components/schemas/DailyReportRequest"
               }
             }
-          },
-          "required": true
+          }
         },
         "responses": {
           "200": {
@@ -2082,7 +2756,10 @@
           "external_historical",
           "realtime_market_data",
           "paper_trading",
-          "live_trading"
+          "live_trading",
+          "live_trading_candidate",
+          "live_canary",
+          "live_scaled"
         ],
         "title": "DataMode"
       },
@@ -2205,6 +2882,18 @@
             "type": "boolean",
             "title": "Live Trading Enabled"
           },
+          "market_orders_enabled": {
+            "type": "boolean",
+            "title": "Market Orders Enabled"
+          },
+          "guarded_autopilot_enabled": {
+            "type": "boolean",
+            "title": "Guarded Autopilot Enabled"
+          },
+          "fully_automated_operator_enabled": {
+            "type": "boolean",
+            "title": "Fully Automated Operator Enabled"
+          },
           "default_broker": {
             "type": "string",
             "title": "Default Broker"
@@ -2233,6 +2922,9 @@
         "required": [
           "status",
           "live_trading_enabled",
+          "market_orders_enabled",
+          "guarded_autopilot_enabled",
+          "fully_automated_operator_enabled",
           "default_broker",
           "data_mode",
           "data_mode_safe"
@@ -2476,11 +3168,16 @@
         "additionalProperties": false,
         "type": "object",
         "required": [
+          "decision_id",
           "run_id",
           "policy_id",
           "policy_version",
+          "strategy_id",
+          "order_plan_id",
           "action",
-          "reason"
+          "reason",
+          "risk_check_id",
+          "created_at"
         ],
         "title": "OperatorDecision"
       },
@@ -2679,6 +3376,7 @@
         "additionalProperties": false,
         "type": "object",
         "required": [
+          "report_id",
           "run_id",
           "user_id",
           "policy_id",
@@ -2687,7 +3385,14 @@
           "completed_at",
           "status",
           "strategy_selection",
-          "decisions"
+          "decisions",
+          "fallback",
+          "order_plan_ids",
+          "broker_order_ids",
+          "risk_check_ids",
+          "safety_flags",
+          "live_trading_enabled",
+          "audit_event_count"
         ],
         "title": "OperatorReport"
       },
@@ -2784,6 +3489,9 @@
         "required": [
           "run_id",
           "status",
+          "submitted_order_plan_ids",
+          "blocked_order_plan_ids",
+          "fallback",
           "report"
         ],
         "title": "OperatorRunResult"

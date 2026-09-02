@@ -3,6 +3,8 @@ from __future__ import annotations
 from datetime import datetime, timezone
 from zoneinfo import ZoneInfo
 
+import pytest
+
 from quantpilot.packages.core.execution.state_machine import authorize_level4, is_krx_auto_order_window
 from quantpilot.packages.core.portfolio.planner import fixture_portfolio_snapshot
 from quantpilot.packages.core.schemas import (
@@ -15,6 +17,11 @@ from quantpilot.packages.core.schemas import (
     StrategyRecipe,
     UserPolicy,
 )
+
+
+@pytest.fixture(autouse=True)
+def _enable_guarded_autopilot_environment(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setenv("GUARDED_AUTOPILOT_ENABLED", "true")
 
 
 def _policy(**updates: object) -> UserPolicy:
@@ -63,7 +70,7 @@ def _order(policy: UserPolicy) -> OrderPlan:
     )
 
 
-def test_guarded_autopilot_default_disabled() -> None:
+def test_guarded_autopilot_policy_default_disabled_even_with_env() -> None:
     policy = UserPolicy()
 
     result = authorize_level4(

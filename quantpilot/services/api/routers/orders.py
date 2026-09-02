@@ -6,7 +6,7 @@ from pydantic import BaseModel
 from quantpilot.packages.core.execution.state_machine import ApprovalRequired, InvalidOrderTransition, RiskCheckRequired
 from quantpilot.packages.core.harness_service import HarnessService
 from quantpilot.packages.core.schemas import OrderPlan, OrderStatus
-from quantpilot.services.api.dependencies import get_harness_service, require_latest
+from quantpilot.services.api.dependencies import get_harness_service, require_latest, require_operator_actor
 
 
 router = APIRouter()
@@ -26,7 +26,7 @@ class ModifyOrderRequest(BaseModel):
     limit_price: float | None = None
 
 
-@router.post("/orders/plan")
+@router.post("/orders/plan", dependencies=[Depends(require_operator_actor)])
 def create_order_plans(
     request: OrderPlanRequest,
     service: HarnessService = Depends(get_harness_service),
@@ -42,7 +42,7 @@ def create_order_plans(
     )
 
 
-@router.post("/orders/generate-proposals")
+@router.post("/orders/generate-proposals", dependencies=[Depends(require_operator_actor)])
 def generate_order_proposals(
     request: OrderPlanRequest,
     service: HarnessService = Depends(get_harness_service),
@@ -66,15 +66,16 @@ def proposed_orders(service: HarnessService = Depends(get_harness_service)) -> l
 @router.post("/orders/{order_plan_id}/approve")
 def approve_order(
     order_plan_id: str,
+    actor_id: str = Depends(require_operator_actor),
     service: HarnessService = Depends(get_harness_service),
 ) -> OrderPlan:
     try:
-        return service.approve_order_plan(order_plan_id)
+        return service.approve_order_plan(order_plan_id, approved_by=actor_id)
     except InvalidOrderTransition as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc
 
 
-@router.post("/orders/{order_plan_id}/reject")
+@router.post("/orders/{order_plan_id}/reject", dependencies=[Depends(require_operator_actor)])
 def reject_order(
     order_plan_id: str,
     request: RejectOrderRequest,
@@ -86,7 +87,7 @@ def reject_order(
         raise HTTPException(status_code=400, detail=str(exc)) from exc
 
 
-@router.post("/orders/{order_plan_id}/modify")
+@router.post("/orders/{order_plan_id}/modify", dependencies=[Depends(require_operator_actor)])
 def modify_order(
     order_plan_id: str,
     request: ModifyOrderRequest,
@@ -98,7 +99,7 @@ def modify_order(
         raise HTTPException(status_code=400, detail=str(exc)) from exc
 
 
-@router.post("/orders/{order_plan_id}/submit")
+@router.post("/orders/{order_plan_id}/submit", dependencies=[Depends(require_operator_actor)])
 def submit_order(
     order_plan_id: str,
     service: HarnessService = Depends(get_harness_service),

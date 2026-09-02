@@ -43,6 +43,11 @@ from quantpilot.packages.db.sqlite_repositories import PaperStateStore
 NOW = datetime(2026, 7, 10, 10, 0, tzinfo=ZoneInfo("Asia/Seoul"))
 
 
+@pytest.fixture(autouse=True)
+def _enable_level5_environment(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setenv("FULLY_AUTOMATED_OPERATOR_ENABLED", "true")
+
+
 def _policy(**updates: object) -> UserPolicy:
     values: dict[str, object] = {
         "execution_mode": ExecutionMode.fully_automated,

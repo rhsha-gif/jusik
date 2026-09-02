@@ -34,6 +34,11 @@ from quantpilot.packages.core.strategies.registry import StrategyRegistryEntry
 KRX_TRADING_TIME = datetime(2026, 6, 12, 10, 0, tzinfo=ZoneInfo("Asia/Seoul"))
 
 
+@pytest.fixture(autouse=True)
+def _enable_level5_environment(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setenv("FULLY_AUTOMATED_OPERATOR_ENABLED", "true")
+
+
 def fixture_portfolio_snapshot(*, monthly_loss_ratio: float = 0.0) -> PortfolioSnapshot:
     return _fixture_portfolio_snapshot(
         monthly_loss_ratio=monthly_loss_ratio
@@ -158,7 +163,10 @@ def _risk_evidence(
     )
 
 
-def test_level5_authority_is_disabled_by_default() -> None:
+def test_level5_authority_is_disabled_by_default(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.delenv("FULLY_AUTOMATED_OPERATOR_ENABLED", raising=False)
     policy = UserPolicy()
 
     result = authorize_level5(

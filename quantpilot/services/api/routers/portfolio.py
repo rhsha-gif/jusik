@@ -5,7 +5,11 @@ from pydantic import BaseModel
 
 from quantpilot.packages.core.harness_service import HarnessService
 from quantpilot.packages.core.schemas import PortfolioPlan
-from quantpilot.services.api.dependencies import get_harness_service, require_latest
+from quantpilot.services.api.dependencies import (
+    get_harness_service,
+    require_latest,
+    require_operator_actor,
+)
 
 
 router = APIRouter()
@@ -15,7 +19,7 @@ class PortfolioPlanRequest(BaseModel):
     policy_id: str | None = None
 
 
-@router.post("/portfolio/plan")
+@router.post("/portfolio/plan", dependencies=[Depends(require_operator_actor)])
 def create_portfolio_plan(
     request: PortfolioPlanRequest,
     service: HarnessService = Depends(get_harness_service),

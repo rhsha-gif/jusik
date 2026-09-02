@@ -6,7 +6,7 @@ from pydantic import BaseModel
 from quantpilot.packages.core.harness_service import HarnessService
 from quantpilot.packages.core.policy.parser import DEFAULT_POLICY_TEXT, parse_policy_text
 from quantpilot.packages.core.schemas import UserPolicy
-from quantpilot.services.api.dependencies import get_harness_service
+from quantpilot.services.api.dependencies import get_harness_service, require_operator_actor
 
 
 router = APIRouter()
@@ -31,7 +31,7 @@ def preview_policy(request: ParsePolicyRequest) -> dict[str, object]:
     }
 
 
-@router.post("/policies/parse")
+@router.post("/policies/parse", dependencies=[Depends(require_operator_actor)])
 def parse_policy(
     request: ParsePolicyRequest,
     service: HarnessService = Depends(get_harness_service),
@@ -39,7 +39,7 @@ def parse_policy(
     return service.parse_policy(request.text, user_id=request.user_id)
 
 
-@router.post("/policies/confirm")
+@router.post("/policies/confirm", dependencies=[Depends(require_operator_actor)])
 def confirm_policy(
     request: ConfirmPolicyRequest,
     service: HarnessService = Depends(get_harness_service),

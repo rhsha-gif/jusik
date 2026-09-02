@@ -2,6 +2,11 @@ import { recordActivity } from "./activity-log";
 
 const DEFAULT_API_BASE = "http://127.0.0.1:8010";
 const API_BASE_STORAGE_KEY = "qp.apiBase";
+let operatorToken = "";
+
+export function setOperatorToken(token: string) {
+  operatorToken = token.trim();
+}
 
 export function getApiBase(): string {
   if (typeof localStorage !== "undefined") {
@@ -49,7 +54,7 @@ function extractDetailMessage(body: unknown): string | null {
 }
 
 export interface ApiFetchOptions {
-  method?: "GET" | "POST";
+  method?: "GET" | "POST" | "PUT" | "PATCH" | "DELETE";
   body?: unknown;
   signal?: AbortSignal;
 }
@@ -65,9 +70,14 @@ export async function apiFetch<T>(
 
   let response: Response;
   try {
+    const headers: Record<string, string> = {};
+    if (options.body !== undefined) headers["Content-Type"] = "application/json";
+    if (method !== "GET" && operatorToken) {
+      headers.Authorization = `Bearer ${operatorToken}`;
+    }
     response = await fetch(`${base}${path}`, {
       method,
-      headers: options.body !== undefined ? { "Content-Type": "application/json" } : undefined,
+      headers: Object.keys(headers).length > 0 ? headers : undefined,
       body: options.body !== undefined ? JSON.stringify(options.body) : undefined,
       signal: options.signal,
     });

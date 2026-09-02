@@ -5,7 +5,7 @@ description: >
   pipeline from hypothesis to finalized YAML recipe. Delegates to specialist
   skills (source synthesis, risk matrix, RL contract, Codex handoff) and
   ensures recipe quality gates are met before handoff.
-model: claude-fable-5
+model: fable
 ---
 
 # Quant Recipe Architect Agent

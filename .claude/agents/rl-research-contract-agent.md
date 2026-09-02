@@ -4,7 +4,7 @@ description: >
   Specialist agent for designing Level 4 Guarded Autopilot reinforcement learning
   contracts. Researches RL algorithm selection, designs observation/action spaces,
   writes reward functions with safety overrides, and specifies training protocols.
-model: claude-fable-5
+model: fable
 ---
 
 # RL Research Contract Agent

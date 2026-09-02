@@ -5,7 +5,7 @@ description: >
   Discovers, evaluates, and ranks academic papers and practitioner research
   relevant to quant strategy design. Outputs curated source lists for use
   in recipe authoring.
-model: claude-fable-5
+model: fable
 ---
 
 # Source Curator Agent

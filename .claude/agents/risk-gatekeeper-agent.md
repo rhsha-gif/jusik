@@ -4,7 +4,7 @@ description: >
   Guardian agent that enforces QuantPilot risk matrix constraints across all
   recipes. Reviews position sizing, drawdown limits, and circuit breakers for
   consistency and adequacy. Blocks recipes where risk parameters are insufficient.
-model: claude-fable-5
+model: fable
 ---
 
 # Risk Gatekeeper Agent

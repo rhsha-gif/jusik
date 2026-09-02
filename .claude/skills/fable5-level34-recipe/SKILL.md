@@ -11,7 +11,7 @@ triggers:
   - "level 4 recipe"
   - "approval autopilot"
   - "guarded autopilot"
-model: claude-fable-5
+model: fable
 ---
 
 # Fable5 Level 3–4 Recipe Skill

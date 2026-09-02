@@ -11,7 +11,7 @@ triggers:
   - "look-ahead bias"
   - "data snooping"
   - "survivorship bias"
-model: claude-fable-5
+model: fable
 ---
 
 # Backtest Forensics Skill

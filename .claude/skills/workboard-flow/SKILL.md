@@ -71,7 +71,7 @@ QuantPilot의 Codex–Claude 협업은 미션별 작업보드(`docs/*_workboard.
 전이·인계·블로커마다 한 줄 추가:
 
 ```text
-2026-07-15 — claude claude-fable-5 — QP-KER-015 review 전환: commit 949aa7d, pytest 1046 passed/2 skipped (junit), smoke OK
+2026-07-15 — claude fable — QP-KER-015 review 전환: commit 949aa7d, pytest 1046 passed/2 skipped (junit), smoke OK
 ```
 
 ## Step 4 — Handoff record
@@ -80,7 +80,7 @@ QuantPilot의 Codex–Claude 협업은 미션별 작업보드(`docs/*_workboard.
 
 ```text
 task_id: QP-KER-015
-agent_and_model: claude claude-fable-5
+agent_and_model: claude fable
 commit: <hash>
 owned_paths: <기록된 소유 경로 그대로>
 acceptance_met: <acceptance 기준 대비 충족 여부>

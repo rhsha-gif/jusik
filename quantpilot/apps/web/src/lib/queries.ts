@@ -325,3 +325,40 @@ export function useOperatorRunOnce() {
     },
   });
 }
+
+export type AutopilotActionResponse = Record<string, unknown>;
+
+function autopilotPolicyBody(policyId?: string) {
+  const normalizedPolicyId = policyId?.trim();
+  return normalizedPolicyId ? { policy_id: normalizedPolicyId } : {};
+}
+
+export function useAutopilotKillSwitch() {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: ({ policyId, reason = "user_requested" }: { policyId?: string; reason?: string }) =>
+      apiFetch<AutopilotActionResponse>("/api/autopilot/kill-switch", {
+        method: "POST",
+        body: { ...autopilotPolicyBody(policyId), reason },
+      }),
+    onSuccess: () => {
+      void queryClient.invalidateQueries({ queryKey: OPERATOR_STATUS_KEY });
+      void queryClient.invalidateQueries({ queryKey: PROFESSIONAL_OPERATOR_STATUS_KEY });
+    },
+  });
+}
+
+export function useResumeGuardedAutopilot() {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: ({ policyId }: { policyId?: string }) =>
+      apiFetch<AutopilotActionResponse>("/api/autopilot/guarded/resume", {
+        method: "POST",
+        body: autopilotPolicyBody(policyId),
+      }),
+    onSuccess: () => {
+      void queryClient.invalidateQueries({ queryKey: OPERATOR_STATUS_KEY });
+      void queryClient.invalidateQueries({ queryKey: PROFESSIONAL_OPERATOR_STATUS_KEY });
+    },
+  });
+}

@@ -31,7 +31,7 @@ const NAV_ITEMS = [
   { to: "/studio", label: "전략 스튜디오", icon: Sparkles },
   { to: "/execution", label: "승인 알림", icon: BellRing },
   { to: "/operator", label: "Level 5 운영자", icon: Bot },
-  { to: "/jobs", label: "작업 & 로그", icon: ScrollText },
+  { to: "/jobs", label: "활동 로그", icon: ScrollText },
   { to: "/settings", label: "설정 & 안전", icon: Settings },
 ];
 

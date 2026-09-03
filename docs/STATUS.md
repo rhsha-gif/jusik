@@ -14,16 +14,17 @@ Level 1~5 자율화 전 과정을 먼저 완성하고, 사람 승인 게이트�
 | 영역 | 상태 | 비고 |
 |---|---|---|
 | Level 1-2 신호→제안/모의체결 | ✅ 완료 | `/run` 제안 전용, `/mock-execute` MockBroker 체결 + 타이밍 판단 요약 |
-| Level 3 승인 기반 오토파일럿 | ✅ 완료 (플래그 잠김) | 제안 생성→사용자 승인→제출 |
-| Level 4 가드 오토파일럿 | ✅ 완료 (플래그 잠김) | 17단계 권한 체인 |
-| Level 5 완전 자동 오퍼레이터 | ✅ 완료 (플래그 잠김) | 19단계 권한 체인 + 폴백 매트릭스 |
+| Level 3 승인 기반 오토파일럿 | ✅ 완료 (플래그 잠김) | 제안 생성→사용자 승인→제출; UI는 승인 티켓 레일만 연결되고 `/api/orders/*`는 API 전용 — 2026-09-03 확인: `FULLY_AUTOMATED_OPERATOR_ENABLED=true`를 일반 런타임(API·`run_smoke`)에 주면 `generic_runtime_rejects_paper_arming_environment`로 기동 자체를 거부하므로(`services/api/dependencies.py:56`) 잠금 해제 도그푸딩은 `QUANTPILOT_RUNTIME_ROLE=paper-session` 잡 경로에서만 가능 |
+| Level 4 가드 오토파일럿 | ✅ 완료 (플래그 잠김) | 17단계 권한 체인 — 2026-09-03 확인: `FULLY_AUTOMATED_OPERATOR_ENABLED=true`를 일반 런타임(API·`run_smoke`)에 주면 `generic_runtime_rejects_paper_arming_environment`로 기동 자체를 거부하므로(`services/api/dependencies.py:56`) 잠금 해제 도그푸딩은 `QUANTPILOT_RUNTIME_ROLE=paper-session` 잡 경로에서만 가능 |
+| Level 5 완전 자동 오퍼레이터 | ✅ 완료 (플래그 잠김) | 19단계 권한 체인 + 폴백 매트릭스 — 2026-09-03 확인: `FULLY_AUTOMATED_OPERATOR_ENABLED=true`를 일반 런타임(API·`run_smoke`)에 주면 `generic_runtime_rejects_paper_arming_environment`로 기동 자체를 거부하므로(`services/api/dependencies.py:56`) 잠금 해제 도그푸딩은 `QUANTPILOT_RUNTIME_ROLE=paper-session` 잡 경로에서만 가능 |
 | 승인 티켓 레일 | ✅ 완료 | live 후보 티켓은 승인해도 `live_broker_unavailable` 차단 (의도됨) |
+| Professional 오퍼레이터 상태 | ✅ 완료 | `GET /api/operator/professional-status` 상태 저장소 snapshot과 UI query 연동 |
 | 퀀트 엔진 (step 04~08) | ✅ 완료 | 공급자 연동 신호·최적화·배치 리스크 게이트·후보 랭킹·캘리브레이션 모델 |
 | 데이터: fixture | ✅ 기본값 | |
 | 데이터: local_historical (CSV) | ✅ 완료 + **실데이터 검증됨** | `fetch_krx_local_data` 잡으로 pykrx→CSV, 실 KRX 일봉으로 스모크 통과 |
 | 데이터: external_historical (KIS) | 🟡 코드 완성, 실서버 미검증 | 가짜 transport로 단위 테스트됨; 실 키 확보 시 `RUN_KIS_MANUAL_INTEGRATION=1` 수동 테스트 준비됨 |
 | KIS 토큰 발급 (`/oauth2/tokenP`) | ✅ 헬퍼 구현 (실서버 미검증) | `request_access_token(_from_env)` — 앱키/시크릿으로 발급; fake transport 단위 테스트 완료, 실 키 확보 시 수동 검증 |
-| 뉴스 브리핑 (구상 ①) | 🟡 골격 완료 (fixture) | 읽기 전용 격리 경계 + `GET /api/briefing/daily`; 실제 수집기·프론트 페이지는 후속 |
+| 뉴스 브리핑 (구상 ①) | 🟡 골격 완료 (fixture) | 읽기 전용 격리 경계 + `GET /api/briefing/daily`; 프론트 페이지 완료, 실제 수집기는 후속 |
 | 실시간 일반 provider | ❌ 미구현, fail closed | 일반 provider factory는 realtime/paper 요청을 fixture로 fallback하지 않음 |
 | KIS paper managed-order kill v1 | 🟡 schema v9 개발 검증 완료, 운영 미승인 | fake-client cancel journal/kill 검증 완료; `VTTC0084R`와 cancel POST는 Gate P 수동 검증 대기 |
 | KIS paper atomic reservation v1 | ✅ schema v10 Gate 1 개발 완료 | baseline `5eb70a9`; Gate P buying-power/실서버 semantics는 미검증 |
@@ -33,6 +34,34 @@ Level 1~5 자율화 전 과정을 먼저 완성하고, 사람 승인 게이트�
 | 지식 vault (8권, Obsidian 개편) | ✅ 전면 개편 완료 (git 미추적) | `quantpilot-foundation/` — 책 8권 챕터 149편 전면 재작성 + 허브 8·연결 8·종합 10·주제 MOC 9·홈. 깨진 링크 0, claim 883개 원본 1:1. 메타·검증기는 `quantpilot-foundation-meta/`로 분리(검증기 은퇴). 절차: `docs/vault_book_ingestion_runbook.md` (v2) |
 | 연구 재현 장부 | ✅ EXP-002~018 전 스크립트 재현 | 18개 스크립트 실행, 결과 CSV 바이트 동일. `docs/vault_recheck_ledger_2026-07-29.md` |
 | 개인 투자 판단 절차 (제품 밖 연구) | ✅ 절차 확립, 기록은 저장소 밖 | 판단 감사 절차와 무효화 감시 모니터. **개인 재무 기록은 이 공개 저장소에 두지 않는다** — 비공개 원장 저장소에 분리 보관 |
+
+### API 전용 라우트 (현재 UI 미연결)
+
+| 라우트 | 용도 |
+|---|---|
+| `POST /api/portfolio/plan` | 현재 신호에서 포트폴리오 계획 생성 |
+| `POST /api/portfolio/rebalance-suggestions` | Level 1-2 결과의 리밸런싱 제안 생성 |
+| `POST /api/signals/run` | 신호 생성 실행 |
+| `POST /api/reports/daily` | 일일 운용 리포트 생성 |
+| `POST /api/reports/research-signal-daily` | 연구·신호 일일 리포트 생성 |
+| `POST /api/execution/strategy-tickets/{ticket_id}/reject` / `revoke` | 전략 승인 티켓 거절 또는 revoke |
+| `POST /api/execution/strategy-performance` | 귀속 체결의 전략 성과 기록 |
+| `POST /api/execution/strategy-performance/refresh` | 귀속 체결에서 전략 성과 재계산 |
+| `GET /api/strategy-studio/drafts/{draft_id}` | 저장된 전략 초안 조회 |
+
+### Jobs 실행 방식
+
+저장소에는 이 여섯 잡을 실행하는 스케줄러 정의가 없다. 외부 스케줄러를 사용할 경우에도 아래 CLI와 명시적 게이트를 운영자가 별도로 구성한다.
+
+| Job | 실행 방식 | 필요한 플래그 / 입력 |
+|---|---|---|
+| `run_smoke` | 수동 CLI (`python -m quantpilot.jobs.run_smoke`) | 없음; 기본 안전값과 fixture 경계를 점검 |
+| `run_kis_paper_kill` | 수동 CLI; 저장소 내 스케줄러 없음 | 위치 인수 `engage` 또는 `release`; 기본 비활성인 `KIS_PAPER_KILL_ENABLED` 및 action별 `KIS_PAPER_KILL_CONFIRMATION` 게이트 |
+| `run_kis_paper_session` | 수동 CLI; 저장소 내 스케줄러 없음 | CLI 인수 없음; `KIS_PAPER_SESSION_ENABLED`, `KIS_PAPER_ORDER_SUBMISSION_ENABLED`, `FULLY_AUTOMATED_OPERATOR_ENABLED`, runtime role/allowlist 게이트와 명시적 paper 운영 설정 |
+| `record_paper_loss_baseline` | 수동 CLI; 저장소 내 스케줄러 없음 | CLI 인수 없음; `KIS_PAPER_BASELINE_CONFIRMATION` 및 승인된 paper baseline 설정 |
+| `fetch_krx_local_data` | 수동 CLI; 저장소 내 스케줄러 없음 | `--symbols`, `--start`, `--end`, `--out-dir` |
+| `run_local_backtest` | 수동 CLI; 저장소 내 스케줄러 없음 | `--data-dir` 또는 `LOCAL_DATA_DIR`; 검증 임계값 플래그는 선택 |
+
 
 ## 안전 불변식 (변경 금지 기본값)
 
@@ -87,8 +116,8 @@ Level 1~5 자율화 전 과정을 먼저 완성하고, 사람 승인 게이트�
   백테스트, KIS 비용 기준) → 증빙 저장 → 티켓 생성 가능. 구상의 전체 경로
   (선택→초안→검증→승인→활성화 게이트)가 테스트로 엔드투엔드 검증됨.
   `/api/strategy-studio/*` 3개 엔드포인트. 검증: pytest 309개 중 308 passed·
-  1 skipped (junit), run_smoke OK, vitest 20 passed, build OK. 남은 것:
-  라우터 파일 분리(현재 execution.py에 동거)
+  1 skipped (junit), run_smoke OK, vitest 20 passed, build OK. 라우터 파일 분리는
+  완료됨: `routers/strategy_studio.py`로 분리하고 `main.py`에서 등록.
 - **전략 스튜디오 프론트 페이지** — `/studio` 라우트 + 사이드바 진입점.
   4단계 카드 플로우(초안 입력 → 초안 검토 → 백테스트 검증 리포트 → 전략 승인)
   + arming 원칙 문구. 브라우저 실검증 완료: 초안→검증→티켓→승인 전 과정을

@@ -33,7 +33,7 @@ export function JobsPage() {
     <>
       <PageHeader
         eyebrow="Activity"
-        title="작업 & 로그"
+        title="활동 로그"
         description="이 세션에서 UI가 보낸 모든 API 요청의 기록입니다. 백엔드는 동기식으로 응답하므로 별도 작업 큐 없이 요청 단위로 기록됩니다."
         actions={
           entries.length > 0 && (

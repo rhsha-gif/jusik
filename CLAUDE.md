@@ -43,8 +43,13 @@ Claude Code는 Codex와 같은 [Best-Fit 협업 프로토콜](docs/agent_collabo
 
 This project's commands are written for PowerShell (below); PowerShell is the working convention here and overrides the user-level Bash default.
 
+Use an interpreter with the project dependencies installed (`pytest`, `fastapi`, and `pydantic`). On the current machine, `python` resolves to the hermes-agent venv; a project venv is the intended home for these dependencies. The command must run with an interpreter that has all three packages.
+
 ```powershell
-python -m pytest quantpilot/tests
+# A user-supplied basetemp is recursively deleted by pytest, so it must be
+# unique per run. The shared Temp/pytest-of-goyan directory is not writable on
+# this machine.
+python -m pytest quantpilot/tests --basetemp ".pytest_tmp/$PID"
 python -m quantpilot.jobs.run_smoke
 ```
 

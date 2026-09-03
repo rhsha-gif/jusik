@@ -5,7 +5,11 @@ from pydantic import BaseModel
 
 from quantpilot.packages.core.harness_service import HarnessService
 from quantpilot.packages.core.schemas import OperationReport
-from quantpilot.services.api.dependencies import get_harness_service, require_latest
+from quantpilot.services.api.dependencies import (
+    get_harness_service,
+    require_latest,
+    require_operator_actor,
+)
 
 
 router = APIRouter()
@@ -15,7 +19,7 @@ class DailyReportRequest(BaseModel):
     policy_id: str | None = None
 
 
-@router.post("/reports/daily")
+@router.post("/reports/daily", dependencies=[Depends(require_operator_actor)])
 def daily_report(
     request: DailyReportRequest,
     service: HarnessService = Depends(get_harness_service),

@@ -761,7 +761,7 @@ class KisPaperClient:
             )
         return result
 
-    def place_limit_cash_order(
+    def _build_limit_cash_order_request(
         self,
         *,
         symbol: str,
@@ -769,7 +769,9 @@ class KisPaperClient:
         quantity: int,
         limit_price: Decimal,
         exchange: str = "KRX",
-    ) -> KisCashOrderResult:
+    ) -> tuple[str, str, dict[str, str]]:
+        """Validate an order and build inert request data without performing I/O."""
+
         normalized_symbol = _validate_market_request(symbol, exchange)
         if side not in {"buy", "sell"}:
             raise KisPaperConfigurationError("cash-order side must be buy or sell")
@@ -788,44 +790,36 @@ class KisPaperClient:
             "SLL_TYPE": "01" if side == "sell" else "",
             "CNDT_PRIC": "",
         }
-        try:
-            response = self._request(
-                "POST",
-                KIS_CASH_ORDER_ENDPOINT,
-                headers=self._auth_headers(tr_id),
-                body=body,
-            )
-            _ensure_http_success(response, "cash-order request")
-            _assert_business_success(response, "cash-order request")
-            output = _required_mapping(response.payload, "output", "cash-order response")
-            order_number = _required_text(output, "ODNO", "cash-order output")
-            forwarding_number = _required_text(
-                output, "KRX_FWDG_ORD_ORGNO", "cash-order output"
-            )
-            order_time = _required_text(output, "ORD_TMD", "cash-order output")
-            if not re.fullmatch(r"\d{6}", order_time):
-                raise KisPaperProtocolError("cash-order output has an invalid order time")
-            message_code = _required_safe_code(response.payload, "msg_cd", "cash-order response")
-        except KisPaperBusinessError:
-            raise
-        except KisPaperOrderOutcomeUnknown:
-            raise
-        except (
-            KisPaperTransportError,
-            KisPaperProtocolError,
-            http.client.HTTPException,
-            TimeoutError,
-            ConnectionError,
-            OSError,
-        ):
-            raise KisPaperOrderOutcomeUnknown(
-                "KIS paper cash-order outcome is unknown; reconcile before any retry"
-            ) from None
+        return normalized_symbol, tr_id, body
+
+    @staticmethod
+    def _parse_limit_cash_order_response(
+        *,
+        normalized_symbol: str,
+        side: Literal["buy", "sell"],
+        quantity: int,
+        limit_price: Decimal,
+        tr_id: str,
+        response: KisHttpResponse,
+    ) -> KisCashOrderResult:
+        """Parse a response that an authorized submitter already obtained."""
+
+        _ensure_http_success(response, "cash-order request")
+        _assert_business_success(response, "cash-order request")
+        output = _required_mapping(response.payload, "output", "cash-order response")
+        order_number = _required_text(output, "ODNO", "cash-order output")
+        forwarding_number = _required_text(
+            output, "KRX_FWDG_ORD_ORGNO", "cash-order output"
+        )
+        order_time = _required_text(output, "ORD_TMD", "cash-order output")
+        if not re.fullmatch(r"\d{6}", order_time):
+            raise KisPaperProtocolError("cash-order output has an invalid order time")
+        message_code = _required_safe_code(response.payload, "msg_cd", "cash-order response")
         return KisCashOrderResult(
             symbol=normalized_symbol,
             side=side,
             quantity=quantity,
-            limit_price=price,
+            limit_price=_coerce_limit_price(limit_price),
             order_number=order_number,
             krx_forwarding_order_org_number=forwarding_number,
             order_time=order_time,
@@ -1015,6 +1009,10 @@ class KisPaperClient:
         params: Mapping[str, str] | None = None,
         body: Mapping[str, Any] | None = None,
     ) -> KisHttpResponse:
+        if endpoint == KIS_CASH_ORDER_ENDPOINT:
+            raise KisPaperConfigurationError(
+                "cash-order submission is reserved for the durable coordinator"
+            )
         if endpoint not in _ALLOWED_ENDPOINTS:
             raise KisPaperConfigurationError("KIS paper endpoint is not allowlisted")
         return self._transport.request_json(

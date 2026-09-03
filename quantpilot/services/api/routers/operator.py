@@ -16,13 +16,14 @@ from quantpilot.packages.core.operator.status_snapshot import (
 from quantpilot.services.api.dependencies import (
     get_operator_service,
     get_professional_operator_status_snapshot,
+    require_operator_actor,
 )
 
 
 router = APIRouter()
 
 
-@router.post("/operator/run-once")
+@router.post("/operator/run-once", dependencies=[Depends(require_operator_actor)])
 def operator_run_once(
     request: OperatorRunRequest,
     service: OperatorService = Depends(get_operator_service),

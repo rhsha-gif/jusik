@@ -1,10 +1,11 @@
 from __future__ import annotations
 
-from collections.abc import Sequence
+from collections.abc import Mapping, Sequence
 import os
-from typing import TypeVar
+from secrets import compare_digest
+from typing import Annotated, TypeVar
 
-from fastapi import HTTPException
+from fastapi import Header, HTTPException
 
 from quantpilot.packages.core.data.mode import DataModeConfigError
 from quantpilot.packages.core.data.providers import ProviderError
@@ -25,6 +26,85 @@ _harness_service: HarnessService | None = None
 _operator_service: OperatorService | None = None
 _service_config_key: tuple[str | None, ...] | None = None
 T = TypeVar("T")
+OPERATOR_SHARED_SECRET_ENV = "QUANTPILOT_OPERATOR_SHARED_SECRET"
+OPERATOR_ACTOR_ID_ENV = "QUANTPILOT_OPERATOR_ACTOR_ID"
+PAPER_RUNTIME_ROLE = "paper-session"
+PAPER_CREDENTIAL_ENV_NAMES = (
+    "KIS_PAPER_APP_KEY",
+    "KIS_PAPER_APP_SECRET",
+    "KIS_PAPER_ACCOUNT_NUMBER",
+    "KIS_PAPER_PRODUCT_CODE",
+    "KIS_PAPER_ACCESS_TOKEN",
+)
+
+
+def validate_generic_runtime_environment(
+    environment: Mapping[str, str] | None = None,
+) -> None:
+    """Keep paper-session authority out of generic API and smoke processes."""
+
+    env = os.environ if environment is None else environment
+    if env.get("QUANTPILOT_RUNTIME_ROLE", "").strip() == PAPER_RUNTIME_ROLE:
+        raise RuntimeError("generic_runtime_rejects_paper_session_role")
+    paper_arming_present = (
+        any(env.get(name, "").strip() for name in PAPER_CREDENTIAL_ENV_NAMES)
+        or env.get("BROKER_MODE", "mock").strip().lower() == "paper"
+        or env.get("FULLY_AUTOMATED_OPERATOR_ENABLED", "false").strip().lower()
+        == "true"
+    )
+    if paper_arming_present:
+        raise RuntimeError("generic_runtime_rejects_paper_arming_environment")
+
+
+def require_operator_actor(
+    authorization: Annotated[str | None, Header()] = None,
+) -> str:
+    """Authenticate a state-changing API request and return its actor id."""
+
+    expected_secret = os.environ.get(OPERATOR_SHARED_SECRET_ENV)
+    configured_actor_id = os.environ.get(OPERATOR_ACTOR_ID_ENV)
+    if (
+        not expected_secret
+        or len(expected_secret) < 32
+        or not configured_actor_id
+    ):
+        raise HTTPException(
+            status_code=503,
+            detail={"error": "operator actor authentication is not configured"},
+        )
+
+    scheme, separator, provided_secret = (authorization or "").partition(" ")
+    if (
+        scheme.lower() != "bearer"
+        or not separator
+        or not provided_secret
+    ):
+        raise HTTPException(
+            status_code=401,
+            detail={"error": "operator actor authentication required"},
+            headers={"WWW-Authenticate": "Bearer"},
+        )
+
+    if not compare_digest(
+        provided_secret.encode("utf-8"),
+        expected_secret.encode("utf-8"),
+    ):
+        raise HTTPException(
+            status_code=403,
+            detail={"error": "operator actor authentication failed"},
+        )
+
+    verified_actor_id = configured_actor_id.strip()
+    if (
+        not verified_actor_id
+        or len(verified_actor_id) > 128
+        or not verified_actor_id.isprintable()
+    ):
+        raise HTTPException(
+            status_code=503,
+            detail={"error": "operator actor authentication is not configured"},
+        )
+    return verified_actor_id
 
 
 def _current_service_config_key() -> tuple[str | None, ...]:
@@ -39,7 +119,6 @@ def _current_service_config_key() -> tuple[str | None, ...]:
         os.environ.get("EXTERNAL_HISTORICAL_HOLIDAYS"),
         os.environ.get("KRX_HOLIDAYS"),
         os.environ.get("EXTERNAL_HISTORICAL_ADJUSTED"),
-        os.environ.get("KIS_BASE_URL"),
     )
 
 

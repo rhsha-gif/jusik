@@ -11,7 +11,7 @@ triggers:
   - "guarded autopilot"
   - "level 4 recipe"
   - "action space design"
-model: claude-fable-5
+model: fable
 ---
 
 # RL Contract Designer Skill

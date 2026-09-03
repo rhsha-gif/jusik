@@ -4,7 +4,7 @@ description: >
   Specialist agent that audits QuantPilot backtest designs and results for
   look-ahead bias, data snooping, overfitting, survivorship bias, and
   microstructure unrealism. Outputs a severity-rated forensics report.
-model: claude-fable-5
+model: fable
 ---
 
 # Backtest Forensics Agent

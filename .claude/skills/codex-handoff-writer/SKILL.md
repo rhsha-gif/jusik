@@ -10,7 +10,7 @@ triggers:
   - "handoff document"
   - "implementation spec"
   - "write task for codex"
-model: claude-fable-5
+model: fable
 ---
 
 # Codex Handoff Writer Skill

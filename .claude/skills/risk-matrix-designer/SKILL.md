@@ -10,7 +10,7 @@ triggers:
   - "drawdown limit"
   - "risk parameters"
   - "kelly criterion"
-model: claude-fable-5
+model: fable
 ---
 
 # Risk Matrix Designer Skill

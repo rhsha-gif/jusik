@@ -14,6 +14,11 @@ from quantpilot.packages.core.strategies.promotion import load_lifecycle_fixture
 from quantpilot.packages.core.strategies.registry import StrategyRegistry, StrategyRegistryEntry
 
 
+@pytest.fixture(autouse=True)
+def _enable_level5_environment(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setenv("FULLY_AUTOMATED_OPERATOR_ENABLED", "true")
+
+
 class StaticHarnessMarketDataProvider:
     def __init__(self, bars: list[dict[str, Any]]) -> None:
         self._bars = [dict(bar) for bar in bars]

@@ -14,7 +14,7 @@ from quantpilot.packages.core.schemas import (
     StrategyApprovalTicketStatus,
     utc_now,
 )
-from quantpilot.services.api.dependencies import get_harness_service
+from quantpilot.services.api.dependencies import get_harness_service, require_operator_actor
 from quantpilot.services.api.main import app
 
 
@@ -168,6 +168,7 @@ def test_strategy_ticket_api_round_trip() -> None:
     service = HarnessService()
     evidence = _recorded_evidence(service)
     app.dependency_overrides[get_harness_service] = lambda: service
+    app.dependency_overrides[require_operator_actor] = lambda: "test-operator"
     try:
         client = TestClient(app)
 

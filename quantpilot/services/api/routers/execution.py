@@ -8,7 +8,7 @@ from pydantic import BaseModel
 from quantpilot.packages.core.execution.state_machine import ApprovalRequired, InvalidOrderTransition, RiskCheckRequired
 from quantpilot.packages.core.harness_service import HarnessService
 from quantpilot.packages.core.schemas import TradeApprovalTicket
-from quantpilot.services.api.dependencies import get_harness_service, require_latest
+from quantpilot.services.api.dependencies import get_harness_service, require_latest, require_operator_actor
 
 
 router = APIRouter()
@@ -34,7 +34,7 @@ def _policy_id(request_policy_id: str | None, service: HarnessService) -> str:
     ).policy_id
 
 
-@router.post("/execution/approval-tickets/generate")
+@router.post("/execution/approval-tickets/generate", dependencies=[Depends(require_operator_actor)])
 def generate_approval_tickets(
     request: ApprovalTicketGenerateRequest,
     service: HarnessService = Depends(get_harness_service),
@@ -57,7 +57,10 @@ def pending_approval_tickets(
     return service.pending_approval_tickets()
 
 
-@router.post("/execution/approval-tickets/{ticket_id}/approve-and-submit")
+@router.post(
+    "/execution/approval-tickets/{ticket_id}/approve-and-submit",
+    dependencies=[Depends(require_operator_actor)],
+)
 def approve_and_submit_approval_ticket(
     ticket_id: str,
     request: ApprovalTicketDecisionRequest,
@@ -69,7 +72,10 @@ def approve_and_submit_approval_ticket(
         raise HTTPException(status_code=400, detail=str(exc)) from exc
 
 
-@router.post("/execution/approval-tickets/{ticket_id}/reject")
+@router.post(
+    "/execution/approval-tickets/{ticket_id}/reject",
+    dependencies=[Depends(require_operator_actor)],
+)
 def reject_approval_ticket(
     ticket_id: str,
     request: ApprovalTicketDecisionRequest,

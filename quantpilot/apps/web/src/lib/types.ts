@@ -6,9 +6,14 @@
  * subset of shapes the UI renders, so pages stay readable.
  */
 
+import type { components } from "./openapi";
+
 export interface HealthResponse {
   status: string;
   live_trading_enabled: boolean;
+  market_orders_enabled: boolean;
+  guarded_autopilot_enabled: boolean;
+  fully_automated_operator_enabled: boolean;
   default_broker: string;
   data_mode: string;
   data_mode_safe: boolean;
@@ -462,80 +467,24 @@ export interface StrategyTicketCreateRequest {
  * and its JSON viewers stay faithful to the backend contract.
  * ------------------------------------------------------------------------- */
 
-export type OperatorRunMode = "dry_run" | "mock_submit" | "paper_submit";
+export type OperatorRunMode =
+  components["schemas"]["OperatorRunRequest"]["run_mode"];
 
-export type OperatorRunStatus = "completed" | "blocked" | "fallback" | "failed";
+export type OperatorRunStatus = components["schemas"]["OperatorRunResult"]["status"];
 
-export type OperatorDecisionAction = "submit" | "block" | "fallback" | "noop";
+export type OperatorDecisionAction = components["schemas"]["OperatorDecision"]["action"];
 
-export interface OperatorRunRequest {
-  user_id: string;
-  policy_id: string;
-  requested_policy_version: number;
-  run_mode: OperatorRunMode;
-  requested_at: string;
-  idempotency_key: string;
-}
+export type OperatorRunRequest = components["schemas"]["OperatorRunRequest"];
 
-export interface FallbackDecision {
-  from_level: 5;
-  /** 4=guarded autopilot, 3=proposals, 2=suggestions, 0=no-op. */
-  to_level: 4 | 3 | 2 | 0;
-  reason_code: string;
-  detail: string;
-  order_submission_enabled: boolean;
-}
+export type FallbackDecision = components["schemas"]["FallbackDecision"];
 
-export interface StrategySelectionDecision {
-  selected_strategy_id: string | null;
-  selected_version: string | null;
-  eligible_strategy_ids: string[];
-  /** Maps strategy_id -> rejection reason. */
-  rejected: Record<string, string>;
-  reason: string;
-}
+export type StrategySelectionDecision = components["schemas"]["StrategySelectionDecision"];
 
-export interface OperatorDecision {
-  decision_id: string;
-  run_id: string;
-  policy_id: string;
-  policy_version: number;
-  strategy_id: string | null;
-  order_plan_id: string | null;
-  action: OperatorDecisionAction;
-  reason: string;
-  risk_check_id: string | null;
-  created_at: string;
-}
+export type OperatorDecision = components["schemas"]["OperatorDecision"];
 
-export interface OperatorReport {
-  report_id: string;
-  run_id: string;
-  user_id: string;
-  policy_id: string;
-  policy_version: number;
-  started_at: string;
-  completed_at: string;
-  status: OperatorRunStatus;
-  strategy_selection: StrategySelectionDecision;
-  decisions: OperatorDecision[];
-  fallback: FallbackDecision | null;
-  order_plan_ids: string[];
-  broker_order_ids: string[];
-  risk_check_ids: string[];
-  safety_flags: Record<string, boolean | string>;
-  live_trading_enabled: boolean;
-  audit_event_count: number;
-}
+export type OperatorReport = components["schemas"]["OperatorReport"];
 
-export interface OperatorRunResult {
-  run_id: string;
-  status: OperatorRunStatus;
-  submitted_order_plan_ids: string[];
-  blocked_order_plan_ids: string[];
-  fallback: FallbackDecision | null;
-  report: OperatorReport;
-}
+export type OperatorRunResult = components["schemas"]["OperatorRunResult"];
 
 /** Registry entry as returned inline by GET /api/operator/status. */
 export interface OperatorRegistryEntry {

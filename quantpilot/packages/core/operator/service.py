@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import hashlib
 import json
+import os
 from datetime import datetime, timedelta
 
 from quantpilot.packages.core.execution.fallback_manager import FallbackDecision, FallbackManager
@@ -37,12 +38,10 @@ from quantpilot.packages.core.operator.professional_cycle import (
     ProfessionalOperatorCoordinator,
     ProfessionalPositionCycleResult,
     ProfessionalStateStore,
-    StrategyHealthReviewResult,
     risk_evaluation_due,
 )
 from quantpilot.packages.core.marketdata.types import Quote
 from quantpilot.packages.core.risk.position_exit import PositionRiskInput
-from quantpilot.packages.core.strategies.performance_review import StrategyHealthInput
 from quantpilot.packages.core.policy.versioning import PolicyVersionGuard, PolicyVersioningService
 from quantpilot.packages.core.risk.gatekeeper import market_orders_enabled
 from quantpilot.packages.core.schemas import (
@@ -159,27 +158,6 @@ class OperatorService:
             )
             if professional_state_store is not None
             else None
-        )
-
-    def review_professional_strategy_health(
-        self,
-        *,
-        policy: UserPolicy,
-        registry_entry,
-        evidence: StrategyHealthInput,
-        performance_record_id: str,
-        evaluated_at: datetime,
-        reapproved: bool = False,
-    ) -> StrategyHealthReviewResult:
-        if self.professional is None:
-            raise RuntimeError("professional state store is not configured")
-        return self.professional.review_strategy_health(
-            policy=policy,
-            registry_entry=registry_entry,
-            evidence=evidence,
-            performance_record_id=performance_record_id,
-            evaluated_at=evaluated_at,
-            reapproved=reapproved,
         )
 
     def run_professional_position_cycle(
@@ -431,8 +409,13 @@ class OperatorService:
             status = "fallback" if fallback.to_level > 0 else "blocked"
             return finish(status, fallback=fallback, selection=selection)
 
-        # Gate 1: Level 5 feature flag (env or explicit policy field).
-        if not fully_automated_operator_flag_enabled(policy):
+        # Gate 1: deployment enablement remains mandatory. Policy consent is
+        # checked below only after a policy exists and is otherwise Level 5.
+        operator_environment_enabled = (
+            os.getenv("FULLY_AUTOMATED_OPERATOR_ENABLED", "false").lower()
+            == "true"
+        )
+        if not operator_environment_enabled:
             return blocked_by("level5_flag_disabled")
 
         # Gate 2: an active policy must exist.
@@ -440,6 +423,13 @@ class OperatorService:
             return blocked_by("policy_not_found")
         if policy.user_id != request.user_id:
             return blocked_by("policy_user_mismatch")
+
+        if (
+            policy.authority_level == 5
+            and policy.execution_mode == ExecutionMode.fully_automated
+            and not fully_automated_operator_flag_enabled(policy)
+        ):
+            return blocked_by("level5_flag_disabled")
 
         # Gate 3: live trading must remain disabled; the operator refuses to run otherwise.
         if live_trading_flag_enabled():
@@ -755,9 +745,6 @@ class OperatorService:
                 source="operator_service",
             )
         return signal_set
-
-    def _record_signals(self, recipe: StrategyRecipe, policy: UserPolicy) -> list[Signal]:
-        return self._record_signal_set(recipe, policy).signals
 
     def _submit_proposals(
         self,

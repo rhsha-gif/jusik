@@ -229,7 +229,9 @@ def test_selected_professional_strategy_uses_history_snapshot_and_actual_quote(
 
 def test_policy_version_mismatch_request_replays_exactly_after_restart(
     tmp_path,
+    monkeypatch: pytest.MonkeyPatch,
 ) -> None:
+    monkeypatch.setenv("FULLY_AUTOMATED_OPERATOR_ENABLED", "true")
     harness = HarnessService()
     policy = UserPolicy(
         version=2,

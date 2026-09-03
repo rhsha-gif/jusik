@@ -68,6 +68,40 @@ def test_health_endpoint_backward_compat() -> None:
     assert data["default_broker"] == "mock"
 
 
+def test_health_endpoint_blocks_unsafe_safety_adapter(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setenv("DATA_MODE", "fixture")
+    monkeypatch.setenv("LIVE_TRADING_ENABLED", "true")
+    monkeypatch.setenv("MARKET_ORDERS_ENABLED", "false")
+    monkeypatch.setenv("FULLY_AUTOMATED_OPERATOR_ENABLED", "false")
+    monkeypatch.setenv("BROKER_MODE", "paper")
+
+    response = TestClient(app).get("/api/health")
+
+    assert response.status_code == 200
+    data = response.json()
+    assert data["status"] == "blocked"
+    assert data["live_trading_enabled"] is True
+    assert data["market_orders_enabled"] is False
+    assert data["fully_automated_operator_enabled"] is False
+    assert data["default_broker"] == "paper"
+
+
+def test_health_endpoint_blocks_guarded_autopilot_environment(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setenv("DATA_MODE", "fixture")
+    monkeypatch.setenv("GUARDED_AUTOPILOT_ENABLED", "true")
+    monkeypatch.setenv("LIVE_TRADING_ENABLED", "false")
+    monkeypatch.setenv("MARKET_ORDERS_ENABLED", "false")
+    monkeypatch.setenv("FULLY_AUTOMATED_OPERATOR_ENABLED", "false")
+    monkeypatch.setenv("BROKER_MODE", "mock")
+
+    response = TestClient(app).get("/api/health")
+
+    assert response.status_code == 200
+    data = response.json()
+    assert data["guarded_autopilot_enabled"] is True
+    assert data["status"] == "blocked"
+
+
 def test_live_trading_env_is_surfaced_as_blocked() -> None:
     os.environ["DATA_MODE"] = "live_trading"
     try:

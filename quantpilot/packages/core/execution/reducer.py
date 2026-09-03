@@ -9,7 +9,6 @@ from pydantic import Field, field_validator, model_validator
 
 from quantpilot.packages.core.execution.events import (
     PAPER_MUTATION_ORIGIN_SOURCES,
-    PaperEventSchemaUnsupported,
     PaperEventStreamConflict,
     PaperEventStreamCorruption,
     PaperExecutionAfter,
@@ -827,7 +826,6 @@ def join_correlated_execution_projections(
 
 
 __all__ = [
-    "PaperEventSchemaUnsupported",
     "PaperEventStreamConflict",
     "PaperEventStreamCorruption",
     "PaperExecutionProjection",

@@ -5,12 +5,13 @@ from fastapi.testclient import TestClient
 from quantpilot.packages.core.harness_service import HarnessService
 from quantpilot.packages.core.portfolio.planner import fixture_portfolio_snapshot
 from quantpilot.packages.core.schemas import OrderStatus
-from quantpilot.services.api.dependencies import get_harness_service
+from quantpilot.services.api.dependencies import get_harness_service, require_operator_actor
 from quantpilot.services.api.main import app
 
 
 def _client_for_service(service: HarnessService) -> TestClient:
     app.dependency_overrides[get_harness_service] = lambda: service
+    app.dependency_overrides[require_operator_actor] = lambda: "test-operator"
     return TestClient(app)
 
 

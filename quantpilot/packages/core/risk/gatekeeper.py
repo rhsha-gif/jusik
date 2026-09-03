@@ -29,13 +29,12 @@ def market_orders_enabled() -> bool:
 
 
 def allowed_execution_modes(policy: UserPolicy | None = None) -> set[ExecutionMode]:
-    # fully_automated is only a valid execution mode while the Level 5 feature flag is
-    # explicitly enabled (env or explicit policy field); with default flags the allowed
-    # set is identical to pre-harness.
+    # fully_automated requires both deployment-level and policy-level consent; with
+    # either flag disabled the allowed set is identical to pre-harness.
     modes = set(PRE_HARNESS_EXECUTION_MODES)
     env_enabled = os.getenv("FULLY_AUTOMATED_OPERATOR_ENABLED", "false").lower() == "true"
     policy_enabled = policy is not None and policy.fully_automated_operator_enabled
-    if env_enabled or policy_enabled:
+    if env_enabled and policy_enabled:
         modes.add(ExecutionMode.fully_automated)
     return modes
 

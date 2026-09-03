@@ -50,6 +50,11 @@ from quantpilot.packages.db.sqlite_repositories import (
 NOW = datetime(2026, 7, 10, 10, 0, tzinfo=ZoneInfo("Asia/Seoul"))
 
 
+@pytest.fixture(autouse=True)
+def _enable_level5_environment(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setenv("FULLY_AUTOMATED_OPERATOR_ENABLED", "true")
+
+
 class PaperStateStore(RuntimePaperStateStore):
     """Test-only store with explicit fixture-seeding capability."""
 

@@ -119,13 +119,14 @@ def is_krx_auto_order_window(now: datetime | None = None) -> bool:
 
 def guarded_autopilot_flag_enabled(policy: UserPolicy) -> bool:
     env_enabled = os.getenv("GUARDED_AUTOPILOT_ENABLED", "false").lower() == "true"
-    return policy.guarded_autopilot_enabled or env_enabled
+    return env_enabled and policy.guarded_autopilot_enabled
 
 
 def fully_automated_operator_flag_enabled(policy: UserPolicy | None = None) -> bool:
     env_enabled = os.getenv("FULLY_AUTOMATED_OPERATOR_ENABLED", "false").lower() == "true"
-    policy_enabled = policy.fully_automated_operator_enabled if policy is not None else False
-    return policy_enabled or env_enabled
+    return env_enabled and (
+        policy is not None and policy.fully_automated_operator_enabled
+    )
 
 
 def operator_kill_switch_engaged() -> bool:

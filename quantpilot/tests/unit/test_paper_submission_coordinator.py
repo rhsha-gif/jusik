@@ -5,6 +5,7 @@ from datetime import date, datetime, timedelta, timezone
 from decimal import Decimal
 import json
 from pathlib import Path
+import re
 import sqlite3
 
 import pytest
@@ -15,6 +16,7 @@ from quantpilot.packages.core.execution.paper_submission import (
     PaperSubmissionOutcomeUnknown,
     PaperSubmissionRejected,
 )
+from quantpilot.packages.core.harness_service import HarnessService
 from quantpilot.packages.core.kis_paper import (
     KisBuyingPower,
     KisCashOrderResult,
@@ -1078,18 +1080,40 @@ def test_restart_expires_prepared_record_without_any_post(tmp_path) -> None:
         assert client.order_calls == 0
 
 
-def test_no_other_production_module_calls_the_low_level_order_post() -> None:
-    package_root = Path(__file__).parents[2] / "packages"
-    callers = {
-        path.relative_to(package_root).as_posix()
-        for path in package_root.rglob("*.py")
-        if "place_limit_cash_order(" in path.read_text(encoding="utf-8")
+def test_kis_paper_client_is_constructed_only_by_paper_jobs_and_never_by_api(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    quantpilot_root = Path(__file__).parents[2]
+    constructors = {
+        path.relative_to(quantpilot_root).as_posix()
+        for path in quantpilot_root.rglob("*.py")
+        if "tests" not in path.parts
+        and "KisPaperClient(" in path.read_text(encoding="utf-8")
     }
 
-    assert callers == {
-        "core/kis_paper.py",
-        "core/execution/paper_submission.py",
+    assert constructors == {
+        "jobs/run_kis_paper_kill.py",
+        "jobs/run_kis_paper_session.py",
     }
+
+    monkeypatch.setenv("DATA_MODE", "fixture")
+    service = HarnessService.from_environment()
+    assert service.external_paper_broker is None
+    assert service.paper_submission_coordinator is None
+
+
+def test_raw_order_post_is_confined_to_paper_submission_by_convention() -> None:
+    package_root = Path(__file__).parents[2] / "packages"
+    raw_order_post = re.compile(
+        r'_transport\.request_json\(\s*"POST"\s*,\s*f?"[^"\n]*KIS_CASH_ORDER_ENDPOINT',
+    )
+    raw_order_post_callers = {
+        path.relative_to(package_root).as_posix()
+        for path in package_root.rglob("*.py")
+        if raw_order_post.search(path.read_text(encoding="utf-8"))
+    }
+
+    assert raw_order_post_callers == {"core/execution/paper_submission.py"}
 
 
 def test_expired_evidence_on_claimed_row_quarantines_without_relabelling(

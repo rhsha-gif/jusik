@@ -4,7 +4,7 @@ from fastapi import APIRouter, Depends, HTTPException
 from pydantic import BaseModel
 
 from quantpilot.packages.core.harness_service import HarnessService
-from quantpilot.services.api.dependencies import get_harness_service, require_latest
+from quantpilot.services.api.dependencies import get_harness_service, require_latest, require_operator_actor
 
 
 router = APIRouter()
@@ -32,7 +32,7 @@ def _policy_id(request_policy_id: str | None, service: HarnessService) -> str:
     ).policy_id
 
 
-@router.post("/autopilot/guarded/run-once")
+@router.post("/autopilot/guarded/run-once", dependencies=[Depends(require_operator_actor)])
 def guarded_run_once(
     request: AutopilotPolicyRequest,
     service: HarnessService = Depends(get_harness_service),
@@ -40,7 +40,7 @@ def guarded_run_once(
     return service.run_guarded_autopilot_once(policy_id=_policy_id(request.policy_id, service))
 
 
-@router.post("/autopilot/guarded/pause")
+@router.post("/autopilot/guarded/pause", dependencies=[Depends(require_operator_actor)])
 def pause_guarded(
     request: AutopilotPolicyRequest,
     service: HarnessService = Depends(get_harness_service),
@@ -48,7 +48,7 @@ def pause_guarded(
     return service.pause_guarded_autopilot(policy_id=_policy_id(request.policy_id, service))
 
 
-@router.post("/autopilot/guarded/resume")
+@router.post("/autopilot/guarded/resume", dependencies=[Depends(require_operator_actor)])
 def resume_guarded(
     request: AutopilotPolicyRequest,
     service: HarnessService = Depends(get_harness_service),
@@ -56,7 +56,7 @@ def resume_guarded(
     return service.resume_guarded_autopilot(policy_id=_policy_id(request.policy_id, service))
 
 
-@router.post("/autopilot/kill-switch")
+@router.post("/autopilot/kill-switch", dependencies=[Depends(require_operator_actor)])
 def kill_switch(
     request: KillSwitchRequest,
     service: HarnessService = Depends(get_harness_service),
@@ -64,7 +64,7 @@ def kill_switch(
     return service.engage_kill_switch(policy_id=_policy_id(request.policy_id, service), reason=request.reason)
 
 
-@router.post("/autopilot/kill-switch/release")
+@router.post("/autopilot/kill-switch/release", dependencies=[Depends(require_operator_actor)])
 def release_kill_switch(
     request: ReleaseKillSwitchRequest,
     service: HarnessService = Depends(get_harness_service),

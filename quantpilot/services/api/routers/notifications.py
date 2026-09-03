@@ -5,7 +5,7 @@ from fastapi import APIRouter, Depends, HTTPException
 from quantpilot.packages.core.harness_service import HarnessService
 from quantpilot.packages.core.schemas import OperatorNotification
 from quantpilot.packages.db.repositories import RepositoryError
-from quantpilot.services.api.dependencies import get_harness_service
+from quantpilot.services.api.dependencies import get_harness_service, require_operator_actor
 
 
 router = APIRouter()
@@ -19,7 +19,10 @@ def list_notifications(
     return service.list_notifications(unacknowledged_only=unacknowledged_only)
 
 
-@router.post("/notifications/{notification_id}/acknowledge")
+@router.post(
+    "/notifications/{notification_id}/acknowledge",
+    dependencies=[Depends(require_operator_actor)],
+)
 def acknowledge_notification(
     notification_id: str,
     service: HarnessService = Depends(get_harness_service),

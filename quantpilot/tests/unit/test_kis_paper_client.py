@@ -4,13 +4,16 @@ import hashlib
 import http.client
 import re
 import ssl
+import types
 import urllib.request
 from collections.abc import Mapping
-from datetime import date, datetime
+from datetime import date, datetime, timedelta, timezone
 from decimal import Decimal
 from typing import Any, Literal
 
 import pytest
+
+import quantpilot.packages.core.kis_paper as kis_paper_module
 
 from quantpilot.packages.core.kis_paper import (
     KIS_BALANCE_ENDPOINT,
@@ -44,6 +47,10 @@ from quantpilot.packages.core.kis_paper import (
     StrictUrllibKisPaperTransport,
     kis_recent_three_month_start,
 )
+from quantpilot.packages.core.execution.paper_submission import (
+    DurablePaperSubmissionCoordinator,
+)
+from quantpilot.packages.core.operator.position_ledger import PaperExecutionSession
 
 
 class RecordingTransport(KisJsonTransport):
@@ -77,6 +84,40 @@ class RecordingTransport(KisJsonTransport):
         if isinstance(outcome, BaseException):
             raise outcome
         return outcome
+
+
+class _AlwaysOpenSessionAuthority:
+    def current_open_session_date(self, observed_at: datetime) -> date:
+        return observed_at.astimezone(timezone(timedelta(hours=9))).date()
+
+
+def _coordinator_order_submitter(client: KisPaperClient):
+    now = datetime(2026, 7, 10, 1, 0, tzinfo=timezone.utc)
+    store_id = "store-kis-client-test"
+    store = types.SimpleNamespace(
+        provenance=types.SimpleNamespace(
+            data_mode="paper_trading",
+            broker_environment="kis_paper",
+            store_id=store_id,
+            account_scope_fingerprint=client.account_scope_fingerprint,
+        )
+    )
+    session = PaperExecutionSession(
+        store_id=store_id,
+        account_scope_fingerprint=client.account_scope_fingerprint,
+        fencing_token=1,
+        started_at=now,
+        lease_expires_at=now + timedelta(hours=1),
+        updated_at=now,
+    )
+    coordinator = DurablePaperSubmissionCoordinator(
+        store=store,  # type: ignore[arg-type]
+        session=session,
+        client=client,
+        session_authority=_AlwaysOpenSessionAuthority(),  # type: ignore[arg-type]
+        clock=lambda: now,
+    )
+    return coordinator._DurablePaperSubmissionCoordinator__order_submitter
 
 
 def _config(*, access_token: str = "fake-paper-token") -> KisPaperConfig:
@@ -609,8 +650,11 @@ def test_limit_cash_order_uses_exact_body_and_side_specific_paper_tr(
     )
     client = KisPaperClient(_config(), transport=transport)
 
-    result = client.place_limit_cash_order(
-        symbol="005930", side=side, quantity=3, limit_price=Decimal("70000")
+    result = _coordinator_order_submitter(client).submit_limit_cash_order(
+        symbol="005930",
+        side=side,
+        quantity=3,
+        limit_price=Decimal("70000"),
     )
 
     assert result.order_number == "0000099999"
@@ -633,6 +677,35 @@ def test_limit_cash_order_uses_exact_body_and_side_specific_paper_tr(
         "CNDT_PRIC": "",
     }
     assert len(transport.calls) == 1
+
+
+def test_no_public_order_method_and_raw_post_is_confined_by_convention() -> None:
+    transport = RecordingTransport()
+    client = KisPaperClient(_config(), transport=transport)
+
+    assert not hasattr(client, "place_limit_cash_order")
+    assert not hasattr(client, "_place_limit_cash_order")
+    assert not hasattr(kis_paper_module, "_ORDER_CAPABILITY_ISSUER")
+    assert not hasattr(kis_paper_module, "_KisPaperOrderCapability")
+    assert not hasattr(kis_paper_module, "_issue_kis_paper_order_capability")
+
+    with pytest.raises(KisPaperConfigurationError, match="durable coordinator"):
+        client._request(
+            "POST",
+            KIS_CASH_ORDER_ENDPOINT,
+            headers={},
+            body={},
+        )
+
+    submitter = _coordinator_order_submitter(client)
+    assert type(submitter) not in vars(kis_paper_module).values()
+    assert type(submitter) not in vars(
+        __import__(
+            "quantpilot.packages.core.execution.paper_submission",
+            fromlist=["*"],
+        )
+    ).values()
+    assert transport.calls == []
 
 
 def test_buying_power_uses_no_receivable_paper_inquiry_contract() -> None:
@@ -710,8 +783,11 @@ def test_http_200_business_failure_is_definitive_and_never_leaks_broker_message(
     client = KisPaperClient(_config(), transport=transport)
 
     with pytest.raises(KisPaperBusinessError) as captured:
-        client.place_limit_cash_order(
-            symbol="005930", side="buy", quantity=1, limit_price=Decimal("70000")
+        _coordinator_order_submitter(client).submit_limit_cash_order(
+            symbol="005930",
+            side="buy",
+            quantity=1,
+            limit_price=Decimal("70000"),
         )
 
     rendered = str(captured.value)
@@ -738,8 +814,11 @@ def test_ambiguous_order_outcomes_are_unknown_and_are_never_retried(
     client = KisPaperClient(_config(), transport=transport)
 
     with pytest.raises(KisPaperOrderOutcomeUnknown) as captured:
-        client.place_limit_cash_order(
-            symbol="005930", side="sell", quantity=1, limit_price=Decimal("70000")
+        _coordinator_order_submitter(client).submit_limit_cash_order(
+            symbol="005930",
+            side="sell",
+            quantity=1,
+            limit_price=Decimal("70000"),
         )
 
     assert "reconcile before any retry" in str(captured.value)

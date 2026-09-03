@@ -73,6 +73,9 @@ class DataMode(str, Enum):
     realtime_market_data = "realtime_market_data"
     paper_trading = "paper_trading"
     live_trading = "live_trading"
+    live_trading_candidate = "live_trading_candidate"
+    live_canary = "live_canary"
+    live_scaled = "live_scaled"
 
 
 class OrderType(str, Enum):

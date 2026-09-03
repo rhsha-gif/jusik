@@ -1,9 +1,10 @@
 from __future__ import annotations
 
 import hashlib
+import http.client
 import json
 from collections.abc import Callable
-from datetime import date, datetime, timedelta
+from datetime import datetime, timedelta
 from decimal import Decimal, ROUND_CEILING, ROUND_FLOOR
 from math import isclose, isfinite
 from typing import Protocol
@@ -17,6 +18,9 @@ from quantpilot.packages.core.kis_paper import (
     KisPaperClient,
     KisPaperConfigurationError,
     KisPaperOrderOutcomeUnknown,
+    KisPaperProtocolError,
+    KisPaperTransportError,
+    KIS_CASH_ORDER_ENDPOINT,
 )
 from quantpilot.packages.core.marketdata.kis_paper import (
     PaperTradingSessionAuthority,
@@ -154,6 +158,70 @@ class DurablePaperSubmissionCoordinator:
         self._client = client
         self._session_authority = session_authority
         self._clock = clock
+        if isinstance(client, KisPaperClient):
+            class _ClosedKisPaperOrderSubmitter:
+                """Order transport authority scoped to this verified coordinator."""
+
+                __slots__ = ("__client",)
+
+                def __init__(self, verified_client: KisPaperClient) -> None:
+                    self.__client = verified_client
+
+                def submit_limit_cash_order(
+                    self,
+                    *,
+                    symbol: str,
+                    side: str,
+                    quantity: int,
+                    limit_price: Decimal,
+                    exchange: str = "KRX",
+                ) -> KisCashOrderResult:
+                    normalized_symbol, tr_id, body = (
+                        self.__client._build_limit_cash_order_request(
+                            symbol=symbol,
+                            side=side,
+                            quantity=quantity,
+                            limit_price=limit_price,
+                            exchange=exchange,
+                        )
+                    )
+                    try:
+                        response = self.__client._transport.request_json(
+                            "POST",
+                            f"{self.__client._config.base_url}{KIS_CASH_ORDER_ENDPOINT}",
+                            headers=self.__client._auth_headers(tr_id),
+                            params=None,
+                            body=body,
+                            timeout_seconds=self.__client._config.timeout_seconds,
+                        )
+                        return self.__client._parse_limit_cash_order_response(
+                            normalized_symbol=normalized_symbol,
+                            side=side,
+                            quantity=quantity,
+                            limit_price=limit_price,
+                            tr_id=tr_id,
+                            response=response,
+                        )
+                    except KisPaperBusinessError:
+                        raise
+                    except KisPaperOrderOutcomeUnknown:
+                        raise
+                    except (
+                        KisPaperTransportError,
+                        KisPaperProtocolError,
+                        http.client.HTTPException,
+                        TimeoutError,
+                        ConnectionError,
+                        OSError,
+                    ):
+                        raise KisPaperOrderOutcomeUnknown(
+                            "KIS paper cash-order outcome is unknown; "
+                            "reconcile before any retry"
+                        ) from None
+
+            self.__order_submitter = _ClosedKisPaperOrderSubmitter(client)
+        else:
+            self.__order_submitter = None
 
     @property
     def session(self) -> PaperExecutionSession:
@@ -723,13 +791,20 @@ class DurablePaperSubmissionCoordinator:
                 "paper kill engaged after claim and before broker POST",
             )
         try:
-            result = self._client.place_limit_cash_order(
-                symbol=claimed.symbol,
-                side=claimed.side,
-                quantity=int(claimed.quantity),
-                limit_price=Decimal(str(int(claimed.limit_price))),
-                exchange="KRX",
-            )
+            order_arguments = {
+                "symbol": claimed.symbol,
+                "side": claimed.side,
+                "quantity": int(claimed.quantity),
+                "limit_price": Decimal(str(int(claimed.limit_price))),
+                "exchange": "KRX",
+            }
+            if isinstance(self._client, KisPaperClient):
+                result = self.__order_submitter.submit_limit_cash_order(
+                    **order_arguments,
+                )
+            else:
+                # Test doubles retain the public shape; production KIS clients do not.
+                result = self._client.place_limit_cash_order(**order_arguments)
         except KisPaperConfigurationError:
             rejected = self._definitive_rejection(
                 claimed,

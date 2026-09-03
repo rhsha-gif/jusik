@@ -5,9 +5,11 @@ import json
 from quantpilot.packages.core.harness_service import HarnessService
 from quantpilot.packages.core.operator.schemas import OperatorRunRequest
 from quantpilot.packages.core.operator.service import OperatorService
+from quantpilot.services.api.dependencies import validate_generic_runtime_environment
 
 
 def main() -> int:
+    validate_generic_runtime_environment()
     harness = HarnessService.from_environment()
     summary = harness.run_smoke()
 

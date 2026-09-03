@@ -6,7 +6,7 @@ from pydantic import BaseModel
 from quantpilot.packages.core.harness_service import HarnessService
 from quantpilot.packages.core.policy.parser import DEFAULT_POLICY_TEXT
 from quantpilot.packages.core.universe.builder import build_candidate_universe
-from quantpilot.services.api.dependencies import get_harness_service
+from quantpilot.services.api.dependencies import get_harness_service, require_operator_actor
 from quantpilot.services.briefing import BriefingCard, daily_briefing
 
 
@@ -32,7 +32,7 @@ def _policy_id_for_request(request: Level12Request, service: HarnessService) -> 
     return service.parse_policy(request.text, user_id=request.user_id).policy_id
 
 
-@router.post("/level-1-2/run")
+@router.post("/level-1-2/run", dependencies=[Depends(require_operator_actor)])
 def run_level_1_2(
     request: Level12Request,
     service: HarnessService = Depends(get_harness_service),
@@ -40,7 +40,10 @@ def run_level_1_2(
     return service.run_level_1_2(policy_id=_policy_id_for_request(request, service))
 
 
-@router.post("/level-1-2/mock-execute")
+@router.post(
+    "/level-1-2/mock-execute",
+    dependencies=[Depends(require_operator_actor)],
+)
 def run_level_1_2_mock_execute(
     request: Level12MockExecuteRequest,
     service: HarnessService = Depends(get_harness_service),
@@ -60,7 +63,7 @@ def briefing_daily() -> list[BriefingCard]:
     return daily_briefing()
 
 
-@router.post("/research/universe")
+@router.post("/research/universe", dependencies=[Depends(require_operator_actor)])
 def research_universe(
     request: Level12Request,
     service: HarnessService = Depends(get_harness_service),
@@ -69,7 +72,7 @@ def research_universe(
     return {"policy_id": policy.policy_id, "candidates": build_candidate_universe(policy)}
 
 
-@router.post("/research/analyst")
+@router.post("/research/analyst", dependencies=[Depends(require_operator_actor)])
 def analyst_reports(
     request: Level12Request,
     service: HarnessService = Depends(get_harness_service),
@@ -78,7 +81,7 @@ def analyst_reports(
     return {"policy_id": result["policy"].policy_id, "analyst_reports": result["analyst_reports"]}  # type: ignore[union-attr]
 
 
-@router.post("/signals/board")
+@router.post("/signals/board", dependencies=[Depends(require_operator_actor)])
 def signal_board(
     request: Level12Request,
     service: HarnessService = Depends(get_harness_service),
@@ -87,7 +90,10 @@ def signal_board(
     return {"policy_id": result["policy"].policy_id, "signals": result["signals"]}  # type: ignore[union-attr]
 
 
-@router.post("/portfolio/rebalance-suggestions")
+@router.post(
+    "/portfolio/rebalance-suggestions",
+    dependencies=[Depends(require_operator_actor)],
+)
 def rebalance_suggestions(
     request: Level12Request,
     service: HarnessService = Depends(get_harness_service),
@@ -96,7 +102,10 @@ def rebalance_suggestions(
     return {"policy_id": result["policy"].policy_id, "rebalance": result["rebalance"]}  # type: ignore[union-attr]
 
 
-@router.post("/reports/research-signal-daily")
+@router.post(
+    "/reports/research-signal-daily",
+    dependencies=[Depends(require_operator_actor)],
+)
 def research_signal_daily_report(
     request: Level12Request,
     service: HarnessService = Depends(get_harness_service),

@@ -6,7 +6,7 @@ from pydantic import BaseModel
 from quantpilot.packages.core.harness_service import HarnessService
 from quantpilot.packages.core.schemas import StrategyDraft
 from quantpilot.packages.db.repositories import RepositoryError
-from quantpilot.services.api.dependencies import get_harness_service
+from quantpilot.services.api.dependencies import get_harness_service, require_operator_actor
 
 
 router = APIRouter()
@@ -18,7 +18,10 @@ class StrategyDraftRequest(BaseModel):
     note: str = ""
 
 
-@router.post("/strategy-studio/draft")
+@router.post(
+    "/strategy-studio/draft",
+    dependencies=[Depends(require_operator_actor)],
+)
 def create_strategy_draft(
     request: StrategyDraftRequest,
     service: HarnessService = Depends(get_harness_service),
@@ -42,7 +45,10 @@ def get_strategy_draft(
         raise HTTPException(status_code=404, detail=str(exc)) from exc
 
 
-@router.post("/strategy-studio/drafts/{draft_id}/validate")
+@router.post(
+    "/strategy-studio/drafts/{draft_id}/validate",
+    dependencies=[Depends(require_operator_actor)],
+)
 def validate_strategy_draft(
     draft_id: str,
     service: HarnessService = Depends(get_harness_service),

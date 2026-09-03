@@ -200,7 +200,7 @@ export function AppShell() {
           </div>
         </header>
 
-        <SafetyBanner dataMode={health.data?.data_mode ?? "fixture"} />
+        <SafetyBanner health={health.data} />
 
         <main className="min-w-0 flex-1 overflow-y-auto">
           <AnimatePresence mode="wait">

@@ -8,7 +8,7 @@ from pydantic import BaseModel
 from quantpilot.packages.core.harness_service import HarnessService
 from quantpilot.packages.core.schemas import StrategyApprovalTicket, StrategyPerformanceRecord
 from quantpilot.packages.db.repositories import RepositoryError
-from quantpilot.services.api.dependencies import get_harness_service
+from quantpilot.services.api.dependencies import get_harness_service, require_operator_actor
 
 
 router = APIRouter()
@@ -39,7 +39,10 @@ class StrategyPerformanceRequest(BaseModel):
     source: str = "manual"
 
 
-@router.post("/execution/strategy-tickets/create")
+@router.post(
+    "/execution/strategy-tickets/create",
+    dependencies=[Depends(require_operator_actor)],
+)
 def create_strategy_ticket(
     request: StrategyTicketCreateRequest,
     service: HarnessService = Depends(get_harness_service),
@@ -83,7 +86,10 @@ def strategy_activation_allowed(
     }
 
 
-@router.post("/execution/strategy-tickets/{ticket_id}/approve")
+@router.post(
+    "/execution/strategy-tickets/{ticket_id}/approve",
+    dependencies=[Depends(require_operator_actor)],
+)
 def approve_strategy_ticket(
     ticket_id: str,
     request: StrategyTicketDecisionRequest,
@@ -95,7 +101,10 @@ def approve_strategy_ticket(
         raise HTTPException(status_code=400, detail=str(exc)) from exc
 
 
-@router.post("/execution/strategy-tickets/{ticket_id}/reject")
+@router.post(
+    "/execution/strategy-tickets/{ticket_id}/reject",
+    dependencies=[Depends(require_operator_actor)],
+)
 def reject_strategy_ticket(
     ticket_id: str,
     request: StrategyTicketDecisionRequest,
@@ -107,7 +116,10 @@ def reject_strategy_ticket(
         raise HTTPException(status_code=400, detail=str(exc)) from exc
 
 
-@router.post("/execution/strategy-tickets/{ticket_id}/revoke")
+@router.post(
+    "/execution/strategy-tickets/{ticket_id}/revoke",
+    dependencies=[Depends(require_operator_actor)],
+)
 def revoke_strategy_ticket(
     ticket_id: str,
     request: StrategyTicketDecisionRequest,
@@ -119,7 +131,10 @@ def revoke_strategy_ticket(
         raise HTTPException(status_code=400, detail=str(exc)) from exc
 
 
-@router.post("/execution/strategy-performance")
+@router.post(
+    "/execution/strategy-performance",
+    dependencies=[Depends(require_operator_actor)],
+)
 def record_strategy_performance(
     request: StrategyPerformanceRequest,
     service: HarnessService = Depends(get_harness_service),
@@ -139,7 +154,10 @@ def record_strategy_performance(
         raise HTTPException(status_code=400, detail=str(exc)) from exc
 
 
-@router.post("/execution/strategy-performance/refresh")
+@router.post(
+    "/execution/strategy-performance/refresh",
+    dependencies=[Depends(require_operator_actor)],
+)
 def refresh_strategy_performance(
     service: HarnessService = Depends(get_harness_service),
 ) -> list[StrategyPerformanceRecord]:

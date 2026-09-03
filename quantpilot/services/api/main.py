@@ -1,12 +1,15 @@
 from __future__ import annotations
 
 import os
+from collections.abc import AsyncIterator
+from contextlib import asynccontextmanager
 
 from fastapi import FastAPI, Request
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
 
 from quantpilot.packages.db.repositories import RepositoryError
+from quantpilot.services.api.dependencies import validate_generic_runtime_environment
 from quantpilot.services.api.routers import (
     autopilot,
     execution,
@@ -38,6 +41,12 @@ DEPLOYED_WEB_ORIGINS = (
 )
 
 
+@asynccontextmanager
+async def _lifespan(_app: FastAPI) -> AsyncIterator[None]:
+    validate_generic_runtime_environment()
+    yield
+
+
 def _split_origins(raw: str | None) -> tuple[str, ...]:
     if not raw:
         return ()
@@ -51,7 +60,11 @@ def allowed_cors_origins() -> list[str]:
     return list(dict.fromkeys((*LOCAL_WEB_ORIGINS, *DEPLOYED_WEB_ORIGINS, *configured_origins)))
 
 
-app = FastAPI(title="QuantPilot Operator Pre-Harness", version="0.1.0")
+app = FastAPI(
+    title="QuantPilot Operator Pre-Harness",
+    version="0.1.0",
+    lifespan=_lifespan,
+)
 
 # Allow only known UI origins to call the pre-harness API. Never widen this to
 # wildcard origins; add exact private deployment origins through the env var.
@@ -60,7 +73,7 @@ app.add_middleware(
     allow_origins=allowed_cors_origins(),
     allow_credentials=False,
     allow_methods=["GET", "POST"],
-    allow_headers=["Content-Type"],
+    allow_headers=["Authorization", "Content-Type"],
 )
 
 

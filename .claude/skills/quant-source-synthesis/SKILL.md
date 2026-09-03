@@ -9,7 +9,7 @@ triggers:
   - "research this strategy"
   - "what does the literature say"
   - "cite papers for"
-model: claude-fable-5
+model: fable
 ---
 
 # Quant Source Synthesis Skill

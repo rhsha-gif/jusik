@@ -23,10 +23,12 @@ import { JsonViewer } from "@/components/json-viewer";
 import { EmptyState, ErrorState, OfflineState } from "@/components/states";
 import { PageHeader } from "@/components/page-header";
 import {
+  useAutopilotKillSwitch,
   useLatestOperatorReport,
   useOperatorRunOnce,
   useOperatorStatus,
   useProfessionalOperatorStatus,
+  useResumeGuardedAutopilot,
 } from "@/lib/queries";
 import { useWorkingPolicy } from "@/lib/working-policy";
 import type {
@@ -85,14 +87,30 @@ export function OperatorPage() {
   const professionalStatus = useProfessionalOperatorStatus();
   const latestReport = useLatestOperatorReport();
   const run = useOperatorRunOnce();
+  const killSwitch = useAutopilotKillSwitch();
+  const resumeGuarded = useResumeGuardedAutopilot();
   const workingPolicy = useWorkingPolicy();
 
   const [policyId, setPolicyId] = useState(workingPolicy?.policyId ?? "");
   const [policyVersion, setPolicyVersion] = useState("1");
   const [runMode, setRunMode] = useState<OperatorRunMode>("dry_run");
+  const [killConfirmationOpen, setKillConfirmationOpen] = useState(false);
+  const [autopilotActionResponse, setAutopilotActionResponse] = useState<Record<string, unknown> | null>(
+    null,
+  );
+  const [autopilotActionError, setAutopilotActionError] = useState<unknown>(null);
 
   const submission = RUN_MODE_META[runMode].submission;
   const canSubmit = policyId.trim().length > 0 && !run.isPending;
+  const autopilotPolicyId = policyId.trim() || undefined;
+  // The resume request targets one policy (the form's, else the server's latest),
+  // so the UI gate must read that policy's paused flag, not any policy's.
+  const safetyPolicies = professionalStatus.data?.safety.policies ?? [];
+  const targetPolicy = autopilotPolicyId
+    ? safetyPolicies.find((policy) => policy.policy_id === autopilotPolicyId)
+    : safetyPolicies[safetyPolicies.length - 1];
+  const autopilotPaused = targetPolicy?.autopilot_paused ?? false;
+  const autopilotActionPending = killSwitch.isPending || resumeGuarded.isPending;
 
   const submit = () => {
     const request: OperatorRunRequest = {
@@ -104,6 +122,31 @@ export function OperatorPage() {
       idempotency_key: crypto.randomUUID(),
     };
     run.mutate(request);
+  };
+
+  const confirmKillSwitch = () => {
+    setKillConfirmationOpen(false);
+    setAutopilotActionResponse(null);
+    setAutopilotActionError(null);
+    killSwitch.mutate(
+      { policyId: autopilotPolicyId, reason: "user_requested" },
+      {
+        onSuccess: (response) => setAutopilotActionResponse(response),
+        onError: (error) => setAutopilotActionError(error),
+      },
+    );
+  };
+
+  const resumeAutopilot = () => {
+    setAutopilotActionResponse(null);
+    setAutopilotActionError(null);
+    resumeGuarded.mutate(
+      { policyId: autopilotPolicyId },
+      {
+        onSuccess: (response) => setAutopilotActionResponse(response),
+        onError: (error) => setAutopilotActionError(error),
+      },
+    );
   };
 
   return (
@@ -164,6 +207,18 @@ export function OperatorPage() {
         />
       )}
 
+      <AutopilotControlCard
+        autopilotPaused={autopilotPaused}
+        pending={autopilotActionPending}
+        killConfirmationOpen={killConfirmationOpen}
+        response={autopilotActionResponse}
+        error={autopilotActionError}
+        onRequestKillSwitch={() => setKillConfirmationOpen(true)}
+        onConfirmKillSwitch={confirmKillSwitch}
+        onCancelKillSwitch={() => setKillConfirmationOpen(false)}
+        onResume={resumeAutopilot}
+      />
+
       <RunOnceCard
         policyId={policyId}
         onPolicyId={setPolicyId}
@@ -204,6 +259,92 @@ function isOffline(error: unknown): boolean {
     error !== null &&
     "isOffline" in error &&
     Boolean((error as { isOffline: unknown }).isOffline)
+  );
+}
+
+function AutopilotControlCard({
+  autopilotPaused,
+  pending,
+  killConfirmationOpen,
+  response,
+  error,
+  onRequestKillSwitch,
+  onConfirmKillSwitch,
+  onCancelKillSwitch,
+  onResume,
+}: {
+  autopilotPaused: boolean;
+  pending: boolean;
+  killConfirmationOpen: boolean;
+  response: Record<string, unknown> | null;
+  error: unknown;
+  onRequestKillSwitch: () => void;
+  onConfirmKillSwitch: () => void;
+  onCancelKillSwitch: () => void;
+  onResume: () => void;
+}) {
+  return (
+    <Card>
+      <CardHeader className="flex-col items-start justify-between gap-4 sm:flex-row">
+        <div className="flex flex-col gap-1">
+          <CardTitle className="flex items-center gap-2">
+            <Ban className="size-4.5 text-danger" /> 자동운영 제어
+          </CardTitle>
+          <CardDescription>
+            킬스위치와 재개 요청은 기존 운영자 Bearer 토큰으로 서버가 검증합니다. 이 화면은 안전 기본값을
+            변경하지 않습니다.
+          </CardDescription>
+        </div>
+        <Badge variant={autopilotPaused ? "warn" : "safe"}>
+          autopilot_paused: {String(autopilotPaused)}
+        </Badge>
+      </CardHeader>
+      <CardContent className="flex flex-col gap-4">
+        <div className="flex flex-wrap items-center gap-2">
+          {killConfirmationOpen ? (
+            <>
+              <p role="alert" className="mr-1 text-[12.5px] text-danger">
+                킬스위치를 실행하면 자동운영이 즉시 중지됩니다. 다시 확인하세요.
+              </p>
+              <Button variant="danger" onClick={onConfirmKillSwitch} disabled={pending}>
+                <Ban /> 킬스위치 실행 확인
+              </Button>
+              <Button variant="ghost" onClick={onCancelKillSwitch} disabled={pending}>
+                취소
+              </Button>
+            </>
+          ) : (
+            <Button variant="danger" onClick={onRequestKillSwitch} disabled={pending}>
+              <Ban /> 킬스위치
+            </Button>
+          )}
+          <Button variant="secondary" onClick={onResume} disabled={!autopilotPaused || pending}>
+            <PlayCircle /> 재개
+          </Button>
+        </div>
+
+        {response && (
+          <div role="status" className="flex flex-col gap-3 rounded-xl border border-hairline bg-surface-solid p-3.5">
+            <p className="text-[12px] font-medium text-muted">서버 응답</p>
+            <div className="flex flex-wrap gap-2">
+              {"guarded_autopilot_paused" in response && (
+                <Badge variant={response.guarded_autopilot_paused ? "warn" : "safe"}>
+                  guarded_autopilot_paused: {String(response.guarded_autopilot_paused)}
+                </Badge>
+              )}
+              {"kill_switch_engaged" in response && (
+                <Badge variant={response.kill_switch_engaged ? "danger" : "safe"}>
+                  kill_switch_engaged: {String(response.kill_switch_engaged)}
+                </Badge>
+              )}
+            </div>
+            <JsonViewer data={response} title="Raw JSON (autopilot action)" defaultOpen />
+          </div>
+        )}
+
+        {error !== null && <ErrorState error={error} context="자동운영 제어 요청에 실패했습니다" />}
+      </CardContent>
+    </Card>
   );
 }
 

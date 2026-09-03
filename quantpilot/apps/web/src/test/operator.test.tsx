@@ -2,6 +2,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { MemoryRouter } from "react-router-dom";
+import { apiFetch } from "@/lib/api";
 import { OperatorPage } from "@/pages/operator";
 import type {
   OperatorReport,
@@ -10,12 +11,7 @@ import type {
   ProfessionalOperatorStatusResponse,
 } from "@/lib/types";
 
-function json(data: unknown, status = 200): Response {
-  return new Response(JSON.stringify(data), {
-    status,
-    headers: { "Content-Type": "application/json" },
-  });
-}
+vi.mock("@/lib/api", () => ({ apiFetch: vi.fn() }));
 
 const SAFE_STATUS: OperatorStatusResponse = {
   live_trading_enabled: false,
@@ -219,30 +215,43 @@ interface FetchRoutes {
   professional?: ProfessionalOperatorStatusResponse;
   latest?: { report: OperatorReport | null; text: string };
   runOnce?: OperatorRunResult;
+  killSwitch?: Record<string, unknown>;
+  resume?: Record<string, unknown>;
   onRunOnce?: (body: unknown) => void;
+  onKillSwitch?: (body: unknown) => void;
+  onResume?: (body: unknown) => void;
 }
 
-function stubFetch(routes: FetchRoutes) {
-  const fetchMock = vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
-    const url = String(input);
-    const method = init?.method ?? "GET";
-    if (url.includes("/api/operator/run-once") && method === "POST") {
-      routes.onRunOnce?.(init?.body ? JSON.parse(String(init.body)) : null);
-      return json(routes.runOnce ?? { detail: "no run configured" }, routes.runOnce ? 200 : 500);
+function stubApiFetch(routes: FetchRoutes) {
+  const apiFetchMock = vi.mocked(apiFetch);
+  const handler = async (path: string, options?: { method?: string; body?: unknown }) => {
+    const method = options?.method ?? "GET";
+    if (path === "/api/operator/run-once" && method === "POST") {
+      routes.onRunOnce?.(options?.body ?? null);
+      if (!routes.runOnce) throw new Error("no run configured");
+      return routes.runOnce;
     }
-    if (url.includes("/api/operator/reports/latest")) {
-      return json(routes.latest ?? { report: null, text: "" });
+    if (path === "/api/autopilot/kill-switch" && method === "POST") {
+      routes.onKillSwitch?.(options?.body ?? null);
+      return routes.killSwitch ?? { guarded_autopilot_paused: true, kill_switch_engaged: true };
     }
-    if (url.includes("/api/operator/professional-status")) {
-      return json(routes.professional ?? UNAVAILABLE_PROFESSIONAL);
+    if (path === "/api/autopilot/guarded/resume" && method === "POST") {
+      routes.onResume?.(options?.body ?? null);
+      return routes.resume ?? { guarded_autopilot_paused: false, kill_switch_engaged: false };
     }
-    if (url.includes("/api/operator/status")) {
-      return json(routes.status ?? SAFE_STATUS);
+    if (path === "/api/operator/reports/latest") {
+      return routes.latest ?? { report: null, text: "" };
     }
-    return json({ detail: `unhandled ${method} ${url}` }, 404);
-  });
-  vi.stubGlobal("fetch", fetchMock);
-  return fetchMock;
+    if (path === "/api/operator/professional-status") {
+      return routes.professional ?? UNAVAILABLE_PROFESSIONAL;
+    }
+    if (path === "/api/operator/status") {
+      return routes.status ?? SAFE_STATUS;
+    }
+    throw new Error(`unhandled ${method} ${path}`);
+  };
+  apiFetchMock.mockImplementation(handler as unknown as typeof apiFetch);
+  return apiFetchMock;
 }
 
 function renderPage() {
@@ -259,6 +268,7 @@ function renderPage() {
 describe("OperatorPage", () => {
   beforeEach(() => {
     localStorage.clear();
+    vi.clearAllMocks();
   });
 
   afterEach(() => {
@@ -266,18 +276,18 @@ describe("OperatorPage", () => {
   });
 
   it("queries operator status and latest report on mount", async () => {
-    const fetchMock = stubFetch({ status: SAFE_STATUS });
+    const apiFetchMock = stubApiFetch({ status: SAFE_STATUS });
     renderPage();
 
     await waitFor(() => {
-      const urls = fetchMock.mock.calls.map((call) => String(call[0]));
+      const urls = apiFetchMock.mock.calls.map((call) => String(call[0]));
       expect(urls.some((u) => u.includes("/api/operator/status"))).toBe(true);
       expect(urls.some((u) => u.includes("/api/operator/reports/latest"))).toBe(true);
     });
   });
 
   it("renders the safe default state with no live-trading affordance", async () => {
-    stubFetch({ status: SAFE_STATUS });
+    stubApiFetch({ status: SAFE_STATUS });
     renderPage();
 
     expect(await screen.findByText("live_trading_enabled: false")).toBeInTheDocument();
@@ -289,7 +299,7 @@ describe("OperatorPage", () => {
   });
 
   it("renders an explicit unavailable professional state instead of a green empty state", async () => {
-    stubFetch({ status: SAFE_STATUS, professional: UNAVAILABLE_PROFESSIONAL });
+    stubApiFetch({ status: SAFE_STATUS, professional: UNAVAILABLE_PROFESSIONAL });
     renderPage();
 
     expect(await screen.findByText("Paper 상태 DB가 설정되지 않았거나 안전하게 읽을 수 없습니다. 빈 값을 정상 상태로 간주하지 않습니다.")).toBeInTheDocument();
@@ -297,7 +307,7 @@ describe("OperatorPage", () => {
   });
 
   it("renders all five durable professional status sections without fabricated PnL", async () => {
-    stubFetch({ status: SAFE_STATUS, professional: CRITICAL_PROFESSIONAL });
+    stubApiFetch({ status: SAFE_STATUS, professional: CRITICAL_PROFESSIONAL });
     renderPage();
 
     expect(await screen.findByRole("heading", { name: "안전 상태" })).toBeInTheDocument();
@@ -328,7 +338,7 @@ describe("OperatorPage", () => {
         reason_codes: [],
       },
     };
-    stubFetch({ status: SAFE_STATUS, professional: stale });
+    stubApiFetch({ status: SAFE_STATUS, professional: stale });
     renderPage();
 
     expect(await screen.findByText("지연 데이터")).toBeInTheDocument();
@@ -336,7 +346,7 @@ describe("OperatorPage", () => {
 
   it("builds a dry_run OperatorRunRequest with a fresh idempotency key", async () => {
     let captured: Record<string, unknown> | null = null;
-    stubFetch({
+    stubApiFetch({
       status: SAFE_STATUS,
       runOnce: {
         run_id: "oprun_1",
@@ -369,7 +379,7 @@ describe("OperatorPage", () => {
   });
 
   it("renders fallback reason and detail from a fallback run result", async () => {
-    stubFetch({
+    stubApiFetch({
       status: SAFE_STATUS,
       runOnce: {
         run_id: "oprun_2",
@@ -414,8 +424,94 @@ describe("OperatorPage", () => {
     expect(screen.getByText("broker unhealthy, falling back")).toBeInTheDocument();
   });
 
+  it("requires confirmation before engaging the kill switch and shows the server state", async () => {
+    const apiFetchMock = stubApiFetch({
+      status: SAFE_STATUS,
+      professional: CRITICAL_PROFESSIONAL,
+      killSwitch: { guarded_autopilot_paused: true, kill_switch_engaged: true },
+    });
+    renderPage();
+
+    await waitFor(() =>
+      expect(
+        apiFetchMock.mock.calls.some(([path]) => path === "/api/operator/professional-status"),
+      ).toBe(true),
+    );
+    fireEvent.click(screen.getByRole("button", { name: "킬스위치" }));
+
+    expect(
+      apiFetchMock.mock.calls.some(([path]) => path === "/api/autopilot/kill-switch"),
+    ).toBe(false);
+
+    fireEvent.click(screen.getByRole("button", { name: "킬스위치 실행 확인" }));
+
+    await waitFor(() =>
+      expect(
+        apiFetchMock.mock.calls.some(([path]) => path === "/api/autopilot/kill-switch"),
+      ).toBe(true),
+    );
+    const killSwitchCall = apiFetchMock.mock.calls.find(
+      ([path]) => path === "/api/autopilot/kill-switch",
+    );
+    expect(killSwitchCall?.[1]).toMatchObject({
+      method: "POST",
+      body: { reason: "user_requested" },
+    });
+    expect(await screen.findByText("guarded_autopilot_paused: true")).toBeInTheDocument();
+    expect(screen.getByText("kill_switch_engaged: true")).toBeInTheDocument();
+  });
+
+  it("keeps resume disabled until the harness reports autopilot_paused", async () => {
+    const apiFetchMock = stubApiFetch({
+      status: SAFE_STATUS,
+      professional: CRITICAL_PROFESSIONAL,
+    });
+    renderPage();
+
+    await waitFor(() =>
+      expect(
+        apiFetchMock.mock.calls.some(([path]) => path === "/api/operator/professional-status"),
+      ).toBe(true),
+    );
+    expect(screen.getByRole("button", { name: "재개" })).toBeDisabled();
+  });
+
+  it("resumes only after the harness reports a paused autopilot", async () => {
+    const pausedProfessional: ProfessionalOperatorStatusResponse = {
+      ...CRITICAL_PROFESSIONAL,
+      safety: {
+        ...CRITICAL_PROFESSIONAL.safety,
+        policies: CRITICAL_PROFESSIONAL.safety.policies.map((policy) => ({
+          ...policy,
+          autopilot_paused: true,
+        })),
+      },
+    };
+    const apiFetchMock = stubApiFetch({
+      status: SAFE_STATUS,
+      professional: pausedProfessional,
+      resume: { guarded_autopilot_paused: false, kill_switch_engaged: false },
+    });
+    renderPage();
+
+    const resumeButton = screen.getByRole("button", { name: "재개" });
+    await waitFor(() => expect(resumeButton).toBeEnabled());
+    fireEvent.click(resumeButton);
+
+    await waitFor(() =>
+      expect(
+        apiFetchMock.mock.calls.some(([path]) => path === "/api/autopilot/guarded/resume"),
+      ).toBe(true),
+    );
+    const resumeCall = apiFetchMock.mock.calls.find(
+      ([path]) => path === "/api/autopilot/guarded/resume",
+    );
+    expect(resumeCall?.[1]).toMatchObject({ method: "POST", body: {} });
+    expect(await screen.findByText("kill_switch_engaged: false")).toBeInTheDocument();
+  });
+
   it("renders the latest report text when present", async () => {
-    stubFetch({
+    stubApiFetch({
       status: SAFE_STATUS,
       latest: { report: makeReport(), text: "운영자 리포트 텍스트 렌더링" },
     });

@@ -10,7 +10,7 @@ from quantpilot.packages.core.execution.state_machine import (
     fully_automated_operator_flag_enabled,
     live_trading_flag_enabled,
 )
-from quantpilot.packages.core.harness_service import HarnessService
+from quantpilot.packages.core.harness_service import HarnessService, run_smoke_with_operator
 from quantpilot.packages.core.risk.gatekeeper import market_orders_enabled
 from quantpilot.packages.db.repositories import RepositoryRegistry
 from quantpilot.services.api.dependencies import get_harness_service, require_operator_actor
@@ -81,4 +81,4 @@ def run_smoke(service: HarnessService = Depends(get_harness_service)) -> dict[st
         market_data_provider=service.market_data_provider,
         data_mode=service.data_mode,
     )
-    return isolated_service.run_smoke()
+    return run_smoke_with_operator(isolated_service)

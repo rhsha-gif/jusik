@@ -144,6 +144,7 @@ def test_api_smoke_route_preserves_shared_orders_and_audit_logs(monkeypatch) -> 
         "audit_events",
         "report_id",
         "live_trading_enabled",
+        "operator",
     }
     assert shared_repositories.order_plans.list() == existing_orders
     assert shared_repositories.audit_logs.list() == existing_audit_logs

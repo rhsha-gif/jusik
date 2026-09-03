@@ -3611,3 +3611,25 @@ class HarnessService:
             "report_id": report.report_id,
             "live_trading_enabled": False,
         }
+
+
+def run_smoke_with_operator(harness: HarnessService) -> dict[str, object]:
+    from quantpilot.packages.core.operator.schemas import OperatorRunRequest
+    from quantpilot.packages.core.operator.service import OperatorService
+
+    summary = harness.run_smoke()
+    operator_result = OperatorService(harness).run_once(
+        OperatorRunRequest(
+            policy_id=str(summary["policy_id"]),
+            requested_policy_version=1,
+            run_mode="dry_run",
+            idempotency_key="smoke-operator-run",
+        )
+    )
+    summary["operator"] = {
+        "status": operator_result.status,
+        "fallback": operator_result.fallback.reason_code if operator_result.fallback else None,
+        "submitted_order_plan_ids": operator_result.submitted_order_plan_ids,
+        "live_trading_enabled": operator_result.report.live_trading_enabled,
+    }
+    return summary

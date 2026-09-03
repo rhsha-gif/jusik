@@ -6,13 +6,17 @@ authoritative bind for what each roadmap gate must prove, with which commands,
 under which safety invariants, and how *fake-only fixture development* is
 distinguished from *manual KIS operational validation*.
 
-- Mission: `QP-ROADMAP-EXECUTION` (lead: GPT-5 Codex; see
-  `docs/roadmap_execution_workboard.md`).
+- Mission record: `QP-ROADMAP-EXECUTION`; completion status is recorded in
+  `docs/STATUS.md` "최근 완료 (2026-07-11)" and
+  "최근 완료 (2026-07-12, Roadmap Gate 2)".
 - This artifact: `QP-RM-00A` counterpart role (independent acceptance authoring),
   authored by Claude Code on branch `claude/qp-roadmap-contracts`.
 - Governing documents: root `AGENTS.md`, `docs/agent_collaboration_protocol.md`,
-  `docs/roadmap_baseline_v9_report.md`, `docs/contracts/kis_paper_kill_contract.md`,
-  and the reservation contract `docs/contracts/atomic_risk_reservation_v1.md`.
+  `docs/_archive/krx_kis/kis_paper_cancel_all_kill_v1_report.md`,
+  `docs/contracts/kis_paper_kill_contract.md`, and the reservation contract
+  `docs/contracts/atomic_risk_reservation_v1.md`.
+
+The former roadmap workboard and baseline report are not present under `docs/`; their status, baseline, and manual-Gate-P evidence are preserved in the `STATUS.md` sections and archived KRX/KIS records above.
 
 This matrix does not grant any authority. It records what evidence a gate must
 present before its workboard may move to `integrated`/`done`. It never widens a
@@ -28,13 +32,13 @@ misallocation is escalated to the user, never overridden by a gate.
 |---|---|---|
 | Live trading | `LIVE_TRADING_ENABLED=false` | `AGENTS.md`; smoke prints `live_trading_enabled=false` |
 | Guarded autopilot | `GUARDED_AUTOPILOT_ENABLED=false` | `AGENTS.md` |
-| Fully automated operator | `FULLY_AUTOMATED_OPERATOR_ENABLED=false` | `risk/gatekeeper.py:36` (`allowed_execution_modes`) |
+| Fully automated operator | `FULLY_AUTOMATED_OPERATOR_ENABLED=false` | `quantpilot/packages/core/risk/gatekeeper.py:31` (`allowed_execution_modes`) |
 | Market orders | `MARKET_ORDERS_ENABLED=false` | `risk/gatekeeper.py:27` (`market_orders_enabled`) |
 | Broker mode | `BROKER_MODE=mock` | smoke prints `broker=mock` |
 | Secrets | no credentials/account IDs/tokens persisted or printed | `StateStoreProvenance.account_scope_fingerprint` is an opaque `sha256:` digest only (`operator/position_ledger.py:106-119`) |
 | External connectors | fake-client unit tests only; real KIS is skipped/manual | `docs/contracts/kis_paper_kill_contract.md` "Adversarial executable test matrix" |
-| Order-path integrity | risk gate, kill switch, idempotency, order state machine, audit, reconciliation are never bypassed | `PAPER_DISPATCH_TRANSITIONS`/`PAPER_KILL_TRANSITIONS`/`PAPER_CANCEL_TRANSITIONS` (`db/sqlite_repositories.py:62-117`) |
-| LLM/RL authority | model output cannot create, approve, or submit broker orders | `DurablePaperSubmissionCoordinator` is the sole POST authority (`execution/paper_submission.py:107-108`) |
+| Order-path integrity | risk gate, kill switch, idempotency, order state machine, audit, reconciliation are never bypassed | `PAPER_DISPATCH_TRANSITIONS`/`PAPER_CANCEL_TRANSITIONS` (`quantpilot/packages/core/execution/transitions.py:19,51`); `PAPER_KILL_TRANSITIONS` (`quantpilot/packages/db/sqlite_repositories.py:284`) |
+| LLM/RL authority | model output cannot create, approve, or submit broker orders | `DurablePaperSubmissionCoordinator` is the sole POST authority (`quantpilot/packages/core/execution/paper_submission.py:128`) |
 
 A gate that cannot demonstrate every invariant above is **not** acceptable,
 regardless of feature completeness.
@@ -51,7 +55,8 @@ pass/skip counts.
 # Backend (authoritative test evidence)
 python -m pytest quantpilot/tests -p no:cacheprovider --basetemp=.pytest_tmp `
     --junitxml=.pytest_tmp/roadmap.xml
-# v9 baseline evidence of record: 819 passed, 2 skipped (roadmap_baseline_v9_report.md)
+# v9 baseline evidence of record: 819 passed, 2 skipped
+# (`docs/_archive/krx_kis/kis_paper_cancel_all_kill_v1_report.md`)
 
 # Smoke / orchestration safety
 python -m quantpilot.jobs.run_smoke
@@ -93,8 +98,9 @@ declares which side of the line each acceptance item sits on.
 
 **Manual KIS operational validation (explicit user opt-in only).**
 - Requires user-supplied paper credentials and explicit manual authority
-  (`roadmap_execution_workboard.md` blockers; `roadmap_baseline_v9_report.md`
-  "Remaining gate").
+  (`docs/STATUS.md` "사람 입력 대기";
+  `docs/_archive/krx_kis/atomic_risk_reservation_v1_completion_report.md`
+  "Manual-only limitations").
 - Confirms the inferred `VTTC0084R` cancelable-order inquiry and any other real
   TR contract against a separate paper account.
 - Is the **only** evidence that authorizes *operational* kill/reservation use.
@@ -108,8 +114,9 @@ explicit authorization.
 
 ## 4. Stage-gated acceptance
 
-Dependency order follows the roadmap work queue
-(`roadmap_execution_workboard.md`): `QP-RM-00 → QP-RISK-RES-V1 →
+Dependency order follows the recorded roadmap sequence
+(`docs/STATUS.md` "최근 완료 (2026-07-11)" and
+`docs/_archive/krx_kis/canonical_order_events_v1_workboard.md`): `QP-RM-00 → QP-RISK-RES-V1 →
 QP-EXEC-EVENTS-V1 → QP-KERNEL-V2 → QP-LEDGER-RUNTIME → Gate P (paper readiness)`.
 Each gate lists its dependency, the invariants it must additionally hold, its
 authoritative evidence, and its fake-vs-manual split.
@@ -123,7 +130,8 @@ authoritative evidence, and its fake-vs-manual split.
   are never auto-reposted (`kis_paper_kill_contract.md` "Durable state machines").
 - **Authoritative evidence (already recorded):** backend `819 passed, 2 skipped`;
   smoke `broker=mock`, `live=false`, operator blocked; kill CLI
-  `paper_kill_disabled` (`roadmap_baseline_v9_report.md`, commit `216ff22`).
+  `paper_kill_disabled` (`docs/_archive/krx_kis/kis_paper_cancel_all_kill_v1_report.md`,
+  commit `216ff22`).
 - **Fake-only:** all of the above. **Manual:** `VTTC0084R` remains an open manual
   gate; it blocks operational kill use only, not downstream development.
 
@@ -176,7 +184,7 @@ authoritative evidence, and its fake-vs-manual split.
 
 - **Depends on:** Gate 1 contract stability (reservation lifecycle aggregate
   identities must be stable before event dual-write —
-  `roadmap_execution_workboard.md` integration requests).
+  `docs/_archive/krx_kis/canonical_order_events_v1_workboard.md` integration requests).
 - **Scope:** canonical execution events + deterministic reducer + shadow parity.
 - **Additional invariants:** replay is deterministic; duplicate or out-of-order
   events cannot corrupt projections; events are derived from, and never widen,
@@ -251,7 +259,7 @@ authoritative evidence, and its fake-vs-manual split.
 |---|---|---|---|---|---|---|
 | Gate 0 `QP-RM-00` | `819 passed, 2 skipped` | mock/live=false/blocked | 0 | yes | `VTTC0084R` pending | done |
 | Gate 1 `QP-RISK-RES-V1` | `885 passed, 2 skipped` | mock/live=false/operator blocked; kill CLI blocked | 0/0 | yes | n/a for dev; Gate P pending | done |
-| Gate 2 `QP-EXEC-EVENTS-V1` | pending | pending | pending | pending | n/a | proposed |
+| Gate 2 `QP-EXEC-EVENTS-V1` | Gate 2 accepted head `8eaf15a`; 전체 backend `1046 passed, 2 skipped` | broker mock/live=false/operator blocked; kill CLI `paper_kill_disabled`; OpenAPI 51 paths byte-exact + d.ts 동기화; frontend `23 passed` + build 성공 | 0/0 | yes | n/a | done |
 | Gate 3 `QP-KERNEL-V2` | pending | pending | pending | pending | n/a | proposed |
 | Gate 4 `QP-LEDGER-RUNTIME` | pending | pending | pending | pending | folded into P | proposed |
 | Gate P paper readiness | pending | pending | pending | required | **required** | proposed |

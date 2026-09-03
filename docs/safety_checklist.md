@@ -22,12 +22,19 @@ Run through this list before enabling any operator capability, and again after a
 ## Invariants enforced in code (verify after any refactor)
 
 - [ ] Only `HarnessService.submit_order_plan` calls `broker.submit_order` (single submission path, state machine + fresh risk check + idempotency).
+  근거: `quantpilot/packages/core/harness_service.py:3125`
 - [ ] `/api/level-1-2/run` remains suggestion-only. Mock execution must use `/api/level-1-2/mock-execute`, and that path must require `BrokerMode.mock`.
+  근거: `quantpilot/services/api/routers/level_1_2.py:35`, `quantpilot/services/api/routers/level_1_2.py:43`, `quantpilot/packages/core/harness_service.py:371`
 - [ ] Approval tickets may record `live_trading_candidate` user approval, but must block before broker submission with no live broker adapter or credentials.
+  근거: `quantpilot/packages/core/harness_service.py:1451`, `quantpilot/packages/core/harness_service.py:1564`
 - [ ] `authorize_level5` re-checks flag, kill switches, broker mode, promotion, version, quote freshness, registry status, order type, loss limits, conflicts, idempotency, and a fresh risk check per order.
+  근거: `quantpilot/packages/core/execution/state_machine.py:252`, `quantpilot/packages/core/execution/state_machine.py:415`, `quantpilot/packages/core/execution/state_machine.py:418`
 - [ ] No LLM or RL output reaches a broker: RL contract limits outputs to `target_weight_delta`/`strategy_selection`; reports render deterministically without an LLM.
+  근거: `quantpilot/packages/core/rl/outputs.py:10`, `quantpilot/packages/core/operator/reporting.py:6`
 - [ ] Audit recorder whitelist rejects unknown actions (fail-closed).
+  근거: `quantpilot/packages/db/audit.py:187`
 - [ ] Every fallback row has `order_submission_enabled=false`.
+  근거: `quantpilot/packages/core/execution/fallback_manager.py:13`, `quantpilot/packages/core/execution/fallback_manager.py:85`
 
 ## Out of bounds — do not do
 

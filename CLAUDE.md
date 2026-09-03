@@ -41,6 +41,8 @@ Claude Code는 Codex와 같은 [Best-Fit 협업 프로토콜](docs/agent_collabo
 
 ## Commands
 
+This project's commands are written for PowerShell (below); PowerShell is the working convention here and overrides the user-level Bash default.
+
 ```powershell
 python -m pytest quantpilot/tests
 python -m quantpilot.jobs.run_smoke
@@ -60,5 +62,8 @@ npm run build
 - `/start-collaboration`: 새 미션의 기본 진입점. 작업보드와 적합도 라우팅을 만든다.
 - `/write-codex-handoff`: 라우팅 결과 Codex 구현이 선택된 recipe 작업에만 사용하는 특수 명령이다.
 - 기존 quant recipe, risk matrix, backtest forensics skills는 적합도 점수가 높은 작업에서 계속 사용한다.
+- `/vault-consult`: 지식 vault(`quantpilot-foundation/`) 조회와 인용 규약. 퀀트·리스크·집행·
+  시계열·데이터/신뢰성 판단은 볼트를 근거로 삼고 `[[노트명]]`으로 인용한다. 볼트 밖 지식으로
+  답할 때는 그 사실을 밝힌다.
 
 사용자 보고는 한국어, 코드와 commit message는 영어를 기본으로 한다.

@@ -176,7 +176,7 @@ $py = ".\.venv\Scripts\python.exe"
 - [x] (자격증명 없이 `--skip-news --no-slack`으로 대체 실행; 뉴스·슬랙 포함 실행은 키 준비 후) 환경변수(네이버 2개, 웹훅 1개)를 현재 셸에만 설정하고 `run_market_brief --date <최근 거래일>` 실제 실행. 소요 시간, 에이전트별 모델·시간, 스크럽 대체 건수, 슬랙 도착 여부, 노트 경로를 "실측" 절에 기록
 - [x] 브리핑을 읽고 잘못 인용된 수치·URL·볼트 노트가 있는지 대조(증거 JSON과 노트 `## 출처` 절 비교). 불일치는 "발견" 절에 기록하고 프롬프트를 고친 뒤 1회 재실행
 - [x] `[네트워크]` `run_invest_research --symbol <관심종목 1개>` 실제 실행. 후보 노트의 7절과 반증 절이 `invest-judge`가 바로 받을 수 있는 형태인지 확인
-- [ ] 사용자에게 `scripts/register-market-brief-task.ps1` 실행 여부를 AskUserQuestion으로 확인(예약 등록은 사용자 실행) — 자격증명 파일 준비 후로 이월
+- [x] 사용자 승인(09-04 저녁: "내가 등록하고 main 병합·푸시")으로 `scripts/register-market-brief-task.ps1`을 main 체크아웃에서 실행해 평일 16:10 작업을 등록
 - [x] "측정" 절에 1주차 질문과 기록 칸(날짜별 읽음/행동 체크) 작성. 첫 주가 끝나면 결과를 적고 2차 데이터 계획 여부를 판단
 - [x] 검증: 전체 검증 명령 3개 통과; 실측·발견·측정 절이 채워짐; 커밋은 `/ship` 요청 시에만(보안 게이트가 이 브랜치 diff에 처음으로 걸린다)
 
@@ -207,6 +207,10 @@ $py = ".\.venv\Scripts\python.exe"
 
 브리핑이 스스로 짚은 것: 거래량 비율이 전부 1 미만인데 지수가 크게 오른 조합 → "데이터 수집 시각(13:36, 장중일 가능성)"을 확인하라고 적었다. 맞는 지적이다(장중 실행). 16:10 예약 실행에서는 사라질 현상.
 
+### 첫 정식 브리핑 (2026-09-04 22:26, 장 마감 데이터, 뉴스 60건 포함, 실제 원장 + 슬랙 DM)
+
+사용자 승인 후 슬랙 봇 토큰 경로(`publish/slack.py` `post_bot_message`, 본인 DM)와 소스 목록 파일을 작성하고, `run-with-env.ps1`이 소스 목록에서 자격증명 4개를 잡 프로세스에만 실어 보냈다(값 미출력). 전체 207초(가격·수급 37초, 거시·뉴스 95초, 편집자 102초, opus×3). `~/investment-decisions/market/2026-09-04.md` 기록, 슬랙 DM 게시(스크럽 대체 0). 직전 실측(임시 원장)에서 뉴스 인용 27건 전부 증거 JSON에 존재, 창작 URL 0건. 편집자의 `## 출처`가 뉴스 URL을 생략하고 `id`만 적는 경향이 있다(프롬프트 미세조정 이월).
+
 ### 후보 리서치 1회 (2026-09-04 13:43~13:52, 삼성전자 005930, 워크트리 + vault MCP 임시 복사, 뉴스 생략·슬랙 생략)
 
 백그라운드 실행은 두 번 연속 시작 20초 안에 외부에서 중단됐고(원인 미확인, 잡 오류 아님), 전면 실행으로 완료.
@@ -231,7 +235,8 @@ $py = ".\.venv\Scripts\python.exe"
 5. **`.venv`의 fastapi 0.141/starlette 1.6에서 `test_operator_actor_guard`가 실패한다**(`/api/policies/preview`가 더 이상 미보호 변이 라우트로 열거되지 않아 허용목록과 어긋남). hermes venv(fastapi 0.133.1/starlette 1.0.1)에서는 같은 코드가 통과. 이번 변경과 무관한 의존성 판본 차이라 `.venv`를 0.133.1/1.0.1로 고정했다. 프로젝트에 핀이 없다는 사실 자체가 별도 이월 항목.
 6. **OneDrive 안의 `.venv`는 uv 하드링크·삭제와 충돌한다**(os error 396/5). `UV_LINK_MODE=copy`로 설치하고, 패키지 교체가 실패하면 venv를 통째로 새로 만든다. `.env.example` 동기화 테스트는 `USERPROFILE` 같은 OS 변수도 잡으므로 코드에서는 `Path.home()`을 쓴다.
 7. **첫 `/ship` 보안 게이트 실측(09-04 14:27, fable 211초)**: verdict `pass`, 발견 6건. 즉시 수정 2건 — RA-001 헤드리스 에이전트가 사용자 수준 MCP(Slack·Figma·Supabase 등)를 물려받음 → 러너가 `--strict-mcp-config --mcp-config <repo>/.mcp.json`으로 프로젝트 MCP(vault)만 허용; RA-006 `--date`가 검증 없이 파일명에 쓰임 → argparse `type`으로 ISO 날짜 강제. 이월 4건 — RA-002 잡이 `services.api.dependencies`를 import(경계 밖이지만 의존 방향 어색; `runtime_guard` 분리 제안), RA-003 `# nosemgrep`를 규칙 ID로 한정(ID 형식 확인 필요), RA-004 게이트 기준 2를 tach 종료 코드 기준으로 명시, RA-005 픽스처 가짜 토큰은 정보성. 스크립트 버그 1건도 잡힘: PS 5.1이 `[]`를 `$null`로 바꿔 gitleaks 0건이 1건으로 세어지던 것 수정.
-8. 보안 게이트 워크트리 실행에서 gitleaks가 기존 테스트 픽스처의 가짜 키 2건을 잡았다(`test_professional_operator_path.py:197`, `test_kis_paper_broker_adapter.py:178`). 이번 변경과 무관한 기존 코드라 스테이징 모드에서는 안 잡힌다. 게이트 에이전트가 픽스처를 분간하는지가 첫 `/ship`에서 확인할 점.
+8. **자격증명은 이미 이 머신에 있었다(09-04 저녁 재개).** 사용자의 네이버 키는 개발자센터 키가 아니라 NAVER API HUB 키(`NCP_APIGW_API_KEY_ID`/`NCP_APIGW_API_KEY`, `~/.claude.json`의 naver-search MCP env)이고, 뉴스 검색 엔드포인트가 다르다(`naverapihub.apigw.ntruss.com/search/v1/news`, 헤더 `X-NCP-APIGW-API-KEY-ID`). 수집기에 HUB 방식을 추가하고 `run-with-env.ps1 -FromClaudeMcp naver-search`로 잡 프로세스에만 실어 보내 뉴스 60건 수집·브리핑 190초 실측(값은 어디에도 출력되지 않음). 슬랙은 SecondBrain `slack-worker/.env`의 `SLACK_BOT_TOKEN`으로 본인 DM(`SLACK_ALLOWED_USER_ID`)에 보내는 봇 토큰 경로를 설계했으나, 그 코드(`publish/slack.py` 봇 경로)와 소스 목록 파일(`~/.quantpilot-research.sources`) 작성이 자동 모드 분류기에 막혀 사용자 승인 대기. PowerShell 함정: 잡의 `--out-dir` 같은 인자를 스크립트 파라미터로 오인하므로 로더 호출은 `--%` 뒤에 명령을 둬야 한다(`[CmdletBinding(PositionalBinding=$false)]` 필수).
+9. 보안 게이트 워크트리 실행에서 gitleaks가 기존 테스트 픽스처의 가짜 키 2건을 잡았다(`test_professional_operator_path.py:197`, `test_kis_paper_broker_adapter.py:178`). 이번 변경과 무관한 기존 코드라 스테이징 모드에서는 안 잡힌다. 게이트 에이전트가 픽스처를 분간하는지가 첫 `/ship`에서 확인할 점.
 
 ## 측정
 
@@ -252,7 +257,8 @@ $py = ".\.venv\Scripts\python.exe"
 
 ## 이월
 
-- 보안 게이트 이월 4건(발견 7: RA-002·003·004·005)
+- 보안 게이트 이월: RA-002·003·004·005(발견 7), RA-104·105(2차 판정: 픽스처 분류, 게이트 입력 일관성), SG-002·003·004(3차 판정: 자격증명 재사용 문서화, 웹훅 응답 스크럽, /ship이 changed_files로 설명 생성). SG-001(슬랙 토큰 패턴 스크럽)과 RA-101·102·103은 반영 완료
+- 편집자 `## 출처`에 뉴스 URL을 강제하는 프롬프트 미세조정
 - 의존성 핀: `pyproject.toml`에 fastapi·starlette 상한이 없어 새 venv에서 라우트 열거 테스트가 깨진다(발견 5). 핀 도입은 별도 판단
 - 2차 데이터: dart-fss(DART 키), PublicDataReader(ECOS·KOSIS·공공데이터포털 키), fredapi(FRED 키) — 브리핑이 한 주 읽힌 뒤 `/dependency-audit` 후 별도 계획
 - 보안 모드 2·3: 프리플라이트(trufflehog + pip-audit, 실서버 연결 직전 수동), 운영 감시(JSON 로그·heartbeat·낙폭 알림) — 페이퍼 서버가 로그를 내기 시작할 때

@@ -26,7 +26,7 @@ from quantpilot.services.research_agents.collectors.naver_news import (
 )
 from quantpilot.services.research_agents.pipeline_market import MarketBriefOutput, run_market_pipeline
 from quantpilot.services.research_agents.publish.notes import NoteExistsError, write_market_note
-from quantpilot.services.research_agents.publish.slack import SlackPostError, post_webhook
+from quantpilot.services.research_agents.publish.slack import SlackPostError, post
 from quantpilot.services.research_agents.runner import AgentEmptyOutput, AgentRunError
 
 EXIT_OK = 0
@@ -86,7 +86,7 @@ def run(
     krx_client_factory: Callable[[], object] | None = None,
     news_client_factory: Callable[[], object] | None = None,
     pipeline: Callable[..., MarketBriefOutput] = run_market_pipeline,
-    poster: Callable[..., object] = post_webhook,
+    poster: Callable[..., object] = post,
     note_writer: Callable[..., Path] = write_market_note,
     validate_env: Callable[[], object] = validate_generic_runtime_environment,
     watchlist_loader: Callable[[], list] = load_watchlist,

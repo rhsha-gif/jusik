@@ -17,6 +17,7 @@ _ENV_NAME_RE = re.compile(r"(KEY|SECRET|TOKEN|WEBHOOK|PASSWORD|PASSWD|CREDENTIAL
 _PATTERNS = (
     re.compile(r"Bearer\s+[A-Za-z0-9\-._~+/]{16,}=*"),
     re.compile(r"\bsk-[A-Za-z0-9\-_]{20,}\b"),
+    re.compile(r"\bxox[abposre]-[A-Za-z0-9\-]{10,}\b"),  # Slack bot/user/app tokens (gate finding SG-001)
     re.compile(r"hooks\.slack\.com/services/[A-Za-z0-9/_\-]+"),
     re.compile(r"\b[0-9a-fA-F]{32,}\b"),
     re.compile(r"\b[A-Za-z0-9+/]{40,}={0,2}\b"),

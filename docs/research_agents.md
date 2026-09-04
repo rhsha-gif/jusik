@@ -33,7 +33,7 @@ no buy/sell/sizing language; `.env` and credentials are never opened.
 | Source | What | Credential | Module |
 |---|---|---|---|
 | Naver Finance public endpoints (`m.stock.naver.com/api`, `fchart.stock.naver.com`) | KOSPI/KOSDAQ daily bars, today's index-level investor net buying (억원), industry group changes, stock daily bars, ticker names | none | `collectors/naver_market.py` |
-| Naver Search API (news) | headlines for watchlist names + 코스피/코스닥/금리/환율 | `NAVER_CLIENT_ID`, `NAVER_CLIENT_SECRET` | `collectors/naver_news.py` |
+| Naver news search | headlines for watchlist names + 코스피/코스닥/금리/환율 | NAVER API HUB `NCP_APIGW_API_KEY_ID`/`NCP_APIGW_API_KEY` (preferred; the same pair the `naver-search` MCP uses) or legacy `NAVER_CLIENT_ID`/`NAVER_CLIENT_SECRET` | `collectors/naver_news.py` |
 
 pykrx was audited and rejected on 2026-09-04 (KRX now requires a personal
 login for everything except stock bars). DART, ECOS, KOSIS and FRED are
@@ -63,18 +63,20 @@ nothing, 4 publishing failed. Evidence and logs land in
 Slack post, so a webhook failure still leaves the brief in the ledger; a
 second run on the same day refuses to overwrite unless `--force`.
 
-Manual runs with credentials kept outside the repository: `scripts/run-with-env.ps1 -EnvFile "$env:USERPROFILE\.quantpilot-research.env" -- .\.venv\Scripts\python.exe -m quantpilot.jobs.run_market_brief` loads `KEY=VALUE` lines into the job's process only and never prints them.
+Credentials stay outside the repository. `scripts/run-with-env.ps1` loads them into the job's process only (values never printed) from `-EnvFile` (optionally `-Only KEY,KEY`), from `-FromClaudeMcp <server>` (the `env` block of an MCP server in `~/.claude.json`, e.g. `naver-search`), or from a sources list at `%USERPROFILE%\.quantpilot-research.sources` (`envfile=<path>|only=K1,K2` and `claude-mcp=<server>` lines). Put the job command after `--%` (PowerShell stop-parsing) or its own `--out-dir`/`--dry-run` flags are read as script parameters. The scheduler wrapper uses the sources list, so the scheduled task needs no user-level environment variables. The sources list routes credentials: keep it in your profile (never in the repository or OneDrive-shared folders), readable only by your account, and list only the keys each job needs (`only=`). The agent process itself never receives these variables (`runner.agent_environment`).
 
 Scheduling: `scripts/register-market-brief-task.ps1` registers a weekday
-16:10 task that runs `scripts/run-market-brief.cmd`. Run it yourself; set the
-three credentials as *user* environment variables first.
+16:10 task that runs `scripts/run-market-brief.cmd`, which loads credentials
+through the sources list above.
 
 ## Environment
 
 | Variable | Purpose | Default |
 |---|---|---|
-| `NAVER_CLIENT_ID`, `NAVER_CLIENT_SECRET` | Naver Search API | required for news |
-| `QUANTPILOT_SLACK_WEBHOOK_URL` | incoming webhook (https) | required to post |
+| `NCP_APIGW_API_KEY_ID`, `NCP_APIGW_API_KEY` | Naver news search, API HUB pair (preferred) | one pair required for news |
+| `NAVER_CLIENT_ID`, `NAVER_CLIENT_SECRET` | Naver news search, legacy pair (support ends 2027-06) | |
+| `QUANTPILOT_SLACK_WEBHOOK_URL` | incoming webhook (https); wins when set | one delivery path required to post |
+| `SLACK_BOT_TOKEN` + `QUANTPILOT_SLACK_CHANNEL` (or `SLACK_ALLOWED_USER_ID` = DM to yourself) | bot-token path via chat.postMessage; the SecondBrain weekly bot works here | |
 | `QUANTPILOT_LEDGER_ROOT` | private ledger root | `~/investment-decisions` |
 | `QUANTPILOT_RESEARCH_MODEL` | analysts, editor, scout, researcher, direction | `opus` |
 | `QUANTPILOT_RESEARCH_JUDGE_MODEL` | refuter, security gate | `fable` |
@@ -98,6 +100,8 @@ adding data sources or roles.
 
 Month 1 (investment team): at least one decision record in the ledger that
 started as a candidate note.
+
+First real brief: 2026-09-04 22:26 (207 s, 60 headlines, Slack DM via the bot token). Week 1 starts on the next trading day.
 
 ## Deferred
 

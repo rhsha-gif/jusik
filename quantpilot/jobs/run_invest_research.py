@@ -22,7 +22,7 @@ from quantpilot.services.research_agents.collectors.krx import CollectionError, 
 from quantpilot.services.research_agents.collectors.naver_news import DEFAULT_QUERIES, NewsCollectionError, collect_news
 from quantpilot.services.research_agents.pipeline_invest import InvestResearchOutput, compute_base_rates, run_invest_pipeline
 from quantpilot.services.research_agents.publish.notes import NoteExistsError, ledger_root, write_candidate_note
-from quantpilot.services.research_agents.publish.slack import SlackPostError, post_webhook
+from quantpilot.services.research_agents.publish.slack import SlackPostError, post
 from quantpilot.services.research_agents.runner import AgentEmptyOutput, AgentRunError
 
 EXIT_OK = 0
@@ -109,7 +109,7 @@ def run(
     krx_client_factory: Callable[[], Any] | None = None,
     news_client_factory: Callable[[], Any] | None = None,
     pipeline: Callable[..., InvestResearchOutput] = run_invest_pipeline,
-    poster: Callable[..., object] = post_webhook,
+    poster: Callable[..., object] = post,
     note_writer: Callable[..., Path] = write_candidate_note,
     validate_env: Callable[[], object] = validate_generic_runtime_environment,
     watchlist_loader: Callable[[], list] = load_watchlist,

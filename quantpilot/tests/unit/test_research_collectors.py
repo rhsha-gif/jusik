@@ -132,11 +132,24 @@ def test_news_fails_closed_on_a_failed_query() -> None:
         collect_news(FakeNewsClient(fail_on="금리"), ["코스피", "금리"])
 
 
-def test_naver_client_requires_credentials_from_environment(monkeypatch: pytest.MonkeyPatch) -> None:
-    monkeypatch.delenv("NAVER_CLIENT_ID", raising=False)
-    monkeypatch.delenv("NAVER_CLIENT_SECRET", raising=False)
-    with pytest.raises(NewsCollectionError, match="NAVER_CLIENT_ID"):
-        NaverNewsClient()
+def test_naver_client_requires_credentials_from_environment() -> None:
+    with pytest.raises(NewsCollectionError, match="NCP_APIGW_API_KEY_ID"):
+        NaverNewsClient(environ={})
+
+
+def test_naver_client_prefers_the_api_hub_pair_and_falls_back_to_legacy() -> None:
+    from quantpilot.services.research_agents.collectors.naver_news import PROVIDERS, resolve_provider
+
+    hub = {"NCP_APIGW_API_KEY_ID": "id", "NCP_APIGW_API_KEY": "secret", "NAVER_CLIENT_ID": "x", "NAVER_CLIENT_SECRET": "y"}
+    assert resolve_provider(hub) == "hub"
+    assert NaverNewsClient(environ=hub).provider == "hub"
+    legacy = {"NAVER_CLIENT_ID": "x", "NAVER_CLIENT_SECRET": "y"}
+    assert resolve_provider(legacy) == "legacy"
+    assert PROVIDERS["hub"]["endpoint"].startswith("https://naverapihub.apigw.ntruss.com/search/v1/")
+    assert PROVIDERS["hub"]["id_header"] == "X-NCP-APIGW-API-KEY-ID"
+    half = {"NCP_APIGW_API_KEY_ID": "id"}
+    with pytest.raises(NewsCollectionError):
+        resolve_provider(half)
 
 
 def test_evidence_round_trip(tmp_path: Path) -> None:

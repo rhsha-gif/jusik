@@ -106,7 +106,7 @@ $py = ".\.venv\Scripts\python.exe"
 - [x] `slack.py`: `post_webhook(text, url=None)` — `url` 기본은 환경변수 `QUANTPILOT_SLACK_WEBHOOK_URL`, 없으면 예외. 게시 전 `scrub` 필수(스크럽을 거치지 않은 텍스트를 보낼 수 있는 공개 함수는 두지 않는다). `urllib.request`로 `{"text": ...}` POST, 응답 `ok`가 아니면 예외. URL은 로그·예외 메시지에 절대 넣지 않는다
 - [x] `notes.py`: `write_market_note(date, markdown, evidence_path, root=None)` → `<root>/market/YYYY-MM-DD.md`, `write_candidate_note(date, symbol, markdown, root=None)` → `<root>/candidates/YYYY-MM-DD-<symbol>.md`. `root` 기본은 환경변수 `QUANTPILOT_LEDGER_ROOT`, 없으면 `~/investment-decisions`. frontmatter: `type`, `date`, `generated_at`, `generated_by`(에이전트 이름·모델), `evidence`(증거 파일 절대경로), 후보 노트는 `status: proposed`, `candidate_id`, `symbol`. 같은 날 파일이 이미 있으면 `force=True`가 아닌 한 예외(주간 파이프라인의 "조용한 재게시" 함정 회피)
 - [x] 테스트: `subprocess.run`을 monkeypatch한 fake로 정상·빈 결과·비정상 종료·타임아웃 4경로, 스크럽 규칙별 1건씩 + 환경변수 값 유출 케이스, 슬랙은 fake `urlopen`으로 성공·실패·스크럽 미통과 경로 없음 확인, 노트는 `tmp_path`로 생성·중복 예외·frontmatter 필드 확인
-- [ ] 검증: pytest 새 테스트 통과; `[네트워크]` `& $py -c "from quantpilot.services.research_agents.runner import run_agent; print(run_agent('aorch-scout','현재 디렉터리의 CLAUDE.md 첫 줄만 답하라', cwd='.', model='sonnet').text[:80])"` 가 텍스트 출력
+- [x] (러너 실측은 09-04 시황 브리핑·후보 리서치 실제 실행으로 갈음) 검증: pytest 새 테스트 통과; `[네트워크]` `& $py -c "from quantpilot.services.research_agents.runner import run_agent; print(run_agent('aorch-scout','현재 디렉터리의 CLAUDE.md 첫 줄만 답하라', cwd='.', model='sonnet').text[:80])"` 가 텍스트 출력
 
 ### 작업 5: 시황 팀 에이전트 3종과 파이프라인
 

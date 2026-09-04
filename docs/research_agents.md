@@ -101,6 +101,8 @@ adding data sources or roles.
 Month 1 (investment team): at least one decision record in the ledger that
 started as a candidate note.
 
+First real brief: 2026-09-04 22:26 (207 s, 60 headlines, Slack DM via the bot token). Week 1 starts on the next trading day.
+
 ## Deferred
 
 - Second-tier data: dart-fss (DART key), PublicDataReader (ECOS/KOSIS/공공데이터), fredapi (FRED key) — after a week of read briefs, each through `/dependency-audit`.

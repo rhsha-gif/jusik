@@ -25,6 +25,7 @@ Level 1~5 자율화 전 과정을 먼저 완성하고, 사람 승인 게이트�
 | 데이터: external_historical (KIS) | 🟡 코드 완성, 실서버 미검증 | 가짜 transport로 단위 테스트됨; 실 키 확보 시 `RUN_KIS_MANUAL_INTEGRATION=1` 수동 테스트 준비됨 |
 | KIS 토큰 발급 (`/oauth2/tokenP`) | ✅ 헬퍼 구현 (실서버 미검증) | `request_access_token(_from_env)` — 앱키/시크릿으로 발급; fake transport 단위 테스트 완료, 실 키 확보 시 수동 검증 |
 | 뉴스 브리핑 (구상 ①) | 🟡 골격 완료 (fixture) | 읽기 전용 격리 경계 + `GET /api/briefing/daily`; 프론트 페이지 완료, 실제 수집기는 후속 |
+| 리서치 에이전트 (시황 3·투자 4·보안 게이트 1) | 🟡 구현 완료, 실전 1주 미측정 (2026-09-04) | `services/research_agents` 격리 패키지(`tach.toml`), 네이버 파이낸스 공개 엔드포인트 + 네이버 뉴스 API, `claude -p --agent` 헤드리스, 산출물은 `~/investment-decisions/market|candidates`. `docs/research_agents.md` |
 | 실시간 일반 provider | ❌ 미구현, fail closed | 일반 provider factory는 realtime/paper 요청을 fixture로 fallback하지 않음 |
 | KIS paper managed-order kill v1 | 🟡 schema v9 개발 검증 완료, 운영 미승인 | fake-client cancel journal/kill 검증 완료; `VTTC0084R`와 cancel POST는 Gate P 수동 검증 대기 |
 | KIS paper atomic reservation v1 | ✅ schema v10 Gate 1 개발 완료 | baseline `5eb70a9`; Gate P buying-power/실서버 semantics는 미검증 |
@@ -51,7 +52,7 @@ Level 1~5 자율화 전 과정을 먼저 완성하고, 사람 승인 게이트�
 
 ### Jobs 실행 방식
 
-저장소에는 이 여섯 잡을 실행하는 스케줄러 정의가 없다. 외부 스케줄러를 사용할 경우에도 아래 CLI와 명시적 게이트를 운영자가 별도로 구성한다.
+저장소에는 이 잡들을 실행하는 스케줄러 정의가 없다(리서치 브리핑만 선택적 등록 스크립트가 있다). 외부 스케줄러를 사용할 경우에도 아래 CLI와 명시적 게이트를 운영자가 별도로 구성한다.
 
 | Job | 실행 방식 | 필요한 플래그 / 입력 |
 |---|---|---|
@@ -61,6 +62,8 @@ Level 1~5 자율화 전 과정을 먼저 완성하고, 사람 승인 게이트�
 | `record_paper_loss_baseline` | 수동 CLI; 저장소 내 스케줄러 없음 | CLI 인수 없음; `KIS_PAPER_BASELINE_CONFIRMATION` 및 승인된 paper baseline 설정 |
 | `fetch_krx_local_data` | 수동 CLI; 저장소 내 스케줄러 없음 | `--symbols`, `--start`, `--end`, `--out-dir` |
 | `run_local_backtest` | 수동 CLI; 저장소 내 스케줄러 없음 | `--data-dir` 또는 `LOCAL_DATA_DIR`; 검증 임계값 플래그는 선택 |
+| `run_market_brief` | 수동 CLI 또는 `scripts/register-market-brief-task.ps1`로 평일 16:10 작업 스케줄러 등록 | `NAVER_CLIENT_ID/SECRET`, `QUANTPILOT_SLACK_WEBHOOK_URL`; `--dry-run`/`--no-post`/`--force`; 거래 입력 아님 |
+| `run_invest_research` | 수동 CLI | `--theme` 또는 `--symbol`; 같은 자격증명; 후보 노트를 `status: proposed`로만 씀 |
 
 
 ## 안전 불변식 (변경 금지 기본값)

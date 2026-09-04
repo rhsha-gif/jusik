@@ -58,3 +58,5 @@ investment-decisions/
 docs/plans/*-btc-*.md
 docs/decisions/
 observations.jsonl
+.security-gate/
+.research_agents_out/

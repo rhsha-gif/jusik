@@ -70,5 +70,9 @@ npm run build
 - `/vault-consult`: 지식 vault(`quantpilot-foundation/`) 조회와 인용 규약. 퀀트·리스크·집행·
   시계열·데이터/신뢰성 판단은 볼트를 근거로 삼고 `[[노트명]]`으로 인용한다. 볼트 밖 지식으로
   답할 때는 그 사실을 밝힌다.
+- 리서치 에이전트(시황 팀 3·투자 팀 4, `qp-*`)와 잡 `run_market_brief`·`run_invest_research`:
+  `docs/research_agents.md`. 산출물은 읽기 전용이며 거래 입력이 아니다.
+- `/ship` 보안 게이트: 스테이징 diff가 `qp-security-gate`의 `ship_triggers`에 걸리면
+  `scripts/security-gate.ps1 -Staged` 후 에이전트 판정 없이는 커밋하지 않는다(`docs/security_gate.md`).
 
 사용자 보고는 한국어, 코드와 commit message는 영어를 기본으로 한다.

@@ -1,0 +1,20 @@
+{
+  "_comment": "Watchlist for the daily market brief. Starts as the 15 KRX names in local_data; edit freely — the job reloads it every run.",
+  "symbols": [
+    {"code": "005930", "name": "삼성전자", "theme": "반도체"},
+    {"code": "000660", "name": "SK하이닉스", "theme": "반도체"},
+    {"code": "373220", "name": "LG에너지솔루션", "theme": "2차전지"},
+    {"code": "006400", "name": "삼성SDI", "theme": "2차전지"},
+    {"code": "247540", "name": "에코프로비엠", "theme": "2차전지"},
+    {"code": "051910", "name": "LG화학", "theme": "화학·2차전지"},
+    {"code": "005380", "name": "현대차", "theme": "자동차"},
+    {"code": "000270", "name": "기아", "theme": "자동차"},
+    {"code": "005490", "name": "POSCO홀딩스", "theme": "철강·소재"},
+    {"code": "035420", "name": "NAVER", "theme": "인터넷"},
+    {"code": "035720", "name": "카카오", "theme": "인터넷"},
+    {"code": "068270", "name": "셀트리온", "theme": "바이오"},
+    {"code": "207940", "name": "삼성바이오로직스", "theme": "바이오"},
+    {"code": "055550", "name": "신한지주", "theme": "금융"},
+    {"code": "105560", "name": "KB금융", "theme": "금융"}
+  ]
+}

@@ -39,6 +39,7 @@ misallocation is escalated to the user, never overridden by a gate.
 | External connectors | fake-client unit tests only; real KIS is skipped/manual | `docs/contracts/kis_paper_kill_contract.md` "Adversarial executable test matrix" |
 | Order-path integrity | risk gate, kill switch, idempotency, order state machine, audit, reconciliation are never bypassed | `PAPER_DISPATCH_TRANSITIONS`/`PAPER_CANCEL_TRANSITIONS` (`quantpilot/packages/core/execution/transitions.py:19,51`); `PAPER_KILL_TRANSITIONS` (`quantpilot/packages/db/sqlite_repositories.py:284`) |
 | LLM/RL authority | model output cannot create, approve, or submit broker orders | `DurablePaperSubmissionCoordinator` is the sole POST authority (`quantpilot/packages/core/execution/paper_submission.py:128`) |
+| Research isolation | `services/research_agents` and `services/briefing` never import execution, operator, signals, portfolio, risk, brokers, harness or api modules; their output is never a trading input | `tach.toml` (`cannot_depend_on`); `quantpilot/tests/unit/test_research_agents_boundary.py` |
 
 A gate that cannot demonstrate every invariant above is **not** acceptable,
 regardless of feature completeness.

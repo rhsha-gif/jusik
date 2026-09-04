@@ -1,0 +1,85 @@
+# Import boundaries checked by `tach check` (tool venv: ~/.local/share/aorch-tools/.venv).
+#
+# The research packages produce material for a human to read and are never a
+# trading input (acceptance matrix §1 "Research isolation"). They may only
+# depend on the shared pydantic schemas. The order-path modules are declared
+# `unchecked` so that their own imports are not policed here, but any import of
+# them *from* the research packages is a violation.
+
+source_roots = ["."]
+exclude = [
+    ".venv",
+    ".claude",
+    ".pytest_tmp",
+    "node_modules",
+    "quantpilot-foundation",
+    "quantpilot-foundation-meta",
+    "local_data",
+    "marketdata",
+    "quantpilot/apps",
+    "quantpilot/tests",
+]
+
+[[modules]]
+path = "quantpilot.services.research_agents"
+depends_on = ["quantpilot.packages.core.schemas"]
+cannot_depend_on = [
+    "quantpilot.packages.core.execution",
+    "quantpilot.packages.core.operator",
+    "quantpilot.packages.core.signals",
+    "quantpilot.packages.core.portfolio",
+    "quantpilot.packages.core.risk",
+    "quantpilot.packages.brokers",
+    "quantpilot.packages.core.harness_service",
+    "quantpilot.services.api",
+]
+
+[[modules]]
+path = "quantpilot.services.briefing"
+depends_on = ["quantpilot.packages.core.schemas"]
+cannot_depend_on = [
+    "quantpilot.packages.core.execution",
+    "quantpilot.packages.core.operator",
+    "quantpilot.packages.core.signals",
+    "quantpilot.packages.core.portfolio",
+    "quantpilot.packages.core.risk",
+    "quantpilot.packages.brokers",
+    "quantpilot.packages.core.harness_service",
+    "quantpilot.services.api",
+]
+
+[[modules]]
+path = "quantpilot.packages.core.schemas"
+unchecked = true
+
+[[modules]]
+path = "quantpilot.packages.core.execution"
+unchecked = true
+
+[[modules]]
+path = "quantpilot.packages.core.operator"
+unchecked = true
+
+[[modules]]
+path = "quantpilot.packages.core.signals"
+unchecked = true
+
+[[modules]]
+path = "quantpilot.packages.core.portfolio"
+unchecked = true
+
+[[modules]]
+path = "quantpilot.packages.core.risk"
+unchecked = true
+
+[[modules]]
+path = "quantpilot.packages.brokers"
+unchecked = true
+
+[[modules]]
+path = "quantpilot.packages.core.harness_service"
+unchecked = true
+
+[[modules]]
+path = "quantpilot.services.api"
+unchecked = true

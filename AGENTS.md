@@ -31,6 +31,8 @@ QuantPilot은 fixture-first 안전 중심 트레이딩 운영자 하네스다. �
 - 거래 관련 변경은 pre-trade risk check, kill switch, idempotency, order state machine, audit logging,
   reconciliation을 우회할 수 없다.
 - LLM/RL 출력은 broker 주문을 직접 생성, 승인 또는 제출할 수 없다.
+- 리서치 에이전트 산출물(시황·후보 노트)은 거래 입력이 아니며 `quantpilot/services/research_agents`와
+  `services/briefing`은 거래 코드를 import 할 수 없다(`tach.toml`, `test_research_agents_boundary.py`).
 - 실패한 안전 테스트를 약화하지 말고 원인을 수정한다.
 - 기존 사용자 변경을 덮어쓰거나 작업 커밋에 포함하지 않는다.
 

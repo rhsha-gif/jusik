@@ -1,0 +1,29 @@
+{
+  "lastBuildDate": "Thu, 03 Sep 2026 16:05:12 +0900",
+  "total": 3,
+  "start": 1,
+  "display": 3,
+  "items": [
+    {
+      "title": "<b>코스피</b> 외국인 순매수에 0.5% 상승 마감",
+      "originallink": "https://example-news.co.kr/article/1001",
+      "link": "https://n.news.naver.com/mnews/article/001/0001",
+      "description": "외국인이 1,200억원 순매수하며 지수를 끌어올렸다.",
+      "pubDate": "Thu, 03 Sep 2026 15:40:00 +0900"
+    },
+    {
+      "title": "한은, 기준<b>금리</b> 동결…성명서에서 완화 문구 삭제",
+      "originallink": "https://example-news.co.kr/article/1002",
+      "link": "https://n.news.naver.com/mnews/article/001/0002",
+      "description": "기준금리를 동결했다.",
+      "pubDate": "Thu, 03 Sep 2026 10:05:00 +0900"
+    },
+    {
+      "title": "<b>코스피</b> 외국인 순매수에 0.5% 상승 마감 (종합)",
+      "originallink": "https://example-news.co.kr/article/1001",
+      "link": "https://n.news.naver.com/mnews/article/001/0003",
+      "description": "중복 링크 — 같은 originallink.",
+      "pubDate": "Thu, 03 Sep 2026 15:50:00 +0900"
+    }
+  ]
+}

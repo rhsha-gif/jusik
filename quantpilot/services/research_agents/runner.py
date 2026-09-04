@@ -19,6 +19,18 @@ from typing import Any, Callable
 from quantpilot.services.research_agents.models import AgentResult
 
 DEFAULT_CLAUDE_PATH = Path.home() / ".local" / "bin" / "claude.exe"
+# The job's own credentials (news search, Slack) are for the collectors and publishers;
+# the agent process never needs them and must not be able to leak them (gate finding RA-101).
+CREDENTIAL_PREFIXES = ("NCP_APIGW_", "NAVER_CLIENT_", "SLACK_", "QUANTPILOT_SLACK_")
+
+
+def agent_environment(base: dict[str, str] | None = None) -> dict[str, str]:
+    env = dict(os.environ if base is None else base)
+    for name in list(env):
+        if name.startswith(CREDENTIAL_PREFIXES):
+            del env[name]
+    env["PYTHONIOENCODING"] = "utf-8"
+    return env
 
 
 class AgentRunError(RuntimeError):
@@ -65,8 +77,7 @@ def run_agent(
         command += ["--mcp-config", str(project_mcp)]
     if json_schema is not None:
         command += ["--json-schema", json.dumps(json_schema, ensure_ascii=False)]
-    env = dict(os.environ)
-    env["PYTHONIOENCODING"] = "utf-8"
+    env = agent_environment()
     started = time.monotonic()
     try:
         completed = run(

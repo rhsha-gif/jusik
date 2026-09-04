@@ -43,6 +43,20 @@ def test_runner_passes_prompt_on_stdin_with_utf8_and_agent_flag() -> None:
     assert "--strict-mcp-config" in cmd  # RA-001: no inherited user-level MCP servers
 
 
+def test_agent_process_never_sees_the_research_credentials(monkeypatch: pytest.MonkeyPatch) -> None:
+    from quantpilot.services.research_agents.runner import agent_environment
+
+    for name in ("NCP_APIGW_API_KEY_ID", "NCP_APIGW_API_KEY", "NAVER_CLIENT_SECRET", "SLACK_BOT_TOKEN", "QUANTPILOT_SLACK_WEBHOOK_URL"):
+        monkeypatch.setenv(name, "fixture-value")
+    monkeypatch.setenv("QUANTPILOT_LEDGER_ROOT", "keep")
+    env = agent_environment()
+    assert not any(k.startswith(("NCP_APIGW_", "NAVER_CLIENT_", "SLACK_", "QUANTPILOT_SLACK_")) for k in env)
+    assert env["QUANTPILOT_LEDGER_ROOT"] == "keep" and env["PYTHONIOENCODING"] == "utf-8"
+    fake = FakeRun(stdout=_payload("ok"))
+    run_agent("qp-x", "p", cwd=".", model="opus", claude_path="c", run=fake)
+    assert "SLACK_BOT_TOKEN" not in fake.captured["env"]
+
+
 def test_runner_treats_exit_zero_with_empty_output_as_failure() -> None:
     with pytest.raises(AgentEmptyOutput):
         run_agent("qp-x", "p", cwd=".", model="opus", claude_path="c", run=FakeRun(stdout=""))

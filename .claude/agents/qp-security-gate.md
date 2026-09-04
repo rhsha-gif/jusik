@@ -29,7 +29,7 @@ ship_triggers:
 
 block 기준 (하나라도 해당하면 `verdict: block`)
 1. gitleaks 발견 1건 이상.
-2. tach 위반(`tach.txt`에 `[OK]`가 없음) — 리서치 패키지가 거래 코드를 import 했다.
+2. tach 위반 — `summary.json`의 `tools.tach.exit`가 0이 아니거나 `violations`가 0이 아니다(`tach.txt`는 근거 인용용). 리서치 패키지가 거래 코드를 import 했다는 뜻이다.
 3. diff가 §1 불변식의 앵커를 바꾼다: `paper_submission.py`의 유일 POST 권한, `risk/gatekeeper.py`의 플래그 기본값(`market_orders_enabled`, `allowed_execution_modes`), `execution/transitions.py`의 상태 전이표, `.env.example`의 안전 기본값(`LIVE_TRADING_ENABLED=false` 등), 또는 브로커로 POST하는 새 경로가 생긴다.
 4. semgrep `ERROR` 등급 결과(`results[].extra.severity == "ERROR"`).
 5. `quantpilot/services/research_agents/` 또는 `services/briefing/`에 주문·승인·제출 어휘(`submit_order`, `approve`, `place`, `dispatch` 등)를 가진 함수·엔드포인트가 생긴다.

@@ -1,18 +1,24 @@
 # QuantPilot 현재 상태 (living document)
 
+## 최근 완료 (2026-09-10, CLI 모의운용·웹 정리)
+
+새 경로는 `python -m quantpilot.paper`다. 초기 세 전략·자금 분리·AI·보고 구현과 독립 안전 검토 PASS, 전체 1,476 passed·2 skipped 및 smoke 통과를 [인수 기록](paper_acceptance.md)에 보존했다. 사용자 승인으로 [웹 파일 59개](paper_retirement_inventory.md)를 제거했다. 과거 웹 완료 기록은 당시 증거이며 현재 제공 기능이 아니다. 실제 모의 API·Slack·Docker 인수는 미완료이고 운용은 비활성이다.
+
+
 > 이 문서는 시점별 보고서가 아니라 **갱신형 현황판**입니다.
 > 스테이지가 끝날 때마다 이 파일을 덮어쓰고, 상세 근거는 기존 `docs/*_report.md`에 남깁니다.
-> 마지막 갱신: **2026-08-12**
+> 마지막 갱신: **2026-09-10**
 
 ## 목적 (한 줄)
 
-개인용 AI 퀀트 자동운용 웹앱 — 라이브 트레이딩이 물리적으로 불가능한 모의 환경에서
-Level 1~5 자율화 전 과정을 먼저 완성하고, 사람 승인 게이트를 거쳐서만 실거래로 확장한다.
+500만 원 국내주식 단타 실험을 위한 CLI·Slack 중심 모의운용 하네스. 실거래는 기본 비활성이며 실제 모의 연결 인수 후 명시적인 모의 프로필로 운용한다.
 
 ## 단계별 상태
 
 | 영역 | 상태 | 비고 |
 |---|---|---|
+| CLI 모의운용 하네스 | ✅ 구현·자동 검증 완료 | `quantpilot.paper`; 실제 API·Slack·Docker 인수는 미완료 |
+| 구형 웹 클라이언트 | 제거 완료 | 2026-09-10 승인 목록 59개 삭제; 아래 Level·UI 관련 항목은 구형 구현의 역사적 상태 |
 | Level 1-2 신호→제안/모의체결 | ✅ 완료 | `/run` 제안 전용, `/mock-execute` MockBroker 체결 + 타이밍 판단 요약 |
 | Level 3 승인 기반 오토파일럿 | ✅ 완료 (플래그 잠김) | 제안 생성→사용자 승인→제출; UI는 승인 티켓 레일만 연결되고 `/api/orders/*`는 API 전용 — 2026-09-03 확인: `FULLY_AUTOMATED_OPERATOR_ENABLED=true`를 일반 런타임(API·`run_smoke`)에 주면 `generic_runtime_rejects_paper_arming_environment`로 기동 자체를 거부하므로(`services/api/dependencies.py:56`) 잠금 해제 도그푸딩은 `QUANTPILOT_RUNTIME_ROLE=paper-session` 잡 경로에서만 가능 |
 | Level 4 가드 오토파일럿 | ✅ 완료 (플래그 잠김) | 17단계 권한 체인 — 2026-09-03 확인: `FULLY_AUTOMATED_OPERATOR_ENABLED=true`를 일반 런타임(API·`run_smoke`)에 주면 `generic_runtime_rejects_paper_arming_environment`로 기동 자체를 거부하므로(`services/api/dependencies.py:56`) 잠금 해제 도그푸딩은 `QUANTPILOT_RUNTIME_ROLE=paper-session` 잡 경로에서만 가능 |
@@ -322,5 +328,5 @@ python -m pytest quantpilot/tests -p no:cacheprovider --basetemp=.pytest_tmp `
   --junitxml=.pytest_tmp/results.xml
 python -m quantpilot.jobs.run_smoke
 python -m quantpilot.jobs.run_kis_paper_kill engage
-# 프론트 (quantpilot/apps/web): npm run test && npm run build
+# CLI 모의운용: python scripts/verify-paper.py / tach check (웹 제거 완료)
 ```

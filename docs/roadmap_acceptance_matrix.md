@@ -69,12 +69,7 @@ python -m quantpilot.jobs.run_kis_paper_kill engage
 # Required: {"status":"blocked","reason_code":"paper_kill_disabled"}
 ```
 
-Frontend gates additionally require, from `quantpilot/apps/web`:
-
-```powershell
-npm run test
-npm run build
-```
+The web client was retired with user approval on 2026-09-10. Frontend gates no longer apply. Current paper acceptance: [paper_acceptance.md](paper_acceptance.md). Use `python scripts/verify-paper.py` and `tach check`. Historical gate evidence is preserved.
 
 Documentation-only gates (this matrix, the reservation contract, the reservation
 workboard) require `git diff --check` clean and internal-link resolution; they do

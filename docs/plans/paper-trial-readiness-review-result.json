@@ -1,0 +1,39 @@
+{
+  "objective": "Independently review the September 11 paper-trial preparation and read-only probes",
+  "decomposed": false,
+  "runId": "d2f4f17d-120a-4bc4-b231-578c59d36b24",
+  "planFingerprint": "e78b65799c47528c36e24ebe948e5e0e5fd5730fbdffe3ffd7bf7a3b95dfc1fe",
+  "status": "failed",
+  "results": [
+    {
+      "taskId": "paper-trial-readiness-review",
+      "agentRole": "reviewer",
+      "agent": "aorch-reviewer",
+      "status": "failed",
+      "route": {
+        "provider": "anthropic",
+        "profileId": "claude-sonnet-general",
+        "model": "sonnet",
+        "effort": "high"
+      },
+      "error": "Change guard failed after attempt 1; manual review required. Evidence: C:\\Users\\goyan\\OneDrive\\문서\\코덱스\\주식트레이더\\.aorch\\task-runs\\d2f4f17d-120a-4bc4-b231-578c59d36b24\\paper-trial-readiness-review\\verification.json",
+      "runDir": "C:\\Users\\goyan\\OneDrive\\문서\\코덱스\\주식트레이더\\.aorch\\task-runs\\d2f4f17d-120a-4bc4-b231-578c59d36b24\\paper-trial-readiness-review",
+      "attempts": [
+        {
+          "attempt": 1,
+          "route": {
+            "provider": "anthropic",
+            "profileId": "claude-sonnet-general",
+            "model": "sonnet",
+            "effort": "high"
+          },
+          "passed": false,
+          "changeGuardPassed": false
+        }
+      ]
+    }
+  ],
+  "ok": false,
+  "planPath": "C:\\Users\\goyan\\OneDrive\\문서\\코덱스\\주식트레이더\\.aorch\\task-runs\\d2f4f17d-120a-4bc4-b231-578c59d36b24\\plan.json",
+  "resultPath": "C:\\Users\\goyan\\OneDrive\\문서\\코덱스\\주식트레이더\\.aorch\\task-runs\\d2f4f17d-120a-4bc4-b231-578c59d36b24\\dispatch.json"
+}

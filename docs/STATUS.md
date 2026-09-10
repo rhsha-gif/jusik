@@ -1,5 +1,19 @@
 # QuantPilot 현재 상태 (living document)
 
+## 9월 11일 시험운영 준비 (2026-09-10)
+
+[전용 운영표](paper_trial_20260911.md)와 주문 없는 Readiness 점검을 추가했다.
+별도 시험 원장은 동시 1종목·종목당 10%·계획 손실 0.1%, AI·Slack 활성 설정,
+생성 연구 비활성, `paused`이며 주문 0건이다. 주문 제출 권한과 프로세스는 활성화하지 않았다.
+실제 모의 시세·잔고·한투 후보 조회 통과, 장중 분봉·호가·주문·청산 인수는 남아 있다.
+가상 입력의 실제 Claude·Codex 평가와 Codex 전환·Claude 복기 통과. Windows UTF-8과
+Codex 평가 스키마 호환 문제를 수정했다. Claude Code 조회로 기존 SecondBrain Slack 봇의
+설정 경로와 로더를 발견했다. 사용자 승인 후 Slack 두 변수 전용 실행기를 연결하고
+본인 DM 시험 한 건의 API 접수와 사용자 수신을 확인했다(23:15 KST).
+`conversations.open` 권한 부족을 기존 봇의 사용자 ID 직접 전송 방식으로 수정했다.
+Slack 수정 후 최종 검증 **1,489 passed·2 skipped**, smoke·tach 통과.
+조회·AI 준비 변경의 독립 재검토는 PASS이며 Slack 후속 수정은 회귀 테스트와 실제 접수로 확인했다.
+
 ## 최근 완료 (2026-09-10, CLI 모의운용·웹 정리)
 
 새 경로는 `python -m quantpilot.paper`다. 초기 세 전략·자금 분리·AI·보고 구현과 독립 안전 검토 PASS, 전체 1,476 passed·2 skipped 및 smoke 통과를 [인수 기록](paper_acceptance.md)에 보존했다. 사용자 승인으로 [웹 파일 59개](paper_retirement_inventory.md)를 제거했다. 과거 웹 완료 기록은 당시 증거이며 현재 제공 기능이 아니다. 실제 모의 API·Slack·Docker 인수는 미완료이고 운용은 비활성이다.

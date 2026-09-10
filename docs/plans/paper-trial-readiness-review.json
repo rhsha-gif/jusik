@@ -1,0 +1,44 @@
+{
+  "objective": "Independently review the September 11 paper-trial preparation and read-only probes",
+  "decomposed": false,
+  "tasks": [
+    {
+      "id": "paper-trial-final-review",
+      "agentRole": "reviewer",
+      "agentId": "aorch-reviewer",
+      "kind": "review",
+      "risk": "high",
+      "complexity": "standard",
+      "write": false,
+      "allowedProviders": [
+        "anthropic"
+      ],
+      "allowedScope": [
+        "quantpilot/jobs/check_paper_readiness.py",
+        "quantpilot/paper",
+        "quantpilot/packages/core/kis_paper.py",
+        "quantpilot/packages/core/marketdata/kis_paper.py",
+        "quantpilot/tests/unit/test_paper_readiness.py",
+        "quantpilot/tests/unit/test_paper_intelligence.py",
+        "scripts/kis-paper.ps1",
+        "scripts/paper-runtime.ps1",
+        "docs/paper_trial_20260911.md",
+        "quantpilot/tests/unit/test_paper_submission_coordinator.py"
+      ],
+      "forbiddenScope": [
+        ".env*",
+        ".claude",
+        ".codex",
+        ".agents"
+      ],
+      "objective": "Final READ ONLY review; return concise English. Prior review identified public ranking fallback escaping the paper-only diagnostic scope. Fixed readiness_market injects a rejecting public_fetch, probe requires kis_paper_ranking source, and two regressions cover real PaperMarket KIS failure with public network forbidden and rejecting alternate provenance. Prior actual probe explicitly reported kis_paper_ranking, so its recorded success was not public fallback. Also review new _assessment_schema closing nested maps over trusted symbol/strategy allowlists for strict Codex JSON schema. Actual fixture Claude and Codex independent assessments, forced primary failure with actual Codex fallback, and Claude review all passed after UTF-8/schema fixes. Client-construction boundary test explicitly includes the new guarded read-only job; API exclusion and order/cancel transport rejection remain tested. Review all current bounded changes and runbook for order authorization leaks, credential exposure or false completion claims. No secrets, environment or private runtime reads; no network, broker, Slack, provider calls, Docker, edits or delegation. Prior change guard failed due to PARENT edits during review, now parent will hold source stable. Return PASS/BLOCK with precise material findings. You are not alone in the codebase; do not modify or revert anything.",
+      "acceptanceCriteria": [
+        "No order authority in diagnostics",
+        "No false readiness or credential disclosure",
+        "UTF-8 change preserves provider restrictions",
+        "Runbook reflects real controls and outstanding manual checks"
+      ],
+      "verificationCommands": []
+    }
+  ]
+}

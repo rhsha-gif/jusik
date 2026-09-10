@@ -1,0 +1,19 @@
+{
+  "objective": "Ask Claude Code CLI to locate the existing Slack bot setup for the September 11 paper trial",
+  "decomposed": false,
+  "tasks": [{
+    "id": "slack-bot-discovery",
+    "agentRole": "worker",
+    "agentId": "aorch-worker",
+    "kind": "exploration",
+    "risk": "standard",
+    "complexity": "standard",
+    "write": false,
+    "allowedProviders": ["anthropic"],
+    "allowedScope": ["docs", "scripts", "quantpilot/services/research_agents", "quantpilot/paper/reporting.py", "C:/Users/goyan/.claude/projects"],
+    "forbiddenScope": [".env*", "**/.env*", "**/credentials*", "**/auth.json", "**/.claude.json", "**/*.jsonl"],
+    "objective": "User explicitly says Claude Code CLI knows the Slack bot. READ ONLY locate reusable existing Slack setup from non-secret documentation or memory. docs/research_agents.md says the SecondBrain weekly bot works and a real bot-token DM succeeded 2026-09-04 22:26. Current trial needs SLACK_BOT_TOKEN and SLACK_ALLOWED_USER_ID; neither is present in parent process or Windows user environment. Identify exact NON-SECRET setup/documentation/launcher paths, how the bot credentials are supplied to existing jobs (variable names and storage mechanism only), and the minimum local wiring needed for the paper reporter. Do not read or print any .env contents, token/credential files, raw transcript JSONL, private transaction records, credential values or webhook URLs. Environment checks may return presence booleans only. You may use remembered non-secret context and inspect relevant README/setup scripts. Do not send Slack messages, call external APIs, change local settings, create bots, edit files, arm/start trading, commit, or delegate. If only a secret file is discoverable, return its path and required variable names without opening it. Distinguish existing bot proof from assumptions. Return concise English with exact evidence paths and a concrete next step. You are not alone in the codebase; preserve all existing changes.",
+    "acceptanceCriteria": ["Existing Slack setup located or a precise missing prerequisite reported", "No secret values read or returned", "No Slack messages or other writes"],
+    "verificationCommands": []
+  }]
+}

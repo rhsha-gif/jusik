@@ -1,0 +1,118 @@
+{
+  "objective": "Independently review the September 11 paper-trial preparation and read-only probes",
+  "decomposed": false,
+  "runId": "e81bebca-aba7-4cf2-b580-6bedf3348772",
+  "planFingerprint": "6a8b9d896ee81175828abf1951be8d9cd1425ea82ad5fe75afda81e5187540d4",
+  "status": "complete",
+  "results": [
+    {
+      "taskId": "paper-trial-final-review",
+      "agentRole": "reviewer",
+      "agentId": "aorch-reviewer",
+      "agent": "aorch-reviewer",
+      "status": "complete",
+      "route": {
+        "provider": "anthropic",
+        "profileId": "claude-sonnet-general",
+        "model": "sonnet",
+        "effort": "high"
+      },
+      "runDir": "C:\\Users\\goyan\\OneDrive\\문서\\코덱스\\주식트레이더\\.aorch\\task-runs\\e81bebca-aba7-4cf2-b580-6bedf3348772\\paper-trial-final-review",
+      "receiptPath": "C:\\Users\\goyan\\OneDrive\\문서\\코덱스\\주식트레이더\\.aorch\\task-runs\\e81bebca-aba7-4cf2-b580-6bedf3348772\\paper-trial-final-review\\receipt.json",
+      "receipt": {
+        "status": "complete",
+        "summary": "PASS. Independent read-only review of the paper-trial readiness fix, assessment-schema closure, UTF-8 decode fix, and runbook confirms all four acceptance criteria hold, backed by fresh scoped pytest run (44 passed, 0 failed/errored/skipped) and manual code tracing. One low-severity, non-blocking finding: the new _assessment_schema closes `reasons` over the trusted symbol/strategy allowlist at the CLI-schema level, but run_assessment's post-hoc host-side subset check (which does exist for candidate_scores/strategy_scores) is not mirrored for reasons — currently low impact since `Assessment.reasons` is not consumed by any order/strategy-selection code path (grep confirms only candidate_scores/strategy_scores feed quantpilot/paper/runtime.py scoring).",
+        "filesInspected": [
+          "quantpilot/paper/intelligence.py",
+          "quantpilot/jobs/check_paper_readiness.py",
+          "quantpilot/tests/unit/test_paper_readiness.py",
+          "quantpilot/tests/unit/test_paper_intelligence.py",
+          "quantpilot/tests/unit/test_paper_submission_coordinator.py",
+          "quantpilot/paper/data.py",
+          "quantpilot/packages/core/kis_paper.py",
+          "quantpilot/jobs/check_kis_paper_connection.py",
+          "scripts/kis-paper.ps1",
+          "docs/kis_paper_connection.md",
+          "docs/paper_intraday_runbook.md",
+          "docs/paper_trial_20260911.md",
+          "docs/plans/paper-trial-readiness-review.json",
+          "docs/plans/paper-trial-readiness-review-result.json"
+        ],
+        "filesChanged": [],
+        "commands": [
+          {
+            "command": "git status --porcelain=v1 -uno / -uall",
+            "exitCode": 0,
+            "outcome": "Confirmed tracked diff (6 files) plus untracked new files (check_paper_readiness.py, test_paper_readiness.py, docs/paper_trial_20260911.md, 2 plan JSON artifacts)."
+          },
+          {
+            "command": "git diff HEAD -- <scoped files>",
+            "exitCode": 0,
+            "outcome": "Reviewed exact diffs for intelligence.py, kis-paper.ps1, docs; confirmed only additive, bounded changes."
+          },
+          {
+            "command": "python -m pytest quantpilot/tests/unit/test_paper_readiness.py quantpilot/tests/unit/test_paper_intelligence.py quantpilot/tests/unit/test_paper_submission_coordinator.py --basetemp .pytest_tmp/... --junitxml ...",
+            "exitCode": 0,
+            "outcome": "44 tests, 0 failures, 0 errors, 0 skipped (junit-verified count, not just dot output)."
+          }
+        ],
+        "criteria": [
+          {
+            "criterion": "No order authority in diagnostics",
+            "status": "pass",
+            "evidence": "ReadinessTransport allowlists only paper-host GET reads + token POST and raises KisPaperConfigurationError on anything else (4 parametrized tests cover order-cash, order-rvsecncl, live host, unknown path). Independently, KisPaperClient._request hard-rejects KIS_CASH_ORDER_ENDPOINT and _validate_base_url rejects any non-paper base URL, so order submission is blocked at two independent layers even without ReadinessTransport. check_paper_readiness.py imports no coordinator/order module at all."
+          },
+          {
+            "criterion": "No false readiness or credential disclosure",
+            "status": "pass",
+            "evidence": "probe()'s check() wrapper records only {status, error_type}; main()'s setup-failure branch records only error_type — no exception text, no payload. Test test_failure_is_redacted_and_other_reads_continue asserts 'private' not in str(result). docs/paper_trial_20260911.md explicitly states 'passed도 ... 주문 인수 완료를 뜻하지 않는다' and lists Slack delivery, intraday minutes/quotes, and order/cancel/settlement as unverified."
+          },
+          {
+            "criterion": "UTF-8 change preserves provider restrictions",
+            "status": "pass",
+            "evidence": "Diff adds only `encoding=\"utf-8\"` to the existing subprocess.run call in default_cli_runner; every sandbox/tool-disable flag (--sandbox read-only, --tools '', --mcp-config {}, --restricted, env sanitization) is untouched. New test test_cli_unicode_streams_are_decoded_as_utf8 exercises the real stdout-decode path (output-file absent) and passed."
+          },
+          {
+            "criterion": "Runbook reflects real controls and outstanding manual checks",
+            "status": "pass",
+            "evidence": "docs/paper_trial_20260911.md's 준비결과 table marks Slack token unset/미검증, 분봉·호가 as 장외 보류(11일 재검증 필수), 주문·취소·청산 as 미실행·미검증, and calendar as installed-XKRX-only pending day-of notice cross-check — no completion overstatement found."
+          }
+        ],
+        "findings": [
+          {
+            "id": "reasons-allowlist-gap",
+            "severity": "low",
+            "fixCost": "low",
+            "axis": "correctness",
+            "location": "quantpilot/paper/intelligence.py:516-521 (run_assessment) vs :225-240 (_assessment_schema)",
+            "evidence": "run_assessment double-checks `assessment.candidate_scores` and `assessment.strategy_scores` against the trusted symbols/strategies sets after model_validate, but performs no equivalent `set(assessment.reasons).issubset(symbols | strategies)` check, even though _assessment_schema closes the `reasons` map over that same combined allowlist. Enforcement for reasons keys therefore relies solely on the external CLI's JSON-schema compliance, not a host-side boundary check like its siblings.",
+            "proposal": "Add `if not set(assessment.reasons).issubset(symbols | strategies): last_code = OUT_OF_ALLOWLIST; continue` alongside the existing two checks, for defense-in-depth parity. Low urgency: grep confirms Assessment.reasons is not read by quantpilot/paper/runtime.py or jobs.py (only candidate_scores/strategy_scores feed scoring), so a schema-noncompliant provider could at most attach a stray text label to an untracked key, not alter order/strategy authority."
+          }
+        ],
+        "unresolvedRisks": [
+          "Enforcement of the `reasons` allowlist relies on external CLI JSON-schema compliance without a host-side subset re-check (see finding reasons-allowlist-gap); currently inert because reasons is unused downstream.",
+          "This review could not independently reproduce the prior live probe run that reportedly returned source=kis_paper_ranking or a live Slack delivery test, since doing so would require network/broker/provider calls forbidden by this task's scope; those claims are taken from docs/paper_trial_20260911.md and prior task artifacts, not re-verified here.",
+          "Untracked docs/plans/paper-trial-readiness-review*.json artifacts (prior failed-run receipts) remain in the working tree; contents were checked and contain no secrets, but they sit outside the declared allowed scope and should be cleaned up or intentionally kept before any commit."
+        ],
+        "confidence": 0.88
+      },
+      "verification": null,
+      "attempts": [
+        {
+          "attempt": 1,
+          "route": {
+            "provider": "anthropic",
+            "profileId": "claude-sonnet-general",
+            "model": "sonnet",
+            "effort": "high"
+          },
+          "passed": null,
+          "changeGuardPassed": true
+        }
+      ]
+    }
+  ],
+  "ok": true,
+  "planPath": "C:\\Users\\goyan\\OneDrive\\문서\\코덱스\\주식트레이더\\.aorch\\task-runs\\e81bebca-aba7-4cf2-b580-6bedf3348772\\plan.json",
+  "resultPath": "C:\\Users\\goyan\\OneDrive\\문서\\코덱스\\주식트레이더\\.aorch\\task-runs\\e81bebca-aba7-4cf2-b580-6bedf3348772\\dispatch.json"
+}

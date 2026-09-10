@@ -45,6 +45,10 @@ HTS ID를 변경한 경우 이전 ID 신청정보 삭제 및 재신청에 관한
 
 ## Windows 실행과 자동운용 준비
 
+아래 `Prepare`는 구형 세션용이다. 새 CLI 단타 시험은 [9월 11일 운영표](paper_trial_20260911.md)를 따른다.
+새 경로의 주문 없는 데이터 점검은 `scripts/kis-paper.ps1 -Action Readiness`이며,
+장외 분봉·호가는 미검증으로 남긴다. 조회 성공은 주문 활성화 승인이 아니다.
+
 최신 Windows 사용자 환경 변수를 반영하는 실행기:
 
 ```powershell

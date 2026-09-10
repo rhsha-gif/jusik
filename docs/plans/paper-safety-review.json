@@ -1,0 +1,19 @@
+{
+  "objective": "Independent cross-provider safety review of the new QuantPilot paper execution path",
+  "decomposed": false,
+  "tasks": [{
+    "id": "paper-execution-review",
+    "agentRole": "reviewer",
+    "agentId": "aorch-reviewer",
+    "kind": "review",
+    "risk": "critical",
+    "complexity": "critical",
+    "write": false,
+    "allowedProviders": ["anthropic"],
+    "allowedScope": ["quantpilot/paper", "quantpilot/packages/core", "quantpilot/packages/db", "quantpilot/tests"],
+    "forbiddenScope": [".env*", ".claude", ".codex", ".agents"],
+    "objective": "Review only; no edits or external API calls. This is a frozen snapshot of an OpenAI implementation, hence independent Anthropic review required. Inspect quantpilot/paper broker/store/risk/runtime/config/cli/data/reporting against existing durable paper kernel. Identify concrete P0/P1/P2 defects in capital isolation, partial fill/response loss/restart/cancel, pause/flatten protection, final risk authorization, data timing, model-output boundaries, secret handling, default disabled state. Do not require profit backtesting or global drawdown stop: user explicitly rejected those. Legacy unrelated unmodified code is outside scope. AI/lab files may be absent because they are separate work in progress; do not count that absence as a defect. Return pass/block verdict, file+line evidence and actionable corrections. Never read credentials or .env files. Do not run broker or Slack integration.",
+    "acceptanceCriteria": ["Independent safety verdict with concrete failure scenarios and exact code locations", "No edits, no network or secrets"],
+    "verificationCommands": ["python -c \"import ast,pathlib; [ast.parse(p.read_text(encoding='utf-8')) for p in pathlib.Path('quantpilot/paper').glob('*.py')]\""]
+  }]
+}

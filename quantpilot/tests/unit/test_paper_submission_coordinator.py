@@ -1092,8 +1092,12 @@ def test_kis_paper_client_is_constructed_only_by_paper_jobs_and_never_by_api(
     }
 
     assert constructors == {
+        # Dedicated read-only probe has its own token/GET-only transport guard.
+        "jobs/check_kis_paper_connection.py",
         "jobs/run_kis_paper_kill.py",
         "jobs/run_kis_paper_session.py",
+        # Explicit intraday profile checks submission flags before construction.
+        "paper/cli.py",
     }
 
     monkeypatch.setenv("DATA_MODE", "fixture")

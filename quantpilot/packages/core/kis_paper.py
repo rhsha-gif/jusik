@@ -24,6 +24,7 @@ KIS_CURRENT_PRICE_ENDPOINT = "/uapi/domestic-stock/v1/quotations/inquire-price"
 KIS_CURRENT_PRICE_TR_ID = "FHKST01010100"
 KIS_L2_ENDPOINT = "/uapi/domestic-stock/v1/quotations/inquire-asking-price-exp-ccn"
 KIS_L2_TR_ID = "FHKST01010200"
+KIS_DAILY_PRICE_ENDPOINT = "/uapi/domestic-stock/v1/quotations/inquire-daily-price"
 KIS_BALANCE_ENDPOINT = "/uapi/domestic-stock/v1/trading/inquire-balance"
 KIS_BALANCE_TR_ID = "VTTC8434R"
 KIS_BUYING_POWER_ENDPOINT = "/uapi/domestic-stock/v1/trading/inquire-psbl-order"
@@ -45,12 +46,15 @@ _ALLOWED_ENDPOINTS = frozenset(
         KIS_TOKEN_ENDPOINT,
         KIS_CURRENT_PRICE_ENDPOINT,
         KIS_L2_ENDPOINT,
+        KIS_DAILY_PRICE_ENDPOINT,
         KIS_BALANCE_ENDPOINT,
         KIS_BUYING_POWER_ENDPOINT,
         KIS_DAILY_ORDERS_ENDPOINT,
         KIS_CANCELABLE_ORDERS_ENDPOINT,
         KIS_CASH_ORDER_ENDPOINT,
         KIS_CANCEL_ORDER_ENDPOINT,
+        "/uapi/domestic-stock/v1/quotations/inquire-time-itemchartprice",
+        "/uapi/domestic-stock/v1/quotations/volume-rank",
     }
 )
 _SAFE_CODE = re.compile(r"[A-Za-z0-9_.-]{1,32}\Z")

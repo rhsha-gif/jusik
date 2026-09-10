@@ -1,0 +1,14 @@
+{
+ "objective": "Cross-provider final safety review of QuantPilot CLI paper execution and AI research integration",
+ "decomposed": false,
+ "tasks": [{
+  "id": "paper-final-review", "agentRole": "reviewer", "agentId": "aorch-reviewer",
+  "kind": "review", "risk": "critical", "complexity": "critical", "write": false,
+  "allowedProviders": ["anthropic"],
+  "allowedScope": ["quantpilot/paper", "quantpilot/tests", "quantpilot/packages/core", "quantpilot/packages/db", "quantpilot/jobs/check_kis_paper_connection.py", "scripts/verify-paper.py"],
+  "forbiddenScope": [".env*", ".claude", ".codex", ".agents"],
+  "objective": "READ ONLY independent final safety review. Prior Opus snapshot found orphan lease, cancellation identity/race, pause interrupting flatten, permanent bar gap, missing tests, nonbinding broker slice, cost basis as marks. Fixes now reclaim orphan sessions only after CLI account+runtime locks, cleanup failed begin, use existing full cancel predicate and query-only on race, isolate per-cancel failure, preserve flatten during pause, contiguous bar suffix, additional real test files, independent broker outside-cash reserve check because existing kernel reserve also governs experiment gross exposure, marked dispatch snapshot, balance refetch. Earlier zero-test finding was due to omitted test files in review snapshot; now copied. Earlier unused daily-price endpoint is a PREEXISTING USER edit; do not remove it. Typed Assessment validates finite unit scores before runtime mixing, so AI=5 cannot survive. Original requirement explicitly says account ambiguity blocks new entries for reconciliation; adopting foreign broker holdings or inventing a ledger fill is forbidden without evidence. Unknown-order state now still protects unrelated known positions after verified balance. Assess fixes and particularly NEW intelligence/lab/research/jobs: subscription-only no tools, TTL, alternate once, Docker no host authority and timeout cleanup, pure source gate, independent review and trusted fixed tests, shadow ledger never changing cash, same hash >=5 sessions/20 closed net-positive => one max10pct paper trial, final sizing. No actual broker/Slack/AI/Docker network calls. Do not demand global loss stop/profitability backtest (user rejected). Return pass/block with only concrete actionable defects and accurate scope. No changes or subdelegation. Lead full pytest+smoke+tach has passed; verification here is selected offline tests.",
+  "acceptanceCriteria": ["Concrete cross-provider pass/block verdict with exact evidence", "No edits or external calls"],
+  "verificationCommands": ["python scripts/verify-paper.py quantpilot/tests/unit/test_intraday_durable_gateway.py quantpilot/tests/unit/test_paper_review_regressions.py quantpilot/tests/unit/test_paper_research_integration.py quantpilot/tests/unit/test_paper_intelligence.py quantpilot/tests/unit/test_paper_strategy_lab.py"]
+ }]
+}

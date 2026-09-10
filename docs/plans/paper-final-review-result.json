@@ -1,0 +1,194 @@
+{
+  "objective": "Cross-provider final safety review of QuantPilot CLI paper execution and AI research integration",
+  "decomposed": false,
+  "runId": "69fbb7e5-cdd8-4525-8068-e2b8e7e53338",
+  "planFingerprint": "900a125bc60b79d391d7efb02b58361315f77346e1b11384021e7c37f4fa1f5f",
+  "status": "complete",
+  "results": [
+    {
+      "taskId": "paper-final-review",
+      "agentRole": "reviewer",
+      "agentId": "aorch-reviewer",
+      "agent": "aorch-reviewer",
+      "status": "complete",
+      "route": {
+        "provider": "anthropic",
+        "profileId": "claude-opus-deep",
+        "model": "opus",
+        "effort": "xhigh"
+      },
+      "runDir": "C:\\Users\\goyan\\.codex\\worktrees\\qp-paper-redesign-workers\\.aorch\\task-runs\\69fbb7e5-cdd8-4525-8068-e2b8e7e53338\\paper-final-review",
+      "receiptPath": "C:\\Users\\goyan\\.codex\\worktrees\\qp-paper-redesign-workers\\.aorch\\task-runs\\69fbb7e5-cdd8-4525-8068-e2b8e7e53338\\paper-final-review\\receipt.json",
+      "receipt": {
+        "status": "complete",
+        "summary": "BLOCK. Selected offline verification passes (34 tests, exit 0), and the listed fixes (orphan-lease reclaim under CLI account+runtime locks, failed-begin lease release, existing full-cancel predicate with query-only race handling, per-cancel isolation, pause preserving flatten, contiguous bar suffix, independent broker outside-cash reserve, marked dispatch snapshot, balance refetch, subscription-only CLI adapters with no tools, TTL, alternate-once, Docker no-host-authority with timeout cleanup, pure source gate, independent review with trusted fixed tests, cash-neutral shadow ledger, 20-trade/5-session/net-positive single 10% trial, final sizing) are all confirmed in code. However one critical wiring defect blocks acceptance: paper/cli.py hands DurablePaperSubmissionCoordinator a RefreshingClient wrapper, so isinstance(client, KisPaperClient) is False, the closed order submitter is None, and submission falls to place_limit_cash_order which KisPaperClient deliberately does not expose - every real paper order dies as broker_exception_after_claim with attempt_count=1 and no broker POST ever occurs. Three additional confirmed defects: an unrelated broker holding aborts the cycle before protective exits; paper-trial strategy PnL is omitted from the per-strategy report; candidate_status never resets after recovery. No edits, no external broker/Slack/AI/Docker network calls.",
+        "filesInspected": [
+          "quantpilot/paper/runtime.py",
+          "quantpilot/paper/broker.py",
+          "quantpilot/paper/store.py",
+          "quantpilot/paper/risk.py",
+          "quantpilot/paper/strategy.py",
+          "quantpilot/paper/intelligence.py",
+          "quantpilot/paper/lab.py",
+          "quantpilot/paper/research.py",
+          "quantpilot/paper/jobs.py",
+          "quantpilot/paper/cli.py",
+          "quantpilot/paper/reporting.py",
+          "quantpilot/paper/config.py",
+          "quantpilot/paper/calendar.py",
+          "quantpilot/paper/data.py",
+          "quantpilot/paper/auth.py",
+          "quantpilot/paper/http.py",
+          "quantpilot/jobs/check_kis_paper_connection.py",
+          "scripts/verify-paper.py",
+          "quantpilot/packages/core/kis_paper.py",
+          "quantpilot/packages/core/execution/paper_submission.py",
+          "quantpilot/packages/core/execution/paper_reconciliation.py",
+          "quantpilot/packages/core/execution/paper_kill.py",
+          "quantpilot/packages/core/operator/position_ledger.py",
+          "quantpilot/packages/core/marketdata/kis_paper.py",
+          "quantpilot/packages/core/schemas.py",
+          "quantpilot/packages/db/sqlite_repositories.py",
+          "quantpilot/tests/unit/test_intraday_durable_gateway.py",
+          "quantpilot/tests/unit/test_paper_review_regressions.py",
+          "quantpilot/tests/unit/test_paper_research_integration.py",
+          "quantpilot/tests/unit/test_paper_intelligence.py",
+          "quantpilot/tests/unit/test_paper_strategy_lab.py",
+          "quantpilot/tests/unit/test_paper_runtime_controls.py",
+          "quantpilot/tests/unit/test_paper_experiment_ledger.py",
+          "quantpilot/tests/unit/test_paper_reporting_worker.py",
+          "quantpilot/tests/unit/test_intraday_strategies.py",
+          "quantpilot/tests/unit/test_kis_paper_connection.py",
+          "quantpilot/tests/unit/test_paper_submission_coordinator.py",
+          "quantpilot/tests/unit/test_kis_paper_client.py"
+        ],
+        "filesChanged": [],
+        "commands": [
+          {
+            "command": "git status --porcelain (before and after review)",
+            "exitCode": 0,
+            "outcome": "Identical working-tree delta before and after; this review changed nothing. Test artifacts landed only outside the worktree (~/.codex/paper-verification) or in gitignored __pycache__."
+          },
+          {
+            "command": "python scripts/verify-paper.py quantpilot/tests/unit/test_intraday_durable_gateway.py quantpilot/tests/unit/test_paper_review_regressions.py quantpilot/tests/unit/test_paper_research_integration.py quantpilot/tests/unit/test_paper_intelligence.py quantpilot/tests/unit/test_paper_strategy_lab.py",
+            "exitCode": 0,
+            "outcome": "34 passed (dots), EXIT=0. Run twice with identical result. Env sanitized to BROKER_MODE=mock, DATA_MODE=fixture, all live flags false, KIS_/SLACK_ vars stripped."
+          },
+          {
+            "command": "python -c \"hasattr(KisPaperClient,'place_limit_cash_order'); isinstance(RefreshingClient(...), KisPaperClient); getattr probes\"",
+            "exitCode": 0,
+            "outcome": "KisPaperClient has place_limit_cash_order: False; isinstance(RefreshingClient, KisPaperClient): False; place_limit_cash_order -> AttributeError; get_balance/get_cancelable_orders/_authenticated_get -> OK. Proves the coordinator's non-KisPaperClient branch cannot reach a real order POST."
+          },
+          {
+            "command": "python -c \"KisGateway(store, RefreshingClient(FakePaperClient), ...).begin(); inspect coordinator __order_submitter\"",
+            "exitCode": 0,
+            "outcome": "order_submitter when client is a wrapper: None -> confirms branch selection at paper_submission.py:801 falls through to place_limit_cash_order for any wrapper, which is exactly what paper/cli.py build_runtime constructs."
+          },
+          {
+            "command": "python -c \"Runtime.cycle() with local 005930x1 matching broker plus one unrelated broker holding 000660x5\"",
+            "exitCode": 0,
+            "outcome": "cycle: {'status':'blocked','reason':'execution_reconciliation_required'}; sell orders placed: []; position still open with stop 69000 while bid was 60000. Confirms account_position_mismatch suppresses protective exits, not only new entries."
+          },
+          {
+            "command": "python -c \"insert lab_* strategy trade, call reporting.snapshot\"",
+            "exitCode": 0,
+            "outcome": "per-strategy rows: ['opening_range_breakout','trend_pullback','range_reversion']; sum of per-strategy net_pnl: 0; realized_net_pnl: 12345.0; candidate_status after recovery: {'005930':'warming_after_gap'}. Confirms findings 3 and 4."
+          },
+          {
+            "command": "claude --help ; codex exec --help (local help only, no network)",
+            "exitCode": 0,
+            "outcome": "All adapter flags exist: --safe-mode, --restricted, --tools, --strict-mcp-config, --permission-prompts, --no-session-persistence, --json-schema, --output-format; --permission-mode accepts 'dontAsk'. Codex: --ephemeral, --ignore-user-config, --ignore-rules, --skip-git-repo-check, --disable, --output-schema, --output-last-message, --sandbox read-only, and '-' reads the prompt from stdin."
+          }
+        ],
+        "criteria": [
+          {
+            "criterion": "Concrete cross-provider pass/block verdict with exact evidence",
+            "status": "pass",
+            "evidence": "Verdict BLOCK, driven by an independently reproduced defect chain (paper/cli.py:49-51 -> paper_submission.py:161 -> :801-807 -> missing KisPaperClient.place_limit_cash_order), plus three further defects each reproduced with runnable offline probes and exact file:line anchors. Verification command run and reported with exit code 0 / 34 passed."
+          },
+          {
+            "criterion": "No edits or external calls",
+            "status": "pass",
+            "evidence": "git status --porcelain identical before and after (3 modified tracked files and untracked paths all pre-existing at task start); filesChanged is empty. All probes used fixtures/fakes; no broker, Slack, AI provider, or Docker network call was made - CLI inspection was local --help only."
+          }
+        ],
+        "findings": [
+          {
+            "id": "paper-order-post-unreachable",
+            "severity": "critical",
+            "fixCost": "low",
+            "axis": "correctness",
+            "location": "quantpilot/paper/cli.py:49-51 (build_runtime) with quantpilot/packages/core/execution/paper_submission.py:161 and :801-807",
+            "evidence": "build_runtime wraps KisPaperClient in RefreshingClient and passes the wrapper to KisGateway -> DurablePaperSubmissionCoordinator. isinstance(client, KisPaperClient) is False, so __order_submitter is set to None (verified at runtime: 'order_submitter when client is a wrapper: None'). At submit_prepared_order the same isinstance check routes to the test-double branch self._client.place_limit_cash_order(**order_arguments). KisPaperClient deliberately does not expose that method - test_kis_paper_client.py:695 asserts `not hasattr(client, \"place_limit_cash_order\")`, and a live probe returned `AttributeError: 'KisPaperClient' object has no attribute 'place_limit_cash_order'` while get_balance/get_cancelable_orders/_authenticated_get resolved fine through the same proxy. The AttributeError is swallowed by `except Exception:` at paper_submission.py:834 into _outcome_unknown(claimed,'broker_exception_after_claim') -> PaperSubmissionOutcomeUnknown, after claim_dispatch_attempt already set attempt_count=1 (le=1, so no retry is possible). Tests miss this because test_intraday_durable_gateway.Client inherits FakePaperClient, which does define place_limit_cash_order (test_paper_submission_coordinator.py:112).",
+            "proposal": "Make the production client satisfy the coordinator's authority check instead of the test-double path: either have KisGateway/build_runtime pass the underlying KisPaperClient into DurablePaperSubmissionCoordinator (keeping RefreshingClient for read/reconcile paths and rebinding the coordinator's client on token renewal), or make the coordinator accept an explicit order-submitter capability object built from a verified KisPaperClient rather than branching on isinstance. Add a regression test that builds the coordinator with the real RefreshingClient wiring and asserts the closed submitter is present (or that submission reaches the transport), so the test double can no longer mask the production path."
+          },
+          {
+            "id": "mismatch-suppresses-protective-exit",
+            "severity": "high",
+            "fixCost": "low",
+            "axis": "correctness",
+            "location": "quantpilot/paper/broker.py:75 (reconcile) with quantpilot/paper/runtime.py:51 and :82-93",
+            "evidence": "reconcile compares the full local/remote position maps and raises ValueError('account_position_mismatch') on any difference. That raise happens at runtime.py:51, before the position-protection loop, so cycle() falls to the outer handler and returns blocked. Reproduced: local 005930 x1 matches the broker exactly, but one unrelated manual holding 000660 x5 exists in the same paper account -> `cycle: {'status':'blocked','reason':'execution_reconciliation_required'}`, `sell orders placed: []`, position still open with stop 69000 while the quote bid was 60000, and no mark recorded. Every subsequent cycle repeats identically, so a stopped-out position is never exited and the end-of-day liquidation/quarantine path is never reached. The stated requirement (account ambiguity blocks new entries for reconciliation) is already satisfied by the incident flag, which independently gates entries at runtime.py:97 and risk.py:50.",
+            "proposal": "Split the two cases in reconcile: when remote is a superset of the local attributed positions with equal quantities for every locally attributed symbol, treat the balance as verified - return False (or set the incident) so new entries stay blocked while the protection loop still runs; raise only on true divergence (a locally attributed symbol missing remotely or with a smaller remote quantity). Add a regression test asserting a protective sell is still placed when an unrelated broker holding is present."
+          },
+          {
+            "id": "trial-strategy-pnl-missing-from-report",
+            "severity": "standard",
+            "fixCost": "low",
+            "axis": "correctness",
+            "location": "quantpilot/paper/reporting.py:18-20 (snapshot) and quantpilot/paper/runtime.py:201 (performance)",
+            "evidence": "Both loops iterate store.policy.active_strategies, which is constrained by config.py:41-42 to the three built-in STRATEGIES. A promoted paper-trial candidate trades under strategy_id 'lab_<hash>' (research.py:127-130), and store.update_order writes its trades with that strategy while mutating cash and realized. Reproduced: after inserting one lab_deadbeef1234 trade with pnl 12345, snapshot() returned per-strategy rows ['opening_range_breakout','trend_pullback','range_reversion'], sum of per-strategy net_pnl 0, but realized_net_pnl 12345.0. render() prints only those three rows, so the daily Slack report shows zero strategy PnL alongside a nonzero cumulative figure - an internally inconsistent 'Code-computed PnL' report. runtime.performance() has the same blind spot, so the trial's live results never feed the performance factor.",
+            "proposal": "Derive the reported strategy set from the union of policy.active_strategies and the distinct strategies present in the trades table (or from active_strategies plus lab candidates in stage paper_trial), and mark trial rows explicitly in the report so the per-strategy breakdown reconciles with realized_net_pnl."
+          },
+          {
+            "id": "candidate-status-never-resets",
+            "severity": "low",
+            "fixCost": "low",
+            "axis": "correctness",
+            "location": "quantpilot/paper/runtime.py:117 and :122, surfaced by quantpilot/paper/reporting.py:26",
+            "evidence": "candidate_status:<symbol> is written to 'warming_after_gap' on a bar gap and to the exception class name on a candidate fetch failure, but no success path ever writes it back. snapshot() reports store.get('candidate_status:'+s,'ready') for every universe symbol, so once a symbol has had a single transient gap or error the operator status keeps showing that stale reason indefinitely. Reproduced: after setting candidate_status:005930='warming_after_gap', snapshot() still returns {'005930':'warming_after_gap'} with no failure present.",
+            "proposal": "Write store.put('candidate_status:'+symbol,'ready') on the successful, gapless path of the candidate loop (and after the gap suffix is consumed without truncation), so the reported status reflects the current cycle rather than the last problem observed."
+          }
+        ],
+        "unresolvedRisks": [
+          "outside_cash_reserve (broker.py:118-121) is captured exactly once, from a single symbol's get_buying_power, whose orderable_cash/no_receivable_buy_amount are margin-rate dependent, and is never re-derived. It can therefore be mis-calibrated for later symbols or after account cash movements. Impact is bounded because the binding constraint stays min(..., snapshot.cash - other_reserved), i.e. local experiment cash, so this is a guard-calibration risk rather than an over-spend path. Consider re-deriving or auditing it when the broker/local cash relationship shifts.",
+          "The Claude/Codex CLI adapters (intelligence.py:284-333) were validated only against local `--help` output: every flag exists and `--permission-mode dontAsk` is a valid value. No CLI was actually executed, so the end-to-end stdout shape consumed by _parse_cli_json is unverified. One specific uncertainty: the Claude command ends with a bare `-` positional while the prompt is also piped on stdin; Codex documents `-` as read-from-stdin but Claude's `[prompt]` positional does not. Any mismatch degrades to MALFORMED_OUTPUT/RUNNER_FAILED (fail-closed, ai_enabled defaults False), so it is not a blocker but should be smoke-tested once before enabling AI.",
+          "quantpilot/tests/unit/test_paper_token_renewal.py could not be opened (blocked by a local read deny rule on this session), so RefreshingClient coverage was assessed from source only. Note that RefreshingClient.__init__ sets _renew_at to the current clock, so the very first attribute access always issues a fresh token and discards any KIS_PAPER_ACCESS_TOKEN from the environment; that appears intentional (memory-only tokens) but is untested here.",
+          "Verification here was the five selected offline test files only. The full pytest suite, run_smoke and tach were run by the lead, not re-run in this review, so this verdict does not re-attest them.",
+          "DurablePaperSubmissionCoordinator does not re-check the session lease expiry at prepare/submit time (only session identity and fencing token). A cycle that runs longer than the 5-minute lease set in KisGateway.begin can still submit, and KisGateway.end will then fail (alerted as execution_lease_close_failed) leaving self.session set until start_paper_execution_session abandons the expired predecessor. Mutual exclusion relies on the CLI account lock plus trader.lock rather than the lease. This is pre-existing kernel behaviour, not introduced by this change, but it is the weakest link in the new profile's concurrency story."
+        ],
+        "confidence": 0.88
+      },
+      "verification": {
+        "passed": true,
+        "results": [
+          {
+            "command": "python scripts/verify-paper.py quantpilot/tests/unit/test_intraday_durable_gateway.py quantpilot/tests/unit/test_paper_review_regressions.py quantpilot/tests/unit/test_paper_research_integration.py quantpilot/tests/unit/test_paper_intelligence.py quantpilot/tests/unit/test_paper_strategy_lab.py",
+            "status": "complete",
+            "exitCode": 0,
+            "timedOut": false,
+            "durationMs": 4014,
+            "stdoutTail": "..................................                                       [100%]\r\n",
+            "stderrTail": ""
+          }
+        ]
+      },
+      "attempts": [
+        {
+          "attempt": 1,
+          "route": {
+            "provider": "anthropic",
+            "profileId": "claude-opus-deep",
+            "model": "opus",
+            "effort": "xhigh"
+          },
+          "passed": true,
+          "changeGuardPassed": true
+        }
+      ]
+    }
+  ],
+  "ok": true,
+  "planPath": "C:\\Users\\goyan\\.codex\\worktrees\\qp-paper-redesign-workers\\.aorch\\task-runs\\69fbb7e5-cdd8-4525-8068-e2b8e7e53338\\plan.json",
+  "resultPath": "C:\\Users\\goyan\\.codex\\worktrees\\qp-paper-redesign-workers\\.aorch\\task-runs\\69fbb7e5-cdd8-4525-8068-e2b8e7e53338\\dispatch.json"
+}

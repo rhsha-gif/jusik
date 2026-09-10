@@ -24,6 +24,7 @@ exclude = [
 path = "quantpilot.services.research_agents"
 depends_on = ["quantpilot.packages.core.schemas"]
 cannot_depend_on = [
+    "quantpilot.paper",
     "quantpilot.packages.core.execution",
     "quantpilot.packages.core.operator",
     "quantpilot.packages.core.signals",
@@ -38,6 +39,7 @@ cannot_depend_on = [
 path = "quantpilot.services.briefing"
 depends_on = ["quantpilot.packages.core.schemas"]
 cannot_depend_on = [
+    "quantpilot.paper",
     "quantpilot.packages.core.execution",
     "quantpilot.packages.core.operator",
     "quantpilot.packages.core.signals",
@@ -82,4 +84,8 @@ unchecked = true
 
 [[modules]]
 path = "quantpilot.services.api"
+unchecked = true
+
+[[modules]]
+path = "quantpilot.paper"
 unchecked = true

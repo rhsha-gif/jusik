@@ -1,0 +1,190 @@
+{
+  "objective": "Independent acceptance of the final per-symbol protection fix",
+  "decomposed": false,
+  "runId": "f4ded6be-e608-4f93-a9b3-4c4effcaf3f8",
+  "planFingerprint": "d7c53f6d552e23d7aaede9ae021550890e581c11a5f7aefee321a8b4c045c0e9",
+  "status": "complete",
+  "results": [
+    {
+      "taskId": "paper-protection-acceptance",
+      "agentRole": "reviewer",
+      "agentId": "aorch-reviewer",
+      "agent": "aorch-reviewer",
+      "status": "complete",
+      "route": {
+        "provider": "anthropic",
+        "profileId": "claude-opus-deep",
+        "model": "opus",
+        "effort": "xhigh"
+      },
+      "runDir": "C:\\Users\\goyan\\.codex\\worktrees\\qp-paper-redesign-workers\\.aorch\\task-runs\\f4ded6be-e608-4f93-a9b3-4c4effcaf3f8\\paper-protection-acceptance",
+      "receiptPath": "C:\\Users\\goyan\\.codex\\worktrees\\qp-paper-redesign-workers\\.aorch\\task-runs\\f4ded6be-e608-4f93-a9b3-4c4effcaf3f8\\paper-protection-acceptance\\receipt.json",
+      "receipt": {
+        "status": "complete",
+        "summary": "PASS. Independent read-only acceptance of the per-symbol protection change found no permission widening. KisGateway.reconcile resets verified_symbols/entry_reconciled before any work (fail-closed on mid-reconcile exceptions), builds verified_symbols only from local positions whose broker holding quantity matches exactly, and requires local==remote for entry_reconciled — so entries can never open while any attributed position is unprotected. Because the new regression test stubs gateway.submit, I independently exercised the submit-level gates offline with the existing fake KIS client: an unverified symbol sell is rejected with position_reconciliation_required, a buy under unattributed remote exposure is rejected with entry_reconciliation_required, and a matched symbol whose orderable quantity was consumed by an external working order is rejected with broker_sell_quantity_unavailable — zero broker order calls in all three. Required verification passed (33 passed, exit 0) and the full offline suite passed (1474 passed / 2 skipped, exit 0), matching 1471 + 3 new regressions. No edits, no writes to the repo working tree, no network/broker/Slack/AI/Docker calls, no subdelegation. Five low, non-blocking findings remain: the submit-level permission gates have no automated coverage; the stranded symbol is not named in the human-facing report or Slack alert; seven dead imports remain in quantpilot/paper; SANDBOX_OUTPUT_LIMIT is unreachable with the production bounded_run; and the unsupported_subprocess_options guard and known_order_state_changed label are untested.",
+        "filesInspected": [
+          "quantpilot/paper/broker.py",
+          "quantpilot/paper/runtime.py",
+          "quantpilot/paper/store.py",
+          "quantpilot/paper/risk.py",
+          "quantpilot/paper/collector.py",
+          "quantpilot/paper/process.py",
+          "quantpilot/paper/config.py",
+          "quantpilot/paper/cli.py",
+          "quantpilot/paper/jobs.py",
+          "quantpilot/paper/reporting.py",
+          "quantpilot/paper/research.py",
+          "quantpilot/paper/lab.py",
+          "quantpilot/paper/intelligence.py",
+          "quantpilot/jobs/prepare_kis_paper_runtime.py",
+          "quantpilot/packages/core/kis_paper.py",
+          "quantpilot/tests/unit/test_paper_review_regressions.py",
+          "quantpilot/tests/unit/test_paper_production_wiring.py",
+          "quantpilot/tests/unit/test_paper_collector.py",
+          "quantpilot/tests/unit/test_paper_process_bounds.py",
+          "quantpilot/tests/unit/test_paper_research_integration.py",
+          "quantpilot/tests/unit/test_paper_strategy_lab.py",
+          "quantpilot/tests/unit/test_prepare_kis_paper_runtime.py",
+          "quantpilot/tests/unit/test_intraday_durable_gateway.py",
+          "quantpilot/tests/unit/test_kis_paper_client.py",
+          "quantpilot/tests/unit/test_paper_submission_coordinator.py",
+          "scripts/verify-paper.py"
+        ],
+        "filesChanged": [],
+        "commands": [
+          {
+            "command": "git status --porcelain (start and end of task)",
+            "exitCode": 0,
+            "outcome": "Working-tree delta identical before and after the review: 4 modified tracked files and the pre-existing untracked paper module/tests. No path was created, modified, or deleted by this task."
+          },
+          {
+            "command": "python scripts/verify-paper.py quantpilot/tests/unit/test_paper_production_wiring.py quantpilot/tests/unit/test_paper_review_regressions.py quantpilot/tests/unit/test_paper_collector.py quantpilot/tests/unit/test_paper_research_integration.py quantpilot/tests/unit/test_paper_process_bounds.py quantpilot/tests/unit/test_paper_strategy_lab.py",
+            "exitCode": 0,
+            "outcome": "33 passed in 1.75s. Required verification command from the task contract."
+          },
+          {
+            "command": "python scripts/verify-paper.py quantpilot/tests -q",
+            "exitCode": 0,
+            "outcome": "1474 passed, 2 skipped (1476 collected items). Matches the stated 1471-test baseline plus the three new regressions; no regression elsewhere in the suite."
+          },
+          {
+            "command": "python - <<'PY' (offline probe 1: local{005930:1,000660:1} vs remote{005930:1,000660:5}, then KisGateway.submit a sell for the unverified symbol)",
+            "exitCode": 0,
+            "outcome": "reconcile -> False, reason account_exposure_unattributed, verified ['005930'], unverified ['000660']; sell 000660 -> REJECTED ValueError position_reconciliation_required; broker order_calls 0."
+          },
+          {
+            "command": "python - <<'PY' (offline probe 2: unattributed remote holding, weights set so authorize_order passes, then submit a buy)",
+            "exitCode": 0,
+            "outcome": "reconcile -> False, entry_reconciled False, verified []; buy -> REJECTED ValueError entry_reconciliation_required; broker order_calls 0."
+          },
+          {
+            "command": "python - <<'PY' (offline probe 3: matched symbol with orderable_quantity=0 plus an unmanaged cancelable row, then submit the protective sell)",
+            "exitCode": 0,
+            "outcome": "reconcile -> False, reason external_working_order, protection_allowed('005930') True; sell -> REJECTED ValueError broker_sell_quantity_unavailable; broker order_calls 0. Confirms the per-symbol widening boundary is defended by the orderable-quantity check."
+          },
+          {
+            "command": "python - (AST scan of quantpilot/paper for unused imports) + grep confirmation",
+            "exitCode": 0,
+            "outcome": "Seven genuinely unused imports confirmed by grep: broker.py:7 OPEN, runtime.py:6 asdict, runtime.py:8 math, runtime.py:13 OPEN, cli.py:8 sys, calendar.py:4 timedelta, reporting.py:4 timezone."
+          }
+        ],
+        "criteria": [
+          {
+            "criterion": "Independent acceptance of per-symbol protection without enabling unsafe orders",
+            "status": "pass",
+            "evidence": "broker.py:113-114 resets verified_symbols/entry_reconciled before any reconcile work, so a mid-reconcile exception (verify_cash raising experiment_cash_ledger_mismatch, or get_cancelable_orders failing) leaves both fail-closed. broker.py:146-150 builds verified_symbols only from local.items() with remote.get(symbol)==quantity, so it can never contain a symbol the local ledger does not hold. broker.py:198-202 requires local==remote for entry_reconciled; since every local position quantity is >0, an unverified symbol implies local!=remote, hence entries are always blocked whenever any position is unprotected (verified by probe 1: verified=['005930'] while entry path stays closed). runtime.py:169-176 skips only unmatched positions and audits position_awaiting_reconciliation. Because the new test stubs gateway.submit (test_paper_review_regressions.py:210), I exercised submit directly offline: unverified-symbol sell -> position_reconciliation_required, blocked buy -> entry_reconciliation_required, matched symbol with orderable_quantity consumed by an external working order -> broker_sell_quantity_unavailable. Zero broker order calls in all three probes."
+          },
+          {
+            "criterion": "Regression tests pass; no writes or external calls",
+            "status": "pass",
+            "evidence": "Required command `python scripts/verify-paper.py <6 files>` exited 0 with 33 passed. Broader `python scripts/verify-paper.py quantpilot/tests -q` exited 0 with 1474 passed / 2 skipped, equal to the stated 1471 baseline plus the three new regressions. verify-paper.py strips KIS_/SLACK_/OPENAI_/ANTHROPIC_ and TOKEN/SECRET/API_KEY/PASSWORD variables and pins LIVE_TRADING_ENABLED/MARKET_ORDERS_ENABLED/GUARDED_AUTOPILOT_ENABLED/FULLY_AUTOMATED_OPERATOR_ENABLED=false, BROKER_MODE=mock, DATA_MODE=fixture; its basetemp lives under ~/.codex/paper-verification, outside the repository. My three probes used the offline FakePaperClient-derived fixture with the same env pinning and temp dirs outside the worktree. git status --porcelain is byte-identical before and after, so filesChanged is empty. No edits, no subdelegation, no network/broker/Slack/AI/Docker calls."
+          }
+        ],
+        "findings": [
+          {
+            "id": "submit-gates-untested",
+            "severity": "low",
+            "fixCost": "low",
+            "axis": "usage",
+            "location": "quantpilot/tests/unit/test_paper_review_regressions.py:210",
+            "evidence": "test_one_quantity_divergence_does_not_strand_another_position replaces the real gateway with `gateway.submit = lambda order, *args: submitted.append(order)`, so it proves only the runtime-side skip. A repo-wide grep for position_reconciliation_required and entry_reconciliation_required returns hits in quantpilot/paper/broker.py:218,220 only — no test anywhere asserts either rejection. I confirmed both gates work today by running them offline (probe 1 and probe 2, zero broker order calls), but nothing in the suite would fail if a future refactor dropped the second layer of defense on this critical-risk permission path.",
+            "proposal": "Add two small tests against the real KisGateway.submit (no stub): a sell for an unverified symbol must raise position_reconciliation_required, and a buy while entry_reconciled is False must raise entry_reconciliation_required, both asserting client.order_calls == 0. The offline scenarios I ran translate directly into test bodies using the existing Client fixture from test_intraday_durable_gateway."
+          },
+          {
+            "id": "stranded-symbol-not-surfaced",
+            "severity": "low",
+            "fixCost": "low",
+            "axis": "usage",
+            "location": "quantpilot/paper/reporting.py:86",
+            "evidence": "reconcile persists store.put('unverified_symbols', ...) (broker.py:151) and snapshot() exposes it (reporting.py:75), but render() never prints it, and runtime.alert() enqueues only 'QuantPilot 모의운용 알림: {code}' with the reason code (runtime.py:42-46). Before this change a single mismatch blocked the whole cycle, which was loud; now the system keeps running with exactly one position unprotected and the only symbol-level trace is the position_awaiting_reconciliation audit row plus `status --json`. The operator reading the Slack report sees 상태 account_exposure_unattributed and cannot tell which holding lost its stop.",
+            "proposal": "In render(), when report['unverified_symbols'] is non-empty, append a line naming those symbols (e.g. '보호 대기: 000660 — 브로커 수량 불일치'), and include the symbol list in the alert payload enqueued for account_exposure_unattributed."
+          },
+          {
+            "id": "dead-imports-remain",
+            "severity": "low",
+            "fixCost": "low",
+            "axis": "overengineering",
+            "location": "quantpilot/paper/runtime.py:6",
+            "evidence": "An AST scan plus grep confirmation shows seven unused imports still in the paper module: broker.py:7 OPEN (only TERMINAL is used), runtime.py:6 asdict, runtime.py:8 math, runtime.py:13 OPEN, cli.py:8 sys, calendar.py:4 timedelta, reporting.py:4 timezone. Each name appears exactly once in its file — on its own import line. The reported 'removed dead import' fix was a single-site removal, not a sweep.",
+            "proposal": "Drop the seven names listed above. All are stdlib or intra-package imports with no side effects, so removal is behaviour-preserving; the full suite (1474 passed) covers every affected module."
+          },
+          {
+            "id": "sandbox-output-limit-unreachable",
+            "severity": "low",
+            "fixCost": "low",
+            "axis": "correctness",
+            "location": "quantpilot/paper/lab.py:926",
+            "evidence": "run_signal_code passes max_output_bytes=config.max_output_bytes to bounded_run whenever subprocess_runner is None (lab.py:898-902), so in production bounded_run raises ValueError('subprocess_output_limit') (process.py:56-57) before control ever reaches the len(stdout) > config.max_output_bytes branch. That ValueError falls through to the catch-all at lab.py:937 and is reported as MALFORMED_OUTPUT. test_signal_runner_bounds_time_and_output (test_paper_strategy_lab.py:388-394) only reaches SANDBOX_OUTPUT_LIMIT through an injected runner that returns oversized bytes, so the assertion does not describe production behaviour. Both paths are fail-closed and neither can emit an order, so this is diagnostics only.",
+            "proposal": "Catch the bounded_run limit explicitly — e.g. `except ValueError as exc: return LabError(code=LabErrorCode.SANDBOX_OUTPUT_LIMIT if str(exc) == 'subprocess_output_limit' else LabErrorCode.MALFORMED_OUTPUT)` before the generic handler — so the recorded lab error code matches the real cause."
+          },
+          {
+            "id": "new-guard-and-label-untested",
+            "severity": "low",
+            "fixCost": "low",
+            "axis": "usage",
+            "location": "quantpilot/paper/process.py:19",
+            "evidence": "test_paper_process_bounds.py covers only the output budget and the timeout kill; nothing exercises the new `if not capture_output or text or shell: raise ValueError('unsupported_subprocess_options')` guard. Likewise, no test asserts the new reconciliation_reason value 'known_order_state_changed' (broker.py:184) — a grep for that string finds it only in broker.py. Neither affects order permission (both branches still set unmanaged=True and block entries), so this is coverage debt rather than a defect.",
+            "proposal": "Add one parametrised assertion that bounded_run(..., text=True) / shell=True / capture_output=False raises unsupported_subprocess_options, and one reconcile test where every unmatched cancelable row matches a known dispatch by order number, branch, symbol, side and quantity, asserting reason == 'known_order_state_changed' and entry_reconciled is False."
+          }
+        ],
+        "unresolvedRisks": [
+          "The per-symbol design deliberately allows a protective sell on a matched symbol while an unmanaged external working order exists on the account. Safety then rests entirely on the broker-reported orderable_quantity check in submit (broker.py:225-230), which I confirmed rejects the over-sell offline. If a real KIS paper balance ever reports orderable_quantity without deducting a pending external sell, that single check is the only thing between a matched symbol and a double sell. Worst case remains a broker rejection (Korean cash accounts cannot go short), not a short position.",
+          "Broker-side timing skew between get_daily_orders_and_fills and get_balance can transiently make a genuinely correct position unverified, suspending its stop-loss for that cycle. This is fail-closed and always accompanied by an incident alert (an unverified symbol necessarily makes local != remote, hence entry_reconciled False), but it is an availability cost of the change that only live paper running will quantify.",
+          "The KisPaperClient constructor allowlist in test_paper_submission_coordinator.py was widened to admit paper/cli.py and jobs/check_kis_paper_connection.py. I verified build_runtime gates on environment_safe, data_mode == paper_trading and KIS_PAPER_ORDER_SUBMISSION_ENABLED before constructing the client, but the read-only probe job itself is outside my allowed scope and was not audited here.",
+          ".env.example is modified in the working tree and sits in this task's forbidden scope, so it was not inspected; a Bash attempt to diff it was correctly denied by the permission layer."
+        ],
+        "confidence": 0.88
+      },
+      "verification": {
+        "passed": true,
+        "results": [
+          {
+            "command": "python scripts/verify-paper.py quantpilot/tests/unit/test_paper_production_wiring.py quantpilot/tests/unit/test_paper_review_regressions.py quantpilot/tests/unit/test_paper_collector.py quantpilot/tests/unit/test_paper_research_integration.py quantpilot/tests/unit/test_paper_process_bounds.py quantpilot/tests/unit/test_paper_strategy_lab.py",
+            "status": "complete",
+            "exitCode": 0,
+            "timedOut": false,
+            "durationMs": 3855,
+            "stdoutTail": ".................................                                        [100%]\r\n33 passed in 2.48s\r\n",
+            "stderrTail": ""
+          }
+        ]
+      },
+      "attempts": [
+        {
+          "attempt": 1,
+          "route": {
+            "provider": "anthropic",
+            "profileId": "claude-opus-deep",
+            "model": "opus",
+            "effort": "xhigh"
+          },
+          "passed": true,
+          "changeGuardPassed": true
+        }
+      ]
+    }
+  ],
+  "ok": true,
+  "planPath": "C:\\Users\\goyan\\.codex\\worktrees\\qp-paper-redesign-workers\\.aorch\\task-runs\\f4ded6be-e608-4f93-a9b3-4c4effcaf3f8\\plan.json",
+  "resultPath": "C:\\Users\\goyan\\.codex\\worktrees\\qp-paper-redesign-workers\\.aorch\\task-runs\\f4ded6be-e608-4f93-a9b3-4c4effcaf3f8\\dispatch.json"
+}

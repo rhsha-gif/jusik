@@ -53,6 +53,15 @@ from quantpilot.packages.core.execution.paper_submission import (
 from quantpilot.packages.core.operator.position_ledger import PaperExecutionSession
 
 
+def test_daily_price_read_endpoint_remains_pinned_to_paper_origin():
+    endpoint = kis_paper_module.KIS_DAILY_PRICE_ENDPOINT
+    kis_paper_module._validate_request_url(KIS_PAPER_BASE_URL + endpoint)
+    with pytest.raises(KisPaperConfigurationError):
+        kis_paper_module._validate_request_url(
+            "https://openapi.koreainvestment.com:9443" + endpoint
+        )
+
+
 class RecordingTransport(KisJsonTransport):
     def __init__(self, *outcomes: KisHttpResponse | BaseException) -> None:
         self.outcomes = list(outcomes)

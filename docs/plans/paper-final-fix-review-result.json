@@ -1,0 +1,235 @@
+{
+  "objective": "Final independent acceptance of paper harness fixes and operational changes",
+  "decomposed": false,
+  "runId": "4ba94daa-3baa-48bd-bff6-1db6e9077bc8",
+  "planFingerprint": "f37e0f18e094297b751a939cefe1ac75b290af7599e325849bea6396ca870f15",
+  "status": "complete",
+  "results": [
+    {
+      "taskId": "paper-final-fix-review",
+      "agentRole": "reviewer",
+      "agentId": "aorch-reviewer",
+      "agent": "aorch-reviewer",
+      "status": "complete",
+      "route": {
+        "provider": "anthropic",
+        "profileId": "claude-opus-deep",
+        "model": "opus",
+        "effort": "xhigh"
+      },
+      "runDir": "C:\\Users\\goyan\\.codex\\worktrees\\qp-paper-review\\.aorch\\task-runs\\4ba94daa-3baa-48bd-bff6-1db6e9077bc8\\paper-final-fix-review",
+      "receiptPath": "C:\\Users\\goyan\\.codex\\worktrees\\qp-paper-review\\.aorch\\task-runs\\4ba94daa-3baa-48bd-bff6-1db6e9077bc8\\paper-final-fix-review\\receipt.json",
+      "receipt": {
+        "status": "complete",
+        "summary": "Cross-provider acceptance verdict = BLOCK. Three of the four prior blockers are genuinely fixed and verified: (1) gateway.begin() at broker.py:71-75 passes RefreshingClient.current_client() so paper_submission.py:161 isinstance(client, KisPaperClient) selects the closed submitter instead of the :801-807 test-double path, and test_paper_production_wiring drives real request construction/parsing through a fake transport asserting exactly one order-cash POST and dispatch.attempt_count==1; (2) reporting.snapshot strategy union (reporting.py:25-29 = active | trades | positions) surfaces lab/trial strategies, confirmed by probe where a lab_fixture round trip reconciles to realized_net_pnl within 0.01; (3) candidate_status is rewritten per symbol every cycle at runtime.py:275-293. The audited deltas are sound: RateLimiter holds its lock across sleep so the collector thread and order loop serialize on one request budget (data.py:32-35); the collector opens its own SQLite connection (collector.py:95); auth.py mutexes renewal; jobs.py:85-92 finalizes job+outbox in one transaction; store.verify_cash reconstructs cash correctly across partial fills, a cancelled remainder and a full sell, with gross/net/slippage-adjusted PnL stored separately; bounded_run enforces the output and time caps and lab.py cleans up a uuid-named container; the research retry still derives the reviewer from source.provider so independence holds. BLOCKING: (A) broker.py:142-143 raise ValueError(\"account_position_mismatch\") aborts cycle() at runtime.py:99 before the protection loop at runtime.py:169, so a quantity divergence on ONE symbol strands protective exits for every position including exactly matched ones - reproduced offline (local{005930:1,000660:1} vs remote{005930:1,000660:5} -> blocked, zero protective sells, repeats every cycle, and flatten cannot escape it). (B) the change set's own orphan test quantpilot/tests/unit/test_prepare_kis_paper_runtime.py:5 imports a nonexistent module, so both the project's documented `python -m pytest quantpilot/tests` and `python scripts/verify-paper.py` with no arguments exit 2 collecting zero tests. Five non-blocking observations recorded. No edits, no network, no credentials read; working tree byte-identical to task start.",
+        "filesInspected": [
+          "quantpilot/paper/broker.py",
+          "quantpilot/paper/auth.py",
+          "quantpilot/paper/runtime.py",
+          "quantpilot/paper/store.py",
+          "quantpilot/paper/cli.py",
+          "quantpilot/paper/jobs.py",
+          "quantpilot/paper/collector.py",
+          "quantpilot/paper/reporting.py",
+          "quantpilot/paper/recommendations.py",
+          "quantpilot/paper/process.py",
+          "quantpilot/paper/research.py",
+          "quantpilot/paper/lab.py",
+          "quantpilot/paper/data.py",
+          "quantpilot/paper/config.py",
+          "quantpilot/paper/calendar.py",
+          "quantpilot/paper/strategy.py",
+          "quantpilot/paper/intelligence.py",
+          "quantpilot/packages/core/execution/paper_submission.py",
+          "quantpilot/packages/core/execution/paper_kill.py",
+          "quantpilot/packages/core/execution/paper_reconciliation.py",
+          "quantpilot/packages/db/sqlite_repositories.py",
+          "quantpilot/tests/unit/test_paper_production_wiring.py",
+          "quantpilot/tests/unit/test_paper_review_regressions.py",
+          "quantpilot/tests/unit/test_paper_collector.py",
+          "quantpilot/tests/unit/test_paper_process_bounds.py",
+          "quantpilot/tests/unit/test_paper_reporting_worker.py",
+          "quantpilot/tests/unit/test_paper_research_integration.py",
+          "quantpilot/tests/unit/test_paper_strategy_lab.py",
+          "quantpilot/tests/unit/test_intraday_durable_gateway.py",
+          "quantpilot/tests/unit/test_prepare_kis_paper_runtime.py",
+          "scripts/verify-paper.py",
+          ".aorch/task-runs/c733808e-21c7-4888-b536-668d23d90526/paper-execution-review/receipt.json"
+        ],
+        "filesChanged": [],
+        "commands": [
+          {
+            "command": "git status --porcelain=v1 ; git branch --show-current ; git log --oneline -15",
+            "exitCode": 0,
+            "outcome": "22 working-tree entries: quantpilot/paper/ and 14 test files untracked, kis_paper.py plus two tests modified. Recorded as the task-start baseline."
+          },
+          {
+            "command": "python scripts/verify-paper.py quantpilot/tests/unit/test_paper_production_wiring.py quantpilot/tests/unit/test_paper_review_regressions.py quantpilot/tests/unit/test_paper_collector.py quantpilot/tests/unit/test_paper_process_bounds.py quantpilot/tests/unit/test_paper_reporting_worker.py quantpilot/tests/unit/test_paper_research_integration.py quantpilot/tests/unit/test_paper_strategy_lab.py",
+            "exitCode": 0,
+            "outcome": "Required verification command passes: 33 tests, all green (re-run with the true exit code captured, not a piped one)."
+          },
+          {
+            "command": "python scripts/verify-paper.py",
+            "exitCode": 2,
+            "outcome": "BLOCK-2 evidence: the change set's own script in its default full mode aborts at collection - ModuleNotFoundError: No module named 'quantpilot.jobs.prepare_kis_paper_runtime'; 'Interrupted: 1 error during collection'; zero tests executed."
+          },
+          {
+            "command": "python -m pytest quantpilot/tests --collect-only -q",
+            "exitCode": 2,
+            "outcome": "Same ImportError from quantpilot/tests/unit/test_prepare_kis_paper_runtime.py:5; the project's documented CLAUDE.md verification command collects nothing."
+          },
+          {
+            "command": "python scripts/verify-paper.py quantpilot/tests/unit  (background)",
+            "exitCode": 2,
+            "outcome": "Same collection interrupt across the whole unit directory (the shell reported 0 only because output was piped to tail)."
+          },
+          {
+            "command": "python %TEMP%/qp_probe_divergence.py (Store + KisGateway + Runtime.cycle with fake Client)",
+            "exitCode": 0,
+            "outcome": "First reproduction: matched local/remote submits a protective sell; local!=remote submits none."
+          },
+          {
+            "command": "python %TEMP%/qp_probe2.py (five local/remote shapes through Runtime.cycle)",
+            "exitCode": 0,
+            "outcome": "BLOCK-1 confirmed. A matched -> running, sell(stop) placed. B local{005930:2}/remote{1} -> blocked, 0 sells. C local{1}/remote{2} -> blocked, 0 sells. D local{005930:1}/remote{005930:1,000660:3} -> protecting, sell placed, incident=account_exposure_unattributed (the intended fix). E local{005930:1,000660:1}/remote{005930:1,000660:5} -> blocked, 0 sells even though 005930 matches exactly."
+          },
+          {
+            "command": "python %TEMP%/qp_probe3.py (repeat cycles then operator flatten)",
+            "exitCode": 0,
+            "outcome": "State is terminal: cycles 0-2 blocked with 0 sells; store.control('flatten') sets control=flattening; cycles 0-2 after flatten still blocked with 0 sells; positions [('000660',1),('005930',1)] remain held. No in-product remediation exists."
+          },
+          {
+            "command": "python %TEMP%/qp_probe4.py (verify_cash across partial fills, cancel, full sell + snapshot)",
+            "exitCode": 0,
+            "outcome": "verify_cash passes at every step; realized 5867.29985; trade pnl/adjusted/gross = 5867.30/5373.77/7000.00; report shows trend_pullback net 5867.3 and gross 7000, realized_net_pnl 5867.3. Cash ledger and gross/cost split are consistent."
+          },
+          {
+            "command": "grep -n 'isinstance(.*[Cc]lient' quantpilot/packages/core/execution/paper_submission.py",
+            "exitCode": 0,
+            "outcome": "Confirms the fix target: :161 selects the closed submitter and :801-807 falls back to the public place_limit_cash_order test-double path when the object is not a KisPaperClient."
+          },
+          {
+            "command": "git status --porcelain=v1 | md5sum ; git status --porcelain=v1 | wc -l",
+            "exitCode": 0,
+            "outcome": "22 entries, identical to the task-start baseline; __pycache__ is gitignored (.gitignore:4). Working-tree delta is empty."
+          }
+        ],
+        "criteria": [
+          {
+            "criterion": "Cross-provider safety acceptance or precise remaining blocker",
+            "status": "pass",
+            "evidence": "Verdict BLOCK with two reproduced blockers and five non-blocking observations, each anchored to file:line. BLOCK-1 broker.py:142-143 vs runtime.py:99/:169, reproduced across five local/remote shapes plus a flatten-escape attempt. BLOCK-2 quantpilot/tests/unit/test_prepare_kis_paper_runtime.py:5, reproduced with exit 2 from both the repo's documented pytest command and scripts/verify-paper.py's default mode. The three fixed blockers are each backed by code evidence (broker.py:71-75 against paper_submission.py:161/:801-807; reporting.py:25-29; runtime.py:275-293) and by executing the code, not by trusting the executor's summary."
+          },
+          {
+            "criterion": "No edits or external calls",
+            "status": "pass",
+            "evidence": "git status --porcelain=v1 is byte-identical at start and end (22 entries, md5 9eee35de93a7d7b1d61a740bf1ad63de); filesChanged is empty. All four probe scripts were written to %TEMP% and used tempfile.mkdtemp for their SQLite state; verify-paper.py places its basetemp under ~/.codex/paper-verification, outside the repo, and runs with -p no:cacheprovider. Every client in the probes was the in-repo FakePaperClient/Client fixture, so no broker, Slack, KIS or Docker call was made. No .env, token or credential file was opened; .env*, .claude, .codex (other than the worktree path itself) and .agents were never read."
+          }
+        ],
+        "findings": [
+          {
+            "id": "BLOCK-1-matched-holdings-lose-protection",
+            "severity": "critical",
+            "fixCost": "low",
+            "axis": "correctness",
+            "location": "quantpilot/paper/broker.py:142-143 (effect at quantpilot/paper/runtime.py:99 vs :169)",
+            "evidence": "reconcile() raises ValueError('account_position_mismatch') whenever any locally held symbol's remote holding_quantity differs. That raise leaves reconcile() on the first statement inside cycle()'s try (runtime.py:99), is caught by the blanket handler at runtime.py:389, and returns blocked - so the position-protection loop at runtime.py:169 never executes. Reproduced with Runtime.cycle() and the in-repo Client fixture, quote bid far below stop: (A) local{005930:1}/remote{005930:1} -> running, sell/stop/1 placed; (B) local{005930:2}/remote{005930:1} -> blocked, 0 sells; (C) local{005930:1}/remote{005930:2} -> blocked, 0 sells; (D) local{005930:1}/remote{005930:1,000660:3} -> protecting, sell placed, incident=account_exposure_unattributed; (E) local{005930:1,000660:1}/remote{005930:1,000660:5} -> blocked, 0 sells although 005930 matches exactly. A second probe ran three cycles (all blocked, 0 sells), issued store.control('flatten') (control becomes 'flattening'), then three more cycles - still blocked, still 0 sells, positions [('000660',1),('005930',1)] still held. The flatten branch lives at runtime.py:177-193, downstream of the raise, so the operator's emergency liquidation control is unreachable.",
+            "proposal": "Replace the raise at broker.py:142-143 with the same soft-fail path already used for remote supersets: store.put('reconciliation_reason','account_position_mismatch') and let the function return False. New entries stay blocked via runtime.py:100-106 and :230, while the protection loop keeps running for every position. Selling more than the broker actually holds is already fail-closed per order at broker.py:193-197 (remote.orderable_quantity < order['quantity'] -> broker_sell_quantity_unavailable), so the cycle-wide raise is redundant defence bought at the price of all protective exits. Add a regression test alongside test_paper_review_regressions.py:70 covering shape (E) - one matched symbol plus one divergent symbol must still place the matched symbol's stop."
+          },
+          {
+            "id": "BLOCK-2-orphan-test-breaks-repo-verification",
+            "severity": "high",
+            "fixCost": "low",
+            "axis": "correctness",
+            "location": "quantpilot/tests/unit/test_prepare_kis_paper_runtime.py:5",
+            "evidence": "The file (untracked, mtime 2026-09-10 14:44, same day as the rest of this change set) does `from quantpilot.jobs.prepare_kis_paper_runtime import prepare_runtime`, but quantpilot/jobs/ contains no such module (only check_kis_paper_connection.py among the new files). pytest aborts during collection, so zero tests run: `python scripts/verify-paper.py` (no arguments, i.e. the script's own default full mode targeting quantpilot/tests at scripts/verify-paper.py:37) exits 2 with 'ModuleNotFoundError: No module named quantpilot.jobs.prepare_kis_paper_runtime' and '!!! Interrupted: 1 error during collection !!!'; `python -m pytest quantpilot/tests --collect-only -q` (the command documented in the project CLAUDE.md) exits 2 with the same error. The defect is invisible to the task's verification command because that command names seven files explicitly.",
+            "proposal": "Delete quantpilot/tests/unit/test_prepare_kis_paper_runtime.py if it is a leftover from an abandoned iteration, or add the missing quantpilot/jobs/prepare_kis_paper_runtime.py it exercises. Then re-run `python scripts/verify-paper.py` with no arguments and require exit 0 before acceptance, so the full-suite path is gated rather than only the seven-file subset."
+          },
+          {
+            "id": "O-1-own-partial-fill-misreported-as-external-order",
+            "severity": "low",
+            "fixCost": "low",
+            "axis": "correctness",
+            "location": "quantpilot/paper/broker.py:149-158",
+            "evidence": "unmanaged is computed by matching every get_cancelable_orders() row against every dispatch with _cancel_identity_matches, which requires row.total_filled_quantity == int(dispatch.cumulative_filled_quantity) and Decimal(row.total_filled_amount) == sum(fill_evidence notional) (paper_kill.py:578-579). reconcile_unresolved() (broker.py:111) and get_cancelable_orders() (broker.py:157) are separate KIS endpoints at least 1.05s apart via LimitedTransport, so a partial fill of our own order between the two calls makes the row advance past the dispatch, no dispatch matches, and unmanaged becomes True. reconcile then returns False and runtime.py:161-167 raises the incident code 'external_working_order' for an order that is entirely ours.",
+            "proposal": "Distinguish the cases: when a row matches a dispatch on identity fields (order_number, branch, symbol, side, quantity) but only the fill-state equalities differ, emit a separate reason such as 'own_order_fill_state_advancing' instead of 'external_working_order'. The soft-fail behaviour is correct; only the operator-facing code is wrong."
+          },
+          {
+            "id": "O-2-candidate-status-defaults-to-ready",
+            "severity": "low",
+            "fixCost": "low",
+            "axis": "correctness",
+            "location": "quantpilot/paper/reporting.py:75-78",
+            "evidence": "snapshot() builds candidate_status as {s: store.get('candidate_status:' + s, 'ready') for s in store.get('universe', [])}. The collector refreshes the universe independently (collector.py:34-38), so a symbol it has just added has no candidate_status key until the order loop's per-symbol pass at runtime.py:275-293 runs. Until then the operator report claims 'ready' for a symbol that has never been evaluated, and the same holds for any cycle that returns early at runtime.py:231 ('protecting').",
+            "proposal": "Change the default from 'ready' to 'not_evaluated' so an absent key is reported as unknown rather than as the healthiest possible state."
+          },
+          {
+            "id": "O-3-bounded-run-silently-drops-subprocess-kwargs",
+            "severity": "low",
+            "fixCost": "low",
+            "axis": "correctness",
+            "location": "quantpilot/paper/process.py:8",
+            "evidence": "bounded_run(command, *, timeout, env, max_output_bytes=65536, **kwargs) swallows every extra keyword. lab.py:890-903 and :908-916 pass capture_output=True, text=False, check=False and shell=False expecting subprocess.run semantics; all four are discarded. Today the outcomes coincide (bounded_run always captures, always returns bytes, never raises on returncode, never uses a shell), so the behaviour is correct by accident, but a future caller passing check=True would silently get no exception on a nonzero exit.",
+            "proposal": "Either consume the supported keywords explicitly and honour check, or raise TypeError on unexpected keywords so a semantic mismatch fails loudly instead of being ignored."
+          },
+          {
+            "id": "O-4-unused-slackdm-import-in-worker-branch",
+            "severity": "low",
+            "fixCost": "low",
+            "axis": "overengineering",
+            "location": "quantpilot/paper/cli.py:165",
+            "evidence": "The worker branch imports SlackDM but calls work_once(store) with no sender, so jobs.py:11-12 and :93-94 never drain the outbox from the worker. Delivery happens only in the separate reporter process (cli.py:149-162), which is the intended design, leaving the import dead.",
+            "proposal": "Drop the import so the worker/reporter split stays legible."
+          },
+          {
+            "id": "O-5-coverage-gaps-on-the-audited-deltas",
+            "severity": "low",
+            "fixCost": "standard",
+            "axis": "usage",
+            "location": "quantpilot/tests/unit/test_paper_review_regressions.py:70, quantpilot/tests/unit/test_paper_collector.py:38, quantpilot/paper/research.py:211-217",
+            "evidence": "test_unrelated_holding_blocks_entries_but_preserves_known_stop only covers a remote superset by an unrelated ticker (000660), which is exactly the shape that passes; the quantity-divergence branch at broker.py:142 - the one that strands protection - has no test, which is why BLOCK-1 survived. test_paper_collector calls Collector.collect_once directly on the main thread, so the background thread with its own SQLite connection running concurrently with a cycle is never exercised. The alternate-provider generation retry at research.py:211-217 has no test either (the reviewer-independence derivation at :245 is correct on inspection but unverified after a retry).",
+            "proposal": "Add: (1) a regression test for one matched plus one divergent symbol asserting the matched symbol's stop is still placed; (2) a collector test that starts the real thread against a live cycle and asserts no SQLite locking error and consistent bars; (3) a research test where the primary provider returns LabError and the alternate succeeds, asserting the reviewer provider is the opposite of source.provider."
+          }
+        ],
+        "unresolvedRisks": [
+          "Deliberately excluded from this review and therefore unverified: real network calls, manual KIS paper sessions, Slack delivery, live AI provider adapters, and Docker sandbox execution. run_signal_code, verify_sandbox_readiness and the lab container lifecycle were read and reasoned about but never executed against a real Docker daemon, so container-escape and image-pinning behaviour rest on code inspection only.",
+          "The DurablePaperSubmissionCoordinator is constructed once per begin() with a snapshot of RefreshingClient.current_client() (broker.py:68-78), while submit()'s other calls (get_buying_power, get_balance, get_cancelable_orders) go through the auto-renewing proxy. Because begin() runs at the top of every cycle the staleness window is bounded by cycle_seconds (default 10s) against a ~24h token, so this is safe as written - but it becomes a live 401 risk if begin() is ever hoisted out of the per-cycle path.",
+          "reconcile() issues two get_balance() calls per invocation (broker.py:112 and :136) and runtime.cycle() calls reconcile twice (runtime.py:99 and :161), so a cycle spends at least four balance reads plus cancelable-order reads on the shared 1.05s LimitedTransport budget, concurrently with the collector thread. Request-budget headroom under a full 20-symbol universe was not measured and could throttle the protection loop on a real account.",
+          "store.verify_cash() and the reconcile raises are hard aborts that skip position protection for the whole cycle. Even after BLOCK-1 is fixed for the position path, experiment_cash_ledger_mismatch (store.py:182) retains the same all-or-nothing shape and has no operator remediation command.",
+          "Two SQLite writers (main cycle and collector thread) share the experiment DB with a 15s busy timeout under WAL. No sustained concurrent-write soak was run, so lock contention under a full trading session is unmeasured."
+        ],
+        "confidence": 0.87
+      },
+      "verification": {
+        "passed": true,
+        "results": [
+          {
+            "command": "python scripts/verify-paper.py quantpilot/tests/unit/test_paper_production_wiring.py quantpilot/tests/unit/test_paper_review_regressions.py quantpilot/tests/unit/test_paper_collector.py quantpilot/tests/unit/test_paper_process_bounds.py quantpilot/tests/unit/test_paper_reporting_worker.py quantpilot/tests/unit/test_paper_research_integration.py quantpilot/tests/unit/test_paper_strategy_lab.py",
+            "status": "complete",
+            "exitCode": 0,
+            "timedOut": false,
+            "durationMs": 3340,
+            "stdoutTail": ".................................                                        [100%]\r\n",
+            "stderrTail": ""
+          }
+        ]
+      },
+      "attempts": [
+        {
+          "attempt": 1,
+          "route": {
+            "provider": "anthropic",
+            "profileId": "claude-opus-deep",
+            "model": "opus",
+            "effort": "xhigh"
+          },
+          "passed": true,
+          "changeGuardPassed": true
+        }
+      ]
+    }
+  ],
+  "ok": true,
+  "planPath": "C:\\Users\\goyan\\.codex\\worktrees\\qp-paper-review\\.aorch\\task-runs\\4ba94daa-3baa-48bd-bff6-1db6e9077bc8\\plan.json",
+  "resultPath": "C:\\Users\\goyan\\.codex\\worktrees\\qp-paper-review\\.aorch\\task-runs\\4ba94daa-3baa-48bd-bff6-1db6e9077bc8\\dispatch.json"
+}

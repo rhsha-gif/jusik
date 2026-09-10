@@ -1,16 +1,7 @@
 ---
+model: "fable"
 name: risk-matrix-designer
-description: >
-  Design a quantitative risk matrix for a trading strategy: position sizing,
-  drawdown limits, correlation budgets, stop-loss levels, and Kelly-based
-  allocation formulas. Outputs a structured YAML risk block.
-triggers:
-  - "design risk matrix"
-  - "position sizing"
-  - "drawdown limit"
-  - "risk parameters"
-  - "kelly criterion"
-model: fable
+description: "Design a quantitative risk matrix for a trading strategy: position sizing, drawdown limits, correlation budgets, stop-loss levels, and Kelly-based allocation formulas. Outputs a structured YAML risk block."
 ---
 
 # Risk Matrix Designer Skill
@@ -73,3 +64,5 @@ risk_matrix:
 - `max_portfolio_drawdown_pct` must be ≥ 2× `max_position_pct`.
 - At least two circuit breakers must be defined.
 - All sizing formulas must cite a source.
+
+<!-- aorch-generated: skill:risk-matrix-designer; mode=native; edit .agents/aorch/definitions.json -->

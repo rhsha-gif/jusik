@@ -1,17 +1,7 @@
 ---
+model: "fable"
 name: fable5-level34-recipe
-description: >
-  Author a complete Level 3 (Approval-Based Autopilot) or Level 4 (Guarded Autopilot)
-  quantitative trading recipe in structured YAML. Synthesizes signals, entry/exit rules,
-  risk matrix, backtest protocol, and Codex handoff stub from cited sources.
-triggers:
-  - "design a strategy"
-  - "write a recipe"
-  - "level 3 recipe"
-  - "level 4 recipe"
-  - "approval autopilot"
-  - "guarded autopilot"
-model: fable
+description: "Author a complete Level 3 (Approval-Based Autopilot) or Level 4 (Guarded Autopilot) quantitative trading recipe in structured YAML. Synthesizes signals, entry/exit rules, risk matrix, backtest protocol, and Codex handoff stub from cited sources."
 ---
 
 # Fable5 Level 3–4 Recipe Skill
@@ -71,3 +61,5 @@ recipe:
 - Risk matrix must include `max_position_pct`, `max_portfolio_drawdown_pct`, `stop_loss_pct`.
 - Backtest protocol must include out-of-sample period.
 - Level 4 must include `rl_contract` block with reward function and safety bounds.
+
+<!-- aorch-generated: skill:fable5-level34-recipe; mode=native; edit .agents/aorch/definitions.json -->

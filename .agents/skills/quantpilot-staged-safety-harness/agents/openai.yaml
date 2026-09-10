@@ -1,0 +1,7 @@
+interface:
+  display_name: "QuantPilot Safety Harness"
+  short_description: "Implement staged trading automation with safety gates."
+  default_prompt: "Use $quantpilot-staged-safety-harness to implement the next QuantPilot level while preserving safety invariants."
+
+policy:
+  allow_implicit_invocation: true

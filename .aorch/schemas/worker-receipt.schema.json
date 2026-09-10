@@ -1,0 +1,76 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "type": "object",
+  "properties": {
+    "inputRequest": {
+      "type": "object",
+      "properties": {
+        "kind": { "type": "string", "enum": ["clarification", "approval"] },
+        "questions": {
+          "type": "array", "minItems": 1, "maxItems": 3,
+          "items": {
+            "type": "object",
+            "properties": {
+              "id": { "type": "string", "pattern": "^[A-Za-z0-9][A-Za-z0-9_-]{0,63}$" },
+              "prompt": { "type": "string", "minLength": 1, "maxLength": 2000 },
+              "options": { "type": "array", "minItems": 2, "maxItems": 5, "items": { "type": "string", "minLength": 1, "maxLength": 300 } }
+            },
+            "required": ["id", "prompt"], "additionalProperties": false
+          }
+        }
+      },
+      "required": ["kind", "questions"], "additionalProperties": false
+    },
+    "status": { "type": "string", "enum": ["complete", "partial", "blocked"] },
+    "summary": { "type": "string" },
+    "filesInspected": { "type": "array", "items": { "type": "string" } },
+    "filesChanged": { "type": "array", "items": { "type": "string" } },
+    "commands": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "properties": {
+          "command": { "type": "string" },
+          "exitCode": { "type": ["integer", "null"] },
+          "outcome": { "type": "string" }
+        },
+        "required": ["command", "exitCode", "outcome"],
+        "additionalProperties": false
+      }
+    },
+    "criteria": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "properties": {
+          "criterion": { "type": "string" },
+          "status": { "type": "string", "enum": ["pass", "fail", "not-run"] },
+          "evidence": { "type": "string" }
+        },
+        "required": ["criterion", "status", "evidence"],
+        "additionalProperties": false
+      }
+    },
+    "findings": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "properties": {
+          "id": { "type": "string", "minLength": 1, "pattern": "^[A-Za-z0-9][A-Za-z0-9._-]*$" },
+          "severity": { "type": "string", "enum": ["low", "standard", "high", "critical"] },
+          "fixCost": { "type": "string", "enum": ["low", "standard", "high", "critical"] },
+          "axis": { "type": "string", "enum": ["overengineering", "correctness", "usage"] },
+          "location": { "type": "string" },
+          "evidence": { "type": "string" },
+          "proposal": { "type": "string" }
+        },
+        "required": ["id", "severity", "fixCost", "axis", "location", "evidence", "proposal"],
+        "additionalProperties": false
+      }
+    },
+    "unresolvedRisks": { "type": "array", "items": { "type": "string" } },
+    "confidence": { "type": "number", "minimum": 0, "maximum": 1 }
+  },
+  "required": ["status", "summary", "filesInspected", "filesChanged", "commands", "criteria", "findings", "unresolvedRisks", "confidence"],
+  "additionalProperties": false
+}

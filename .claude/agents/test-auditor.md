@@ -1,3 +1,11 @@
+---
+name: test-auditor
+description: Review deterministic acceptance coverage for trading safety and operator contracts.
+disallowedTools: Write, Edit, NotebookEdit, Agent
+---
+
+<!-- aorch-generated: agent:test-auditor; mode=native; edit .agents/aorch/definitions.json -->
+
 # Test Auditor
 
 Review whether Level 5 has enough acceptance coverage.

@@ -2,19 +2,14 @@
 
 QuantPilot은 fixture-first 안전 중심 트레이딩 운영자 하네스다. 실거래는 기본적으로 비활성 상태여야 한다.
 
-## Best-Fit Codex–Claude collaboration
+## aorch workflow
 
-- 모든 비단순 작업은 [범용 협업 프로토콜](docs/agent_collaboration_protocol.md)을 따른다.
-- 새 미션은 [작업보드 템플릿](docs/agent_workboard_template.md)을 복사해 목표, 작업 그래프, 라우팅 점수,
-  worktree, 소유 경로, 검증 조건을 먼저 확정한다.
-- 담당자 선정에는 [능력 점수표](docs/agent_capability_scorecard.md)의 모델별 실적을 사용한다.
-- 최초 임무 수신자가 미션 리드를 유지한다. Codex와 Claude Code의 고정 직군은 없으며 작업별 적합도가
-  높은 쪽이 구현을 소유한다.
-- 상대 에이전트의 초기 분해 검토와 최소 하나의 검증 가능한 실질 산출물은 필수다.
-- 각 에이전트는 별도 worktree와 `codex/<mission>-<task>` 또는 `claude/<mission>-<task>` 브랜치에서
-  자기 경로만 수정하고 직접 커밋한다.
-- 미션 리드만 mainline을 통합하고 상대 커밋 검토와 프로젝트 전체 검증을 책임진다.
-- 완료된 `docs/professional_operator_workboard.md`는 역사적 증거다. 새 미션 상태를 그 문서에 추가하지 않는다.
+- 공통 작업 판단은 전역 adaptive-orchestrate를 따른다. 작고 명확한 작업은 현재 에이전트가 직접 처리한다.
+- 독립 실행이나 문맥 분리가 유리할 때 위임하며, 계획·작업보드·고정 역할 수를 모든 작업에 요구하지 않는다.
+- 최초 수신자가 범위, 제공자 선택, 통합과 완료 증거를 책임진다. 안전 중요 변경은 구현자와 다른 검토자의 승인이 필요하다.
+- 기존 작업보드가 있거나 병렬 소유권을 조정할 때 [협업 어댑터](docs/agent_collaboration_protocol.md)를 적용하고 lease와 소유 경로를 지킨다.
+- 프로젝트 에이전트·스킬 원본은 .agents/aorch/definitions.json과 참조 파일이다. 제품별 생성 파일의 별도 수정은 충돌이다.
+- 사용자 요청 없이 commit·push·PR을 만들지 않는다. 완료된 작업보드는 역사적 증거로 보존한다.
 
 ## QuantPilot safety adapter
 
@@ -50,12 +45,7 @@ Smoke 또는 orchestration 변경 후:
 python -m quantpilot.jobs.run_smoke
 ```
 
-`quantpilot/apps/web` frontend 변경 후 해당 디렉터리에서:
-
-```powershell
-npm run test
-npm run build
-```
+웹 클라이언트는 사용자 승인으로 2026-09-10 제거했다. 새 모의운용 검증은 `python scripts/verify-paper.py`와 `tach check`를 따른다. 프런트 npm 검사와 타입 산출물을 복원하지 않는다.
 
 ## Level 5 references
 

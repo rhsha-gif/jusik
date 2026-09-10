@@ -1,11 +1,10 @@
 ---
 name: backtest-forensics-agent
-description: >
-  Specialist agent that audits QuantPilot backtest designs and results for
-  look-ahead bias, data snooping, overfitting, survivorship bias, and
-  microstructure unrealism. Outputs a severity-rated forensics report.
+description: Specialist agent that audits QuantPilot backtest designs and results for look-ahead bias, data snooping, overfitting, survivorship bias, and microstructure unrealism. Outputs a severity-rated forensics report.
 model: fable
 ---
+
+<!-- aorch-generated: agent:backtest-forensics-agent; mode=native; edit .agents/aorch/definitions.json -->
 
 # Backtest Forensics Agent
 

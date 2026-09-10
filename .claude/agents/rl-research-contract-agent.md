@@ -1,11 +1,10 @@
 ---
 name: rl-research-contract-agent
-description: >
-  Specialist agent for designing Level 4 Guarded Autopilot reinforcement learning
-  contracts. Researches RL algorithm selection, designs observation/action spaces,
-  writes reward functions with safety overrides, and specifies training protocols.
+description: Specialist agent for designing Level 4 Guarded Autopilot reinforcement learning contracts. Researches RL algorithm selection, designs observation/action spaces, writes reward functions with safety overrides, and specifies training protocols.
 model: fable
 ---
+
+<!-- aorch-generated: agent:rl-research-contract-agent; mode=native; edit .agents/aorch/definitions.json -->
 
 # RL Research Contract Agent
 

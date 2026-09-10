@@ -81,9 +81,17 @@ QRM `07장 극단값이론 (Extreme Value Theory).md` (수식형).
 
 - `docs/STATUS.md` 갱신 (status-sync 규약)
 - vault·meta는 git 미추적이므로 커밋 대상은 docs뿐
+- **검색 인덱스 갱신**: `vault` MCP의 `vault_reindex` 호출 (또는 CLI `reindex`).
+  워처가 자동 반영하지만, 대량 입고 후에는 명시적으로 한 번 돌려 누락을 막는다.
 
 ## 하지 않는 것
 
 - 원문 PDF를 저장소·OneDrive 안에 두는 것
 - 확보하지 못한 자료의 노트 작성 (`meta/sources/book-acquisition-queue.md`가 미확보 목록)
-- LLM/RAG 검색 연결 (별도 단계 — 현재는 사람이 Obsidian으로, 에이전트가 파일로 직접 읽음)
+
+## 검색 계층 (2026-08-05 연결됨)
+
+vault는 `vault` MCP 서버(하이브리드 검색, 로컬 임베딩)로 에이전트에게 노출된다.
+조회·인용 규약은 `/vault-consult` 스킬이, 설계 근거는
+`docs/superpowers/specs/2026-08-05-vault-knowledge-layer-design.md`가 갖고 있다.
+장·개요·연결 노트의 입고는 여전히 이 runbook만 관할한다.

@@ -1,0 +1,16 @@
+{
+  "hooks": {
+    "UserPromptSubmit": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "ROOT=\"$PWD\"; while [ ! -e \"$ROOT/.aorch/hooks/user-prompt-submit.mjs\" ] && [ \"$ROOT\" != \"/\" ]; do ROOT=\"$(dirname \"$ROOT\")\"; done; if [ -e \"$ROOT/.aorch/hooks/user-prompt-submit.mjs\" ]; then node \"$ROOT/.aorch/hooks/user-prompt-submit.mjs\"; else echo \"aorch: no .aorch/hooks above $PWD\" >&2; fi",
+            "timeout": 3,
+            "statusMessage": "Classifying adaptive orchestration policy"
+          }
+        ]
+      }
+    ]
+  }
+}

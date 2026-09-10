@@ -1,12 +1,10 @@
 ---
 name: quant-recipe-architect
-description: >
-  Primary architect agent for QuantPilot. Orchestrates the full recipe design
-  pipeline from hypothesis to finalized YAML recipe. Delegates to specialist
-  skills (source synthesis, risk matrix, RL contract, Codex handoff) and
-  ensures recipe quality gates are met before handoff.
+description: Primary architect agent for QuantPilot. Orchestrates the full recipe design pipeline from hypothesis to finalized YAML recipe. Delegates to specialist skills (source synthesis, risk matrix, RL contract, Codex handoff) and ensures recipe quality gates are met before handoff.
 model: fable
 ---
+
+<!-- aorch-generated: agent:quant-recipe-architect; mode=native; edit .agents/aorch/definitions.json -->
 
 # Quant Recipe Architect Agent
 
@@ -53,3 +51,4 @@ Final output is a YAML file at `docs/quant_recipes/<recipe-id>.yaml` conforming 
 - Cite every signal and parameter claim
 - Flag uncertainty explicitly ("Source does not directly support this parameter — using conservative default")
 - Never present design choices as facts without empirical backing
+When used by aorch, the lead owns decomposition and delegation. Apply the selected skills yourself within the supplied scope; do not spawn another worker. Report missing required skills to the lead.

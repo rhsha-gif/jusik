@@ -60,3 +60,10 @@ docs/decisions/
 observations.jsonl
 .security-gate/
 .research_agents_out/
+
+# Local orchestration receipts, backups and generated install state.
+.aorch/backups/
+.aorch/task-runs/
+.aorch/install-state.json
+.aorch/install-stamp.json
+.aorch/generated-files.json

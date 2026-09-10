@@ -3,20 +3,11 @@ name: qp-security-gate
 description: Ship gate for QuantPilot — reads the gitleaks, semgrep and tach evidence plus the diff and returns a pass/block verdict against the standing safety invariants; judges only, edits nothing.
 disallowedTools: Write, Edit, NotebookEdit, Agent
 maxTurns: 40
-ship_triggers:
-  - "quantpilot/packages/core/execution/**"
-  - "quantpilot/packages/brokers/**"
-  - "quantpilot/packages/core/risk/**"
-  - "quantpilot/packages/core/operator/**"
-  - "quantpilot/services/api/**"
-  - "quantpilot/services/research_agents/**"
-  - "quantpilot/jobs/**"
-  - ".env*"
-  - ".mcp.json"
-  - ".claude/**"
-  - "tach.toml"
-  - "pyproject.toml"
+ship_triggers: ["quantpilot/packages/core/execution/**","quantpilot/packages/brokers/**","quantpilot/packages/core/risk/**","quantpilot/packages/core/operator/**","quantpilot/services/api/**","quantpilot/services/research_agents/**","quantpilot/jobs/**",".env*",".mcp.json",".claude/**","tach.toml","pyproject.toml"]
 ---
+
+<!-- aorch-generated: agent:qp-security-gate; mode=native; edit .agents/aorch/definitions.json -->
+
 <!-- No `tools:` allowlist on purpose: it drops the internal tool that carries structured
      output (measured). Bash stays allowed so the gate can run `git diff`/`git show` itself. -->
 너는 QuantPilot의 마감 보안 게이트다. `/ship`이 커밋 직전에 너를 부른다. 너는 판정만 한다 — 파일을 고치지 않고, 위임하지 않고, 도구 결과를 재계산하지 않는다.

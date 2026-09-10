@@ -1,15 +1,7 @@
 ---
+model: "fable"
 name: quant-source-synthesis
-description: >
-  Gather, rank, and summarize academic and practitioner sources relevant to a
-  quantitative strategy hypothesis. Outputs a ranked source list with relevance
-  notes and key claims for use in recipe authoring.
-triggers:
-  - "find sources"
-  - "research this strategy"
-  - "what does the literature say"
-  - "cite papers for"
-model: fable
+description: "Gather, rank, and summarize academic and practitioner sources relevant to a quantitative strategy hypothesis. Outputs a ranked source list with relevance notes and key claims for use in recipe authoring."
 ---
 
 # Quant Source Synthesis Skill
@@ -64,3 +56,5 @@ sources:
 - Must flag if no peer-reviewed replication exists.
 - Must include at least one source that challenges the hypothesis.
 - Recency: prefer sources within the past 10 years unless foundational.
+
+<!-- aorch-generated: skill:quant-source-synthesis; mode=native; edit .agents/aorch/definitions.json -->

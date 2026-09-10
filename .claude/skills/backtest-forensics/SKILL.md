@@ -1,17 +1,7 @@
 ---
+model: "fable"
 name: backtest-forensics
-description: >
-  Audit a backtest result for common failure modes: look-ahead bias, data snooping,
-  overfitting, survivorship bias, unrealistic fill assumptions, and regime sensitivity.
-  Outputs a forensics report with severity ratings and remediation steps.
-triggers:
-  - "audit backtest"
-  - "backtest forensics"
-  - "check for overfitting"
-  - "look-ahead bias"
-  - "data snooping"
-  - "survivorship bias"
-model: fable
+description: "Audit a backtest result for common failure modes: look-ahead bias, data snooping, overfitting, survivorship bias, unrealistic fill assumptions, and regime sensitivity. Outputs a forensics report with severity ratings and remediation steps."
 ---
 
 # Backtest Forensics Skill
@@ -76,3 +66,5 @@ backtest_forensics:
 - Any `critical` severity finding → overall_confidence = reject.
 - Deflated Sharpe must be computed using Bailey-López de Prado deflation formula.
 - OOS Sharpe must be ≥ 0.5 before recipe approval.
+
+<!-- aorch-generated: skill:backtest-forensics; mode=native; edit .agents/aorch/definitions.json -->

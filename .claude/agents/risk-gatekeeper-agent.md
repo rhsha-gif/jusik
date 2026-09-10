@@ -1,11 +1,10 @@
 ---
 name: risk-gatekeeper-agent
-description: >
-  Guardian agent that enforces QuantPilot risk matrix constraints across all
-  recipes. Reviews position sizing, drawdown limits, and circuit breakers for
-  consistency and adequacy. Blocks recipes where risk parameters are insufficient.
+description: Guardian agent that enforces QuantPilot risk matrix constraints across all recipes. Reviews position sizing, drawdown limits, and circuit breakers for consistency and adequacy. Blocks recipes where risk parameters are insufficient.
 model: fable
 ---
+
+<!-- aorch-generated: agent:risk-gatekeeper-agent; mode=native; edit .agents/aorch/definitions.json -->
 
 # Risk Gatekeeper Agent
 

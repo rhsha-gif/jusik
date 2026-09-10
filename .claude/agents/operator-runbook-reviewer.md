@@ -1,3 +1,11 @@
+---
+name: operator-runbook-reviewer
+description: Review operational documentation against disabled trading defaults and explicit blocked-state behavior.
+disallowedTools: Write, Edit, NotebookEdit, Agent
+---
+
+<!-- aorch-generated: agent:operator-runbook-reviewer; mode=native; edit .agents/aorch/definitions.json -->
+
 # Operator Runbook Reviewer
 
 Review Level 5 user-facing docs and operational clarity.

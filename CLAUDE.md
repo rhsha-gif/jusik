@@ -1,32 +1,16 @@
 # QuantPilot Claude Code Adapter
 
-Claude Code는 Codex와 같은 [Best-Fit 협업 프로토콜](docs/agent_collaboration_protocol.md)을 따른다.
-작업 시작 전에 `AGENTS.md`, 활성 미션 작업보드, [능력 점수표](docs/agent_capability_scorecard.md), 관련
-도메인 문서를 읽는다.
+Claude Code는 AGENTS.md의 안전 규칙과 aorch 공통 워크플로를 따른다. 관련 도메인 지침과 현재 작업에 필요한 정의만 읽는다.
 
 ## Mission behavior
 
-- Claude가 최초 요청을 받으면 미션 리드가 되어 계획, 라우팅, 통합, 완료 보고를 책임진다.
-- Codex가 리드인 경우에도 점수가 높은 Claude 작업은 연구에 한정하지 않고 전체 기능 구현과 테스트를
-  소유할 수 있다.
-- 초기 우선 강점은 연구 종합, 퀀트·리스크 설계, 장문 계약, 알고리즘 구현, 적대 테스트와 독립 감사다.
-  이는 우선순위일 뿐 고정 경계가 아니다.
-- 구현 전 상대의 작업 분해 검토를 받고, 모든 비단순 미션에서 상대에게 실질 역할을 부여한다.
-- 작업보드에서 정확히 하나의 `ready` 작업을 claim한 뒤 `in_progress`로 바꾼다.
-- 완료된 `docs/professional_operator_workboard.md`의 Codex 전용 소유권 규칙은 역사 기록이며 새 미션에는
-  적용하지 않는다.
-- `claude/<mission-id>-<task-id>` branch의 분리 worktree에서 작업하고 기록된 소유 경로만 수정한다.
-- 자기 branch에서는 자기 파일을 stage하고 commit할 수 있다. 다른 branch, mainline, 사용자 dirty 경로는
-  수정, 정리, stash, reset 또는 commit하지 않는다.
-- Claude가 미션 리드일 때만 검토된 상대 커밋을 mainline에 통합한다.
-- 인계에는 commit hash, 소유 경로, 정확한 검증 출력, 알려진 제한, 통합 요청을 포함한다.
-
-## Failure and review
-
-- 같은 원인의 실패가 두 번 반복되면 추가 수정을 멈추고 Codex의 읽기 전용 진단을 요청한다.
-- 안전 중요 변경은 Codex 또는 별도의 검토자가 승인해야 하며 Claude가 자기 변경을 최종 승인하지 않는다.
-- 설계 충돌은 근거와 최소 실험을 비교한 뒤 미션 리드가 결정한다.
-- 범위 확대, 외부 상태 변경, 비밀 또는 거래 권한 변경에만 사용자 승인을 요청한다.
+- 최초 수신자가 리드로서 범위, 라우팅, 통합과 완료 증거를 책임진다. 작은 작업은 직접 처리한다.
+- 위임은 독립 작업이나 문맥 분리가 유리할 때 선택한다. 상대 제공자 호출, 점수표, 작업보드를 항상 만들지 않는다.
+- 활성 작업보드가 있으면 workboard-flow의 lease·claim·소유 경로·인계 규칙을 지킨다.
+- 사용자 요청 없이 commit·push·PR을 만들지 않는다. 기존 사용자 변경을 수정·stash·reset·정리하거나 커밋에 포함하지 않는다.
+- 같은 원인의 실패가 반복되면 증거를 재검토하고 독립 진단이 유익한지 판단한다. 안전 중요 변경은 별도 검토자 승인 없이 완료하지 않는다.
+- 질문·승인이 필요한 위임 작업은 blocked.inputRequest로 부모 대화에 반환한다. 입력 대기를 실패나 승인으로 처리하지 않는다.
+- 프로젝트 원본은 .agents/aorch/definitions.json이다. 필수 native 기능이 없으면 실행 전에 지원 제공자로 라우팅한다.
 
 ## QuantPilot safety
 
@@ -53,20 +37,15 @@ python -m pytest quantpilot/tests --basetemp ".pytest_tmp/$PID"
 python -m quantpilot.jobs.run_smoke
 ```
 
-Frontend 변경 시 `quantpilot/apps/web`에서:
-
-```powershell
-npm run test
-npm run build
-```
+웹 클라이언트는 사용자 승인으로 2026-09-10 제거했다. 새 모의운용 검증은 `python scripts/verify-paper.py`와 `tach check`를 따른다. 프런트 npm 검사와 타입 산출물을 복원하지 않는다.
 
 로컬 서버 충돌 시 기존 프로세스를 종료하지 말고 다음 빈 포트를 사용한다.
 
 ## Specialized workflows
 
-- `/start-collaboration`: 새 미션의 기본 진입점. 작업보드와 적합도 라우팅을 만든다.
+- `/start-collaboration`: 사용자가 새 협업 미션 또는 작업보드를 요청할 때 사용하는 선택적 진입점이다.
 - `/write-codex-handoff`: 라우팅 결과 Codex 구현이 선택된 recipe 작업에만 사용하는 특수 명령이다.
-- 기존 quant recipe, risk matrix, backtest forensics skills는 적합도 점수가 높은 작업에서 계속 사용한다.
+- 기존 quant recipe, risk matrix, backtest forensics skills는 관련 작업에서 필요한 지침만 로드한다.
 - `/vault-consult`: 지식 vault(`quantpilot-foundation/`) 조회와 인용 규약. 퀀트·리스크·집행·
   시계열·데이터/신뢰성 판단은 볼트를 근거로 삼고 `[[노트명]]`으로 인용한다. 볼트 밖 지식으로
   답할 때는 그 사실을 밝힌다.

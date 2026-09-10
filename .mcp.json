@@ -1,5 +1,19 @@
 {
   "mcpServers": {
+    "vault": {
+      "type": "stdio",
+      "command": "node",
+      "args": [
+        "C:\\Users\\goyan\\.local\\src\\qpf-search\\dist\\src\\server.js"
+      ],
+      "env": {
+        "OBSIDIAN_VAULT_PATH": "C:\\Users\\goyan\\OneDrive\\문서\\코덱스\\주식트레이더\\quantpilot-foundation",
+        "OBSIDIAN_DB_PATH": "C:\\Users\\goyan\\.cache\\qpf-search\\index.db",
+        "OBSIDIAN_RESPECT_GITIGNORE": "false",
+        "OBSIDIAN_PREFIX": "vault_",
+        "OPENAI_API_KEY": ""
+      }
+    },
     "playwright": {
       "type": "stdio",
       "command": "npx",

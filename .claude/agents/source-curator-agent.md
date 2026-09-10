@@ -1,12 +1,10 @@
 ---
 name: source-curator-agent
-description: >
-  Research agent that builds and maintains the QuantPilot source library.
-  Discovers, evaluates, and ranks academic papers and practitioner research
-  relevant to quant strategy design. Outputs curated source lists for use
-  in recipe authoring.
+description: Research agent that builds and maintains the QuantPilot source library. Discovers, evaluates, and ranks academic papers and practitioner research relevant to quant strategy design. Outputs curated source lists for use in recipe authoring.
 model: fable
 ---
+
+<!-- aorch-generated: agent:source-curator-agent; mode=native; edit .agents/aorch/definitions.json -->
 
 # Source Curator Agent
 

@@ -1,16 +1,7 @@
 ---
+model: "fable"
 name: codex-handoff-writer
-description: >
-  Write a complete Codex task handoff document when capability-based mission routing selected Codex.
-  Produces a self-contained task specification with acceptance criteria, data schemas,
-  performance constraints, and test stubs — ready for Codex to implement deterministically.
-triggers:
-  - "write codex handoff"
-  - "codex task"
-  - "handoff document"
-  - "implementation spec"
-  - "write task for codex"
-model: fable
+description: "Write a complete Codex task handoff document when capability-based mission routing selected Codex. Produces a self-contained task specification with acceptance criteria, data schemas, performance constraints, and test stubs — ready for Codex to implement deterministically."
 ---
 
 # Codex Handoff Writer Skill
@@ -93,3 +84,5 @@ codex_handoff:
 - No acceptance criterion may reference broker credentials or live data.
 - `out_of_scope` must include: live trading, order execution, secret reading.
 - `env_vars` must list names only — never values or defaults that reveal secrets.
+
+<!-- aorch-generated: skill:codex-handoff-writer; mode=native; edit .agents/aorch/definitions.json -->

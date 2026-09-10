@@ -1,9 +1,12 @@
 ---
 name: qp-market-price-flow-analyst
-description: Narrates the day's KRX index, sector rotation, investor flows and watchlist outliers from the evidence JSON the job computed; quotes numbers verbatim and derives none.
-disallowedTools: Write, Edit, NotebookEdit, Agent, Bash
+description: "Narrates the day's KRX index, sector rotation, investor flows and watchlist outliers from the evidence JSON the job computed; quotes numbers verbatim and derives none."
+disallowedTools: Write, Edit, NotebookEdit, Agent, Bash, PowerShell
 maxTurns: 30
 ---
+
+<!-- aorch-generated: agent:qp-market-price-flow-analyst; mode=native; edit .agents/aorch/definitions.json -->
+
 <!-- No `tools:` allowlist on purpose: it drops the internal tool that carries structured
      output and the headless JSON result comes back empty (measured on the aorch presets).
      Restrictions go in `disallowedTools:`. -->

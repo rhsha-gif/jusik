@@ -1,17 +1,7 @@
 ---
+model: "fable"
 name: rl-contract-designer
-description: >
-  Design a reinforcement learning reward contract for Level 4 Guarded Autopilot recipes:
-  reward function, action space, observation space, safety constraints, and
-  convergence criteria. Outputs a structured RL contract YAML block.
-triggers:
-  - "rl contract"
-  - "reward function"
-  - "reinforcement learning strategy"
-  - "guarded autopilot"
-  - "level 4 recipe"
-  - "action space design"
-model: fable
+description: "Design a reinforcement learning reward contract for Level 4 Guarded Autopilot recipes: reward function, action space, observation space, safety constraints, and convergence criteria. Outputs a structured RL contract YAML block."
 ---
 
 # RL Contract Designer Skill
@@ -88,3 +78,5 @@ rl_contract:
 - Reward must penalize drawdown, not just maximize return.
 - Action space must include at least one defensive action (HOLD or REDUCE).
 - Training protocol must define convergence criteria and maximum episode budget.
+
+<!-- aorch-generated: skill:rl-contract-designer; mode=native; edit .agents/aorch/definitions.json -->

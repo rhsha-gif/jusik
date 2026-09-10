@@ -1,0 +1,350 @@
+{
+  "version": 1,
+  "agents": [
+    {
+      "id": "backtest-forensics-agent",
+      "description": "Specialist agent that audits QuantPilot backtest designs and results for look-ahead bias, data snooping, overfitting, survivorship bias, and microstructure unrealism. Outputs a severity-rated forensics report.",
+      "instructions": "agents/backtest-forensics-agent.md",
+      "providers": {
+        "anthropic": {
+          "model": "fable"
+        },
+        "openai": {
+          "sandbox_mode": "workspace-write"
+        }
+      }
+    },
+    {
+      "id": "operator-runbook-reviewer",
+      "description": "Review operational documentation against disabled trading defaults and explicit blocked-state behavior.",
+      "instructions": "agents/operator-runbook-reviewer.md",
+      "providers": {
+        "anthropic": {
+          "disallowedTools": "Write, Edit, NotebookEdit, Agent"
+        },
+        "openai": {
+          "sandbox_mode": "read-only"
+        }
+      }
+    },
+    {
+      "id": "qp-invest-portfolio-direction",
+      "description": "Reads the open decision records, the last five market notes and today's candidates, and writes a direction memo about conflicts, concentration and what not to touch; observations and things to verify only, never instructions to trade.",
+      "instructions": "agents/qp-invest-portfolio-direction.md",
+      "providers": {
+        "anthropic": {
+          "disallowedTools": "Write, Edit, NotebookEdit, Agent, Bash, PowerShell",
+          "maxTurns": 40
+        }
+      },
+      "compatibility": "Claude tool deny list prohibits shell use; this installation has no verified equivalent Codex binding. Route to Claude."
+    },
+    {
+      "id": "qp-invest-refuter",
+      "description": "Attacks one candidate's research draft through three independent lenses (macro/flows, structure/regulation, execution/cost), tries to break each refutation, and returns surviving refutations, rejected refutations with reasons, and blind spots; judges only.",
+      "instructions": "agents/qp-invest-refuter.md",
+      "providers": {
+        "anthropic": {
+          "disallowedTools": "Write, Edit, NotebookEdit, Agent, Bash, PowerShell",
+          "maxTurns": 50
+        }
+      },
+      "compatibility": "Claude tool deny list prohibits shell use; this installation has no verified equivalent Codex binding. Route to Claude."
+    },
+    {
+      "id": "qp-invest-stock-researcher",
+      "description": "Drafts the seven ledger sections (facts, forecasts, resolvable questions, refutation draft, base rate, invalidation conditions, execution rules) for one candidate from the evidence JSON and the code-computed base rate; every forecast carries a deadline and a resolution source.",
+      "instructions": "agents/qp-invest-stock-researcher.md",
+      "providers": {
+        "anthropic": {
+          "disallowedTools": "Write, Edit, NotebookEdit, Agent, Bash, PowerShell",
+          "maxTurns": 50
+        }
+      },
+      "compatibility": "Claude tool deny list prohibits shell use; this installation has no verified equivalent Codex binding. Route to Claude."
+    },
+    {
+      "id": "qp-invest-theme-scout",
+      "description": "Turns an owner-stated theme plus the recent market notes into at most five KRX candidate symbols with a one-paragraph why and vault citations; proposes only, never ranks by conviction or suggests sizing.",
+      "instructions": "agents/qp-invest-theme-scout.md",
+      "providers": {
+        "anthropic": {
+          "disallowedTools": "Write, Edit, NotebookEdit, Agent, Bash, PowerShell",
+          "maxTurns": 40
+        }
+      },
+      "compatibility": "Claude tool deny list prohibits shell use; this installation has no verified equivalent Codex binding. Route to Claude."
+    },
+    {
+      "id": "qp-market-editor",
+      "description": "Merges the two market analysts' sections into a 12-line Slack brief and a ledger note with a sources section; edits and formats only, adds no new claims or numbers.",
+      "instructions": "agents/qp-market-editor.md",
+      "providers": {
+        "anthropic": {
+          "disallowedTools": "Write, Edit, NotebookEdit, Agent, Bash, PowerShell",
+          "maxTurns": 20
+        }
+      },
+      "compatibility": "Claude tool deny list prohibits shell use; this installation has no verified equivalent Codex binding. Route to Claude."
+    },
+    {
+      "id": "qp-market-macro-news-analyst",
+      "description": "Groups the day's collected headlines into macro and watchlist-related themes with source grades; cites only the news ids and URLs in the evidence JSON and never invents a source.",
+      "instructions": "agents/qp-market-macro-news-analyst.md",
+      "providers": {
+        "anthropic": {
+          "disallowedTools": "Write, Edit, NotebookEdit, Agent, Bash, PowerShell",
+          "maxTurns": 30
+        }
+      },
+      "compatibility": "Claude tool deny list prohibits shell use; this installation has no verified equivalent Codex binding. Route to Claude."
+    },
+    {
+      "id": "qp-market-price-flow-analyst",
+      "description": "Narrates the day's KRX index, sector rotation, investor flows and watchlist outliers from the evidence JSON the job computed; quotes numbers verbatim and derives none.",
+      "instructions": "agents/qp-market-price-flow-analyst.md",
+      "providers": {
+        "anthropic": {
+          "disallowedTools": "Write, Edit, NotebookEdit, Agent, Bash, PowerShell",
+          "maxTurns": 30
+        }
+      },
+      "compatibility": "Claude tool deny list prohibits shell use; this installation has no verified equivalent Codex binding. Route to Claude."
+    },
+    {
+      "id": "qp-security-gate",
+      "description": "Ship gate for QuantPilot — reads the gitleaks, semgrep and tach evidence plus the diff and returns a pass/block verdict against the standing safety invariants; judges only, edits nothing.",
+      "instructions": "agents/qp-security-gate.md",
+      "providers": {
+        "anthropic": {
+          "disallowedTools": "Write, Edit, NotebookEdit, Agent",
+          "maxTurns": 40,
+          "ship_triggers": [
+            "quantpilot/packages/core/execution/**",
+            "quantpilot/packages/brokers/**",
+            "quantpilot/packages/core/risk/**",
+            "quantpilot/packages/core/operator/**",
+            "quantpilot/services/api/**",
+            "quantpilot/services/research_agents/**",
+            "quantpilot/jobs/**",
+            ".env*",
+            ".mcp.json",
+            ".claude/**",
+            "tach.toml",
+            "pyproject.toml"
+          ]
+        }
+      },
+      "compatibility": "Claude ship_triggers security gate must retain its native metadata and invocation. Route to Claude."
+    },
+    {
+      "id": "quant-recipe-architect",
+      "description": "Primary architect agent for QuantPilot. Orchestrates the full recipe design pipeline from hypothesis to finalized YAML recipe. Delegates to specialist skills (source synthesis, risk matrix, RL contract, Codex handoff) and ensures recipe quality gates are met before handoff.",
+      "instructions": "agents/quant-recipe-architect.md",
+      "providers": {
+        "anthropic": {
+          "model": "fable"
+        },
+        "openai": {
+          "sandbox_mode": "workspace-write"
+        }
+      }
+    },
+    {
+      "id": "risk-gate-auditor",
+      "description": "Review trading safety boundaries, risk checks and order authorization paths.",
+      "instructions": "agents/risk-gate-auditor.md",
+      "providers": {
+        "anthropic": {
+          "disallowedTools": "Write, Edit, NotebookEdit, Agent"
+        },
+        "openai": {
+          "sandbox_mode": "read-only"
+        }
+      }
+    },
+    {
+      "id": "risk-gatekeeper-agent",
+      "description": "Guardian agent that enforces QuantPilot risk matrix constraints across all recipes. Reviews position sizing, drawdown limits, and circuit breakers for consistency and adequacy. Blocks recipes where risk parameters are insufficient.",
+      "instructions": "agents/risk-gatekeeper-agent.md",
+      "providers": {
+        "anthropic": {
+          "model": "fable"
+        },
+        "openai": {
+          "sandbox_mode": "workspace-write"
+        }
+      }
+    },
+    {
+      "id": "rl-research-contract-agent",
+      "description": "Specialist agent for designing Level 4 Guarded Autopilot reinforcement learning contracts. Researches RL algorithm selection, designs observation/action spaces, writes reward functions with safety overrides, and specifies training protocols.",
+      "instructions": "agents/rl-research-contract-agent.md",
+      "providers": {
+        "anthropic": {
+          "model": "fable"
+        },
+        "openai": {
+          "sandbox_mode": "workspace-write"
+        }
+      }
+    },
+    {
+      "id": "source-curator-agent",
+      "description": "Research agent that builds and maintains the QuantPilot source library. Discovers, evaluates, and ranks academic papers and practitioner research relevant to quant strategy design. Outputs curated source lists for use in recipe authoring.",
+      "instructions": "agents/source-curator-agent.md",
+      "providers": {
+        "anthropic": {
+          "model": "fable"
+        },
+        "openai": {
+          "sandbox_mode": "workspace-write"
+        }
+      }
+    },
+    {
+      "id": "test-auditor",
+      "description": "Review deterministic acceptance coverage for trading safety and operator contracts.",
+      "instructions": "agents/test-auditor.md",
+      "providers": {
+        "anthropic": {
+          "disallowedTools": "Write, Edit, NotebookEdit, Agent"
+        },
+        "openai": {
+          "sandbox_mode": "read-only"
+        }
+      }
+    }
+  ],
+  "skills": [
+    {
+      "id": "backtest-forensics",
+      "description": "Audit a backtest result for common failure modes: look-ahead bias, data snooping, overfitting, survivorship bias, unrealistic fill assumptions, and regime sensitivity. Outputs a forensics report with severity ratings and remediation steps.",
+      "source": "skills/backtest-forensics",
+      "providers": [
+        "anthropic",
+        "openai"
+      ],
+      "providerSettings": {
+        "anthropic": {
+          "model": "fable"
+        }
+      }
+    },
+    {
+      "id": "codex-handoff-writer",
+      "description": "Write a complete Codex task handoff document when capability-based mission routing selected Codex. Produces a self-contained task specification with acceptance criteria, data schemas, performance constraints, and test stubs — ready for Codex to implement deterministically.",
+      "source": "skills/codex-handoff-writer",
+      "providers": [
+        "anthropic",
+        "openai"
+      ],
+      "providerSettings": {
+        "anthropic": {
+          "model": "fable"
+        }
+      }
+    },
+    {
+      "id": "fable5-level34-recipe",
+      "description": "Author a complete Level 3 (Approval-Based Autopilot) or Level 4 (Guarded Autopilot) quantitative trading recipe in structured YAML. Synthesizes signals, entry/exit rules, risk matrix, backtest protocol, and Codex handoff stub from cited sources.",
+      "source": "skills/fable5-level34-recipe",
+      "providers": [
+        "anthropic",
+        "openai"
+      ],
+      "providerSettings": {
+        "anthropic": {
+          "model": "fable"
+        }
+      }
+    },
+    {
+      "id": "local-backtest",
+      "description": "Run and interpret a QuantPilot local-historical backtest with the confirmed KIS cost basis, the proposed acceptance thresholds, and fill-buffer sensitivity analysis. Use this skill whenever the user asks to backtest a strategy, validate signals against real KRX data, check whether a strategy passes acceptance thresholds, measure return/MDD/Sharpe, or says \"백테스트 돌려\", \"전략 검증\", \"수익률 확인\", \"승인 기준 통과하는지\" — even if they don't say \"backtest\" explicitly. For auditing an EXISTING backtest result for bias, use backtest-forensics instead; this skill is for running new ones correctly.",
+      "source": "skills/local-backtest",
+      "providers": [
+        "anthropic",
+        "openai"
+      ]
+    },
+    {
+      "id": "openapi-sync",
+      "description": "Regenerate and verify the retained backend openapi.json after API contract changes. Do not recreate the retired web TypeScript artifact.",
+      "source": "skills/openapi-sync",
+      "providers": [
+        "anthropic",
+        "openai"
+      ]
+    },
+    {
+      "id": "quant-source-synthesis",
+      "description": "Gather, rank, and summarize academic and practitioner sources relevant to a quantitative strategy hypothesis. Outputs a ranked source list with relevance notes and key claims for use in recipe authoring.",
+      "source": "skills/quant-source-synthesis",
+      "providers": [
+        "anthropic",
+        "openai"
+      ],
+      "providerSettings": {
+        "anthropic": {
+          "model": "fable"
+        }
+      }
+    },
+    {
+      "id": "risk-matrix-designer",
+      "description": "Design a quantitative risk matrix for a trading strategy: position sizing, drawdown limits, correlation budgets, stop-loss levels, and Kelly-based allocation formulas. Outputs a structured YAML risk block.",
+      "source": "skills/risk-matrix-designer",
+      "providers": [
+        "anthropic",
+        "openai"
+      ],
+      "providerSettings": {
+        "anthropic": {
+          "model": "fable"
+        }
+      }
+    },
+    {
+      "id": "rl-contract-designer",
+      "description": "Design a reinforcement learning reward contract for Level 4 Guarded Autopilot recipes: reward function, action space, observation space, safety constraints, and convergence criteria. Outputs a structured RL contract YAML block.",
+      "source": "skills/rl-contract-designer",
+      "providers": [
+        "anthropic",
+        "openai"
+      ],
+      "providerSettings": {
+        "anthropic": {
+          "model": "fable"
+        }
+      }
+    },
+    {
+      "id": "status-sync",
+      "description": "Update QuantPilot's living status board docs/STATUS.md after a stage, gate, or mission task completes — refresh the stage table, add a dated \"최근 완료\" entry with exact verification evidence, and keep detailed rationale in a separate docs/*_report.md. Use this skill whenever work on QuantPilot finishes and needs recording, whenever the user says \"STATUS 갱신\", \"현황판 업데이트\", \"완료 보고서\", \"상태 문서에 반영\", or a mainline integration / gate completion needs documenting. STATUS.md has strict conventions (overwrite-style living doc, evidence format, no live-readiness claims) that this skill encodes.",
+      "source": "skills/status-sync",
+      "providers": [
+        "anthropic",
+        "openai"
+      ]
+    },
+    {
+      "id": "vault-consult",
+      "description": "Consult the quantpilot-foundation knowledge vault (20 books, 60+ papers, 550+ notes on market microstructure, risk, asset pricing, factor investing, financial machine learning, technical analysis, time series, statistical learning, optimization, forecasting, data systems, SRE, security) through the `vault` MCP server, and ground the answer in cited notes. Use this skill whenever a question or coding task touches quant strategy, signals, alpha, risk limits, position sizing, drawdown, VaR/tail risk, execution, slippage, transaction cost, liquidity, spreads, market microstructure, backtesting methodology, factor models, valuation, time-series models, forecasting and calibration, portfolio optimization — and equally when it touches data pipeline design, SLO/reliability, or security design for QuantPilot. Applies to questions (\"왜 손절을 이렇게 잡지\", \"이 신호가 유효한가\", \"무엇을 근거로\") AND to implementation work in those areas, where the vault's principles must be checked against the design before writing code. Also use when the user says \"볼트\", \"도서관\", \"서재\", \"지식 vault\", \"책에서 찾아\", \"근거 찾아\", \"무슨 책에 나와\". Do NOT use for routine work outside these domains (UI styling, build config, unrelated refactors).",
+      "source": "skills/vault-consult",
+      "providers": [
+        "anthropic"
+      ],
+      "compatibility": "Required vault MCP is not configured or exposed in the inspected Codex installation. Use the Claude project integration."
+    },
+    {
+      "id": "workboard-flow",
+      "description": "QuantPilot 미션 작업보드(docs/*_workboard.md)의 태스크 상태를 프로토콜대로 바꾸는 절차: 문서 편집 lease 획득·해제, ready 작업 claim(정확히 하나), ready→in_progress→review→integrated→done/blocked 상태 전이, checkpoint log 기록, 커밋 해시와 정확한 검증 수치(pytest junit, smoke)가 담긴 handoff record(인계 기록) 작성. QP-KER-020, QP-DRIFT-002 같은 태스크 ID를 claim해라/시작해라/리뷰로 옮겨라/integrated로 바꿔라/blocked 처리해라는 요청, \"작업보드 갱신\", \"workboard에 기록\", \"핸드오프 기록 남겨줘\", \"인계 준비해줘\", \"체크포인트 남겨줘\", \"lease 잡고 상태 바꿔\" 등 기존 미션 작업보드의 상태·기록을 변경하는 모든 작업에 반드시 이 스킬을 사용한다. 구현이 끝나서 작업보드에 증거와 함께 review 전환하는 경우도 포함한다. Use for ANY status transition, claim, checkpoint, or handoff on an EXISTING mission workboard (task IDs like QP-XXX-NNN). Not for creating a brand-new mission workboard (that is /start-collaboration) and not for writing a Codex implementation task spec (that is the codex handoff skill).",
+      "source": "skills/workboard-flow",
+      "providers": [
+        "anthropic",
+        "openai"
+      ]
+    }
+  ]
+}

@@ -1,3 +1,11 @@
+---
+name: risk-gate-auditor
+description: Review trading safety boundaries, risk checks and order authorization paths.
+disallowedTools: Write, Edit, NotebookEdit, Agent
+---
+
+<!-- aorch-generated: agent:risk-gate-auditor; mode=native; edit .agents/aorch/definitions.json -->
+
 # Risk Gate Auditor
 
 Review Level 5 diffs for unsafe order paths.

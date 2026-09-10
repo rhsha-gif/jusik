@@ -1,0 +1,101 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://github.com/adaptive-orchestrator/schemas/task-plan.schema.json",
+  "title": "aorch task plan",
+  "description": "The decomposition contract. The host model decomposes a request and writes this document; aorch validates it and dispatches every task in it. This file is a contract document printed by `aorch decompose --print-schema` — validation itself is hand-rolled in src/decompose.js because this package has no runtime dependencies.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["objective", "decomposed", "tasks"],
+  "properties": {
+    "objective": {
+      "type": "string",
+      "minLength": 1,
+      "description": "The user's request, verbatim. Kept so a reader can judge whether the decomposition preserved the goal."
+    },
+    "decomposed": {
+      "type": "boolean",
+      "description": "false means the request runs as one task and `tasks` must hold exactly one entry. Prefer false when splitting would not let a reviewer approve one part and reject another."
+    },
+    "tasks": {
+      "type": "array",
+      "minItems": 1,
+      "items": { "$ref": "#/$defs/task" },
+      "description": "Executed in declared order. Dispatch stops at the first failure."
+    }
+  },
+  "$defs": {
+    "task": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["id", "objective", "kind", "risk", "acceptanceCriteria", "agentRole"],
+      "not": { "required": ["role"] },
+      "properties": {
+        "id": {
+          "type": "string",
+          "pattern": "^[A-Za-z0-9][A-Za-z0-9._-]*$",
+          "description": "Path-safe and unique within the plan; it names the run directory."
+        },
+        "title": { "type": "string", "minLength": 1 },
+        "objective": { "type": "string", "minLength": 1 },
+        "kind": {
+          "type": "string",
+          "minLength": 1,
+          "description": "Routing input, e.g. implementation, testing, documentation, debugging, architecture, security, exploration, research, writing."
+        },
+        "agentRole": {
+          "enum": ["worker", "reviewer", "fixer", "researcher", "analyst", "license-reviewer", "ponytail", "writer", "editor", "qa-analyst", "invest-analyst", "refactorer", "paper-researcher", "auditor"],
+          "description": "Selects the role agent and derives the routing role. worker: build it. reviewer: judge it without touching it. fixer: repair a task whose verification failed. researcher: find candidates on the web and record URL, license, recency and activity as evidence. analyst: read a named repository and separate what can be borrowed from what cannot. license-reviewer: check the licence text and state what obligations each form of reuse carries. ponytail: look for what does not need to be written at all, and justify whatever survives. writer: draft prose for a bounded chapter or page set at top-tier routing. editor: directly fix wording, phrasing and typos only, and report substance or structure concerns as judgements instead of edits. qa-analyst: read what the QA commands already computed and render a verdict, opening only changed or machine-flagged pages. invest-analyst: analyse evidence someone else gathered into support, refutation and blind spots shaped as decision-record input, never gathering, ranking or ordering trades. refactorer: perform behavior-preserving restructuring only, reporting any public-API or behavior change as a judgement instead of making it. paper-researcher: search academic sources through the paper-search MCP and record bibliographic records, citation counts and the tool each fact came from, never ranking or synthesising. Scouting our own repository is deliberately absent — that reconnaissance stays with the lead, because verifying a delegated survey costs about as much as running it. Web research is the exception researcher covers: a URL and a licence can be re-checked mechanically, so the spot check is cheap."
+        },
+        "agentId": { "type": "string", "pattern": "^[A-Za-z0-9][A-Za-z0-9_-]{0,95}$", "description": "Optional exact inventory agent ID. Overrides the native preset while agentRole still determines routing role and the task's safety envelope." },
+        "role": {
+          "description": "Forbidden in a plan. aorch derives the routing role from agentRole; writing it by hand would let the two disagree."
+        },
+        "risk": { "enum": ["low", "standard", "high", "critical"] },
+        "complexity": {
+          "enum": ["low", "standard", "high", "critical"],
+          "description": "Optional; derived from risk when absent."
+        },
+        "write": { "type": "boolean" },
+        "allowInPlaceWrite": { "type": "boolean" },
+        "maxTurns": { "type": "integer", "minimum": 1 },
+        "runId": { "type": "string", "pattern": "^[A-Za-z0-9][A-Za-z0-9._-]*$" },
+        "weight": { "type": "number" },
+        "tags": { "type": "array", "items": { "type": "string", "minLength": 1 } },
+        "capabilityIds": { "type": "array", "items": { "type": "string", "minLength": 1 } },
+        "allowedScope": { "type": "array", "items": { "type": "string", "minLength": 1 } },
+        "forbiddenScope": { "type": "array", "items": { "type": "string", "minLength": 1 } },
+        "acceptanceCriteria": {
+          "type": "array",
+          "minItems": 1,
+          "items": { "type": "string", "minLength": 1 }
+        },
+        "verificationCommands": {
+          "type": "array",
+          "items": { "type": "string", "minLength": 1 },
+          "description": "aorch runs these itself after the worker returns and escalates the model ladder on failure. A task without them gets no gate."
+        },
+        "allowedProviders": {
+          "type": "array",
+          "items": { "type": "string", "minLength": 1 },
+          "description": "Leave unset so both subscriptions compete. Restrict only for a concrete capability reason."
+        },
+        "forbiddenProviders": { "type": "array", "items": { "type": "string", "minLength": 1 } },
+        "forbiddenProfileIds": { "type": "array", "items": { "type": "string", "minLength": 1 } },
+        "allowedProfileIds": {
+          "type": "array",
+          "items": { "type": "string", "minLength": 1 },
+          "description": "Pin the task to named catalogue profiles. Leave unset so the router chooses by evidence; set it only when the task exists to obtain a specific model's judgement, such as the model-upgrade audit."
+        },
+        "minimumQuality": { "type": "number", "minimum": 0, "maximum": 1 },
+        "maxTokenIndex": { "type": "number", "exclusiveMinimum": 0 },
+        "maxLatencyIndex": { "type": "number", "exclusiveMinimum": 0 },
+        "routingPriorities": {
+          "type": "array",
+          "minItems": 1,
+          "maxItems": 3,
+          "items": { "enum": ["quality", "tokens", "latency"] }
+        }
+      }
+    }
+  }
+}

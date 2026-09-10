@@ -55,3 +55,29 @@ def test_interrupted_review_still_reports_numbers(tmp_path):
     assert s.db.execute("SELECT COUNT(*) FROM outbox").fetchone()[0] == 1
     assert snapshot(s)["equity"] == 5_000_000
     s.close()
+
+
+def test_slack_dm_uses_one_post_to_owner_without_im_write(monkeypatch):
+    from quantpilot.paper.reporting import SlackDM
+    from uuid import uuid5, NAMESPACE_URL
+
+    calls = []
+    monkeypatch.setenv("SLACK_BOT_TOKEN", "fixture-secret-value")
+
+    def request(method, body):
+        assert method == "chat.postMessage"
+        calls.append(body)
+        return {"ok": True}
+
+    sender = SlackDM(
+        {"SLACK_BOT_TOKEN": "fixture-secret-value", "SLACK_ALLOWED_USER_ID": "UOWNER"},
+        request=request,
+    )
+    sender.send("stable-key", "safe fixture-secret-value")
+    assert calls == [{
+        "channel": "UOWNER",
+        "text": "safe [REDACTED]",
+        "client_msg_id": str(uuid5(NAMESPACE_URL, "stable-key")),
+        "unfurl_links": False,
+        "unfurl_media": False,
+    }]

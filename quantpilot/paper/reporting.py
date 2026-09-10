@@ -164,9 +164,6 @@ class SlackDM:
         return data
 
     def send(self, key, text):
-        channel = self.request("conversations.open", {"users": self.user})["channel"][
-            "id"
-        ]
         from quantpilot.services.research_agents.publish.scrub import scrub
 
         cleaned = scrub(text)
@@ -175,7 +172,9 @@ class SlackDM:
         self.request(
             "chat.postMessage",
             {
-                "channel": channel,
+                # A user ID opens the bot DM through chat.postMessage itself;
+                # do not require the unrelated conversations.open/im:write scope.
+                "channel": self.user,
                 "text": text_value[:3900],
                 "client_msg_id": str(uuid5(NAMESPACE_URL, key)),
                 "unfurl_links": False,

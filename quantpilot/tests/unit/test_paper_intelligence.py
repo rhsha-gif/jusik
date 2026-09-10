@@ -251,6 +251,7 @@ def test_default_codex_cli_has_no_shell_tools_and_sanitizes_credentials(
     assert "--ephemeral" in command
     assert "--ignore-user-config" in command
     assert captured["kwargs"]["shell"] is False
+    assert captured["kwargs"]["encoding"] == "utf-8"
     environment = captured["kwargs"]["env"]
     assert "BROKER_API_KEY" not in environment
     assert "SLACK_TOKEN" not in environment
@@ -284,3 +285,48 @@ def test_default_claude_cli_disables_tools_mcp_and_persistence(
     assert json.loads(command[command.index("--mcp-config") + 1]) == {"mcpServers": {}}
     assert "--no-session-persistence" in command
     assert captured["kwargs"]["shell"] is False
+    assert captured["kwargs"]["encoding"] == "utf-8"
+
+
+def test_cli_unicode_streams_are_decoded_as_utf8(monkeypatch):
+    import subprocess
+    import sys
+
+    original_run = subprocess.run
+
+    def local_process(_command, **kwargs):
+        # Reproduce UTF-8 CLI streams without any external provider or credentials.
+        code = (
+            "import sys; "
+            "sys.stdout.buffer.write('{\"summary\":\"검증 ✓\"}'.encode('utf-8')); "
+            "sys.stderr.buffer.write('진단 —'.encode('utf-8'))"
+        )
+        return original_run([sys.executable, "-c", code], **kwargs)
+
+    monkeypatch.setattr("quantpilot.paper.intelligence.subprocess.run", local_process)
+    assert default_cli_runner("codex", "fixture", {"type": "object"}) == {
+        "summary": "검증 ✓"
+    }
+
+
+def test_assessment_wire_schema_closes_every_map_over_current_allowlists():
+    captured = []
+
+    def runner(provider, prompt, schema):
+        captured.append(schema)
+        return assessment_payload()
+
+    assert isinstance(run_assessment(EVIDENCE, NOW, runner=runner), Assessment)
+    props = captured[0]["properties"]
+    for name, keys in (
+        ("candidate_scores", EVIDENCE["symbols"]),
+        ("strategy_scores", EVIDENCE["strategies"]),
+        ("reasons", EVIDENCE["symbols"] + EVIDENCE["strategies"]),
+    ):
+        assert props[name]["additionalProperties"] is False
+        assert set(props[name]["properties"]) == set(keys)
+        assert set(props[name]["required"]) == set(keys)
+    # A subsequent request must not inherit another request's symbols.
+    run_assessment({"symbols": [], "strategies": []}, NOW, runner=runner)
+    assert captured[-1]["properties"]["candidate_scores"]["properties"] == {}
+    assert captured[0]["properties"]["candidate_scores"]["properties"]

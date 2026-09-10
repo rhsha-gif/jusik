@@ -17,6 +17,7 @@ from __future__ import annotations
 
 from datetime import date, datetime, timedelta
 from enum import Enum
+from copy import deepcopy
 import json
 import math
 import os
@@ -221,6 +222,24 @@ _REVIEW_CONTENT_SCHEMA: dict[str, Any] = {
 }
 
 
+def _assessment_schema(symbols: set[str], strategies: set[str]) -> dict[str, Any]:
+    """Close dynamic maps over trusted allowlists for strict CLI JSON schemas."""
+    schema = deepcopy(_ASSESSMENT_CONTENT_SCHEMA)
+    for name, keys in (
+        ("candidate_scores", symbols),
+        ("strategy_scores", strategies),
+        ("reasons", symbols | strategies),
+    ):
+        value_schema = schema["properties"][name]["additionalProperties"]
+        schema["properties"][name] = {
+            "type": "object",
+            "properties": {key: deepcopy(value_schema) for key in sorted(keys)},
+            "required": sorted(keys),
+            "additionalProperties": False,
+        }
+    return schema
+
+
 def _alternate(provider: Provider) -> Provider:
     return "codex" if provider == "claude" else "claude"
 
@@ -411,6 +430,7 @@ def default_cli_runner(
             command,
             input=prompt,
             text=True,
+            encoding="utf-8",
             capture_output=True,
             cwd=root,
             env=_sanitized_environment(),
@@ -481,7 +501,7 @@ def run_assessment(
             raw = invoke(
                 provider,
                 _prompt("assessment", evidence, now),
-                _ASSESSMENT_CONTENT_SCHEMA,
+                _assessment_schema(symbols, strategies),
             )
             content = _AssessmentContent.model_validate(raw)
             data = content.model_dump()

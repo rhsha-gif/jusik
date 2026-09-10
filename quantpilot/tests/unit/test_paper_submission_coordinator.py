@@ -1094,6 +1094,8 @@ def test_kis_paper_client_is_constructed_only_by_paper_jobs_and_never_by_api(
     assert constructors == {
         # Dedicated read-only probe has its own token/GET-only transport guard.
         "jobs/check_kis_paper_connection.py",
+        # ReadinessTransport independently blocks every order/cancel request.
+        "jobs/check_paper_readiness.py",
         "jobs/run_kis_paper_kill.py",
         "jobs/run_kis_paper_session.py",
         # Explicit intraday profile checks submission flags before construction.

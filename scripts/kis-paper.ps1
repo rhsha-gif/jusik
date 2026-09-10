@@ -1,7 +1,7 @@
 # Run in a fresh PowerShell process. Never reads .env or prints credentials.
 [CmdletBinding()]
 param(
-    [ValidateSet('Check', 'Prepare', 'Smoke')][string]$Action = 'Check',
+    [ValidateSet('Check', 'Readiness', 'Prepare', 'Smoke')][string]$Action = 'Check',
     [string]$RuntimeDirectory = (Join-Path $env:USERPROFILE '.quantpilot\paper'),
     [string]$Python = 'python'
 )
@@ -31,6 +31,7 @@ try {
     [Environment]::SetEnvironmentVariable('QUANTPILOT_RUNTIME_ROLE', $null, 'Process')
     switch ($Action) {
         'Check' { & $Python -m quantpilot.jobs.check_kis_paper_connection }
+        'Readiness' { & $Python -m quantpilot.jobs.check_paper_readiness }
         'Prepare' { & $Python -m quantpilot.jobs.prepare_kis_paper_runtime --runtime-dir $RuntimeDirectory }
         'Smoke' { & $Python -m quantpilot.jobs.run_smoke }
     }

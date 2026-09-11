@@ -421,6 +421,93 @@ def test_daily_order_query_uses_exact_paper_tr_and_preserves_fill_evidence() -> 
     assert call["params"]["EXCG_ID_DVSN_CD"] == "KRX"
 
 
+def _query_daily_row(raw):
+    client = KisPaperClient(
+        _config(),
+        transport=RecordingTransport(
+            _response({"rt_cd": "0", "output1": [raw]}, tr_cont="D")
+        ),
+    )
+    return client.get_daily_orders_and_fills(
+        date(2026, 7, 10), date(2026, 7, 10), as_of_date=date(2026, 7, 10)
+    ).rows[0]
+
+
+@pytest.mark.parametrize(
+    "keys", [("cncl_cfrm_qty",), ("cnc_cfrm_qty",), ("cncl_cfrm_qty", "cnc_cfrm_qty")]
+)
+def test_daily_cancel_confirmation_documented_spellings(keys):
+    raw = _daily_row()
+    raw.pop("cnc_cfrm_qty")
+    raw.update({key: "1" for key in keys})
+    raw.update(cncl_yn="Y", rmn_qty="0")
+    row = _query_daily_row(raw)
+    assert row.confirmed_cancel_quantity == 1
+    assert row.cancelled and row.total_filled_quantity == 2
+
+
+@pytest.mark.parametrize(
+    "fields",
+    [
+        {},
+        {"cncl_cfrm_qty": "1", "cnc_cfrm_qty": "0"},
+        {"cncl_cfrm_qty": "-1"},
+        {"cncl_cfrm_qty": "NaN"},
+        {"cncl_cfrm_qty": "0.5"},
+        {"cncl_cfrm_qty": ""},
+    ],
+)
+def test_daily_cancel_confirmation_missing_invalid_or_conflicting_blocks(fields):
+    raw = _daily_row()
+    raw.pop("cnc_cfrm_qty")
+    raw.update(fields)
+    with pytest.raises(KisPaperProtocolError):
+        _query_daily_row(raw)
+
+
+def test_official_full_rejection_with_blank_cancel_flag_is_not_a_fill():
+    from quantpilot.packages.core.execution.paper_reconciliation import _status_from_row
+
+    raw = _daily_row()
+    raw.pop("cnc_cfrm_qty")
+    raw.update(
+        cncl_cfrm_qty="0",
+        cncl_yn="",
+        rjct_qty="3",
+        rmn_qty="0",
+        tot_ccld_qty="0",
+        avg_prvs="0",
+        tot_ccld_amt="0",
+    )
+    row = _query_daily_row(raw)
+    assert _status_from_row(row) == "rejected"
+    assert not row.cancelled and row.total_filled_quantity == 0
+
+
+@pytest.mark.parametrize("changes", [
+    {}, {"rjct_qty": "3"}, {"cncl_yn": None},
+    {"tot_ccld_qty": "3", "rmn_qty": "0", "tot_ccld_amt": "209700"},
+    {"cnc_cfrm_qty": "1", "rmn_qty": "0"},
+])
+def test_blank_cancel_flag_cannot_imply_working_filled_or_cancelled(changes):
+    raw = _daily_row() | {"cncl_yn": ""} | changes
+    with pytest.raises(KisPaperProtocolError):
+        _query_daily_row(raw)
+
+
+@pytest.mark.parametrize("changes", [
+    {"rmn_qty": "1"}, {"tot_ccld_amt": "1"}, {"avg_prvs": "1"},
+    {"cnc_cfrm_qty": "1"}, {"ord_qty": "0", "rjct_qty": "0"},
+])
+def test_blank_flag_rejection_requires_complete_zero_fill_evidence(changes):
+    raw = _daily_row() | {
+        "cncl_yn": "", "rjct_qty": "3", "rmn_qty": "0",
+        "tot_ccld_qty": "0", "avg_prvs": "0", "tot_ccld_amt": "0",
+    } | changes
+    with pytest.raises(KisPaperProtocolError):
+        _query_daily_row(raw)
+
+
 def _cancelable_row(order_number: str = "0000012345") -> dict[str, str]:
     return {
         "ord_gno_brno": "91234",

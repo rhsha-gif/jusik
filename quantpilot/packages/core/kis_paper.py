@@ -1207,10 +1207,45 @@ def _parse_daily_order(raw: Any) -> KisDailyOrderFill:
     order_date = _required_text(raw, "ord_dt", "daily-order row")
     order_time = _required_text(raw, "ord_tmd", "daily-order row")
     if not re.fullmatch(r"\d{8}", order_date) or not re.fullmatch(r"\d{6}", order_time):
-        raise KisPaperProtocolError("KIS paper daily-order row has an invalid date or time")
-    cancel_flag = _required_text(raw, "cncl_yn", "daily-order row").upper()
+        raise KisPaperProtocolError(
+            "KIS paper daily-order row has an invalid date or time"
+        )
+    # The portal contract uses cncl_cfrm_qty; older official examples use
+    # cnc_cfrm_qty. Neither a missing field nor conflicting evidence means zero.
+    cancel_quantities = [
+        _required_int(raw, key, "daily-order row", minimum=0)
+        for key in ("cncl_cfrm_qty", "cnc_cfrm_qty")
+        if key in raw
+    ]
+    if not cancel_quantities or len(set(cancel_quantities)) != 1:
+        raise KisPaperProtocolError(
+            "KIS paper daily-order cancel confirmation is missing or conflicting"
+        )
+    confirmed_cancel_quantity = cancel_quantities[0]
+    cancel_flag = raw.get("cncl_yn")
+    if not isinstance(cancel_flag, str):
+        raise KisPaperProtocolError(
+            "KIS paper daily-order row has an invalid cancel flag"
+        )
+    cancel_flag = cancel_flag.strip().upper()
+    if cancel_flag == "":
+        # The official full-rejection example leaves cncl_yn blank. Accept only
+        # quantitatively proven full rejection, never infer a working/cancelled order.
+        quantity = _required_int(raw, "ord_qty", "daily-order row", minimum=1)
+        fully_rejected = (
+            _required_int(raw, "rjct_qty", "daily-order row", minimum=0) == quantity
+            and _required_int(raw, "tot_ccld_qty", "daily-order row", minimum=0) == 0
+            and _required_int(raw, "rmn_qty", "daily-order row", minimum=0) == 0
+            and confirmed_cancel_quantity == 0
+            and _required_decimal(raw, "tot_ccld_amt", "daily-order row") == 0
+            and _required_decimal(raw, "avg_prvs", "daily-order row") == 0
+        )
+        if fully_rejected:
+            cancel_flag = "N"
     if cancel_flag not in {"Y", "N"}:
-        raise KisPaperProtocolError("KIS paper daily-order row has an invalid cancel flag")
+        raise KisPaperProtocolError(
+            "KIS paper daily-order row has an invalid cancel flag"
+        )
     raw_original_order_number = raw.get("orgn_odno", "")
     if not isinstance(raw_original_order_number, str):
         raise KisPaperProtocolError(
@@ -1239,9 +1274,7 @@ def _parse_daily_order(raw: Any) -> KisDailyOrderFill:
         remaining_quantity=_required_int(raw, "rmn_qty", "daily-order row", minimum=0),
         rejected_quantity=_required_int(raw, "rjct_qty", "daily-order row", minimum=0),
         cancelled=cancel_flag == "Y",
-        confirmed_cancel_quantity=_required_int(
-            raw, "cnc_cfrm_qty", "daily-order row", minimum=0
-        ),
+        confirmed_cancel_quantity=confirmed_cancel_quantity,
         total_filled_amount=_required_decimal(raw, "tot_ccld_amt", "daily-order row"),
     )
 

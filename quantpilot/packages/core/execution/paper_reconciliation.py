@@ -15,6 +15,8 @@ from quantpilot.packages.core.kis_paper import (
     KisDailyOrdersResult,
     KisPaperClient,
     kis_recent_three_month_start,
+    is_original_order,
+    safe_failure,
 )
 from quantpilot.packages.core.operator.position_ledger import (
     PaperDispatchFillEvidence,
@@ -27,7 +29,9 @@ KST = ZoneInfo("Asia/Seoul")
 
 
 class PaperReconciliationUnavailable(RuntimeError):
-    pass
+    def __init__(self, message, detail=None):
+        super().__init__(message)
+        self.detail = detail
 
 
 class PaperReconciliationStore(Protocol):
@@ -51,6 +55,7 @@ class PaperReconciliationResult:
     blocked_order_plan_ids: tuple[str, ...]
     broker_balance: KisBalanceResult
     reconciled_at: datetime
+    diagnostics: tuple[dict, ...] = ()
 
 
 class PaperBrokerReconciler:
@@ -104,9 +109,11 @@ class PaperBrokerReconciler:
             if _dispatch_business_date(item) < earliest_queryable_date
         ]
         queryable = [item for item in unresolved if item not in history_expired]
+        stage = "balance"
         try:
             balance = self._client.get_balance(exchange="KRX")
             if queryable:
+                stage = "daily_orders"
                 start_date = min(_dispatch_business_date(item) for item in queryable)
                 query = self._client.get_daily_orders_and_fills(
                     start_date,
@@ -116,9 +123,9 @@ class PaperBrokerReconciler:
                 )
             else:
                 query = KisDailyOrdersResult(rows=(), pages_fetched=0)
-        except Exception:
+        except Exception as exc:
             raise PaperReconciliationUnavailable(
-                "KIS paper reconciliation query is unavailable"
+                "KIS paper reconciliation query is unavailable", safe_failure(exc, stage)
             ) from None
 
         expired_ids = {item.order_plan_id for item in history_expired}
@@ -148,6 +155,7 @@ class PaperBrokerReconciler:
             ),
             broker_balance=balance,
             reconciled_at=now,
+            diagnostics=tuple(self.diagnose_match(item, query.rows) for item in queryable),
         )
 
     def reconcile_dispatch(
@@ -269,37 +277,50 @@ class PaperBrokerReconciler:
         *,
         compare_known_branch: bool = True,
     ) -> bool:
+        return not self.match_failure_fields(dispatch, row, compare_known_branch=compare_known_branch)
+
+    def match_failure_fields(self, dispatch, row, *, compare_known_branch=True):
         expected_date = _dispatch_business_date(dispatch).strftime("%Y%m%d")
-        exact_identity = (
-            row.order_date == expected_date
-            and row.symbol == dispatch.symbol
-            and row.side == dispatch.side
-            and row.order_quantity == int(dispatch.quantity)
-            and Decimal(str(row.order_price)) == Decimal(str(int(dispatch.limit_price)))
-            and row.original_order_number in {"", "0"}
-        )
-        if not exact_identity:
-            return False
+        checks = {
+            "date": row.order_date == expected_date,
+            "symbol": row.symbol == dispatch.symbol,
+            "side": row.side == dispatch.side,
+            "quantity": row.order_quantity == int(dispatch.quantity),
+            "price": Decimal(str(row.order_price)) == Decimal(str(int(dispatch.limit_price))),
+            "original_order": is_original_order(row.original_order_number),
+        }
         if dispatch.broker_order_reference is not None:
-            return (
-                row.order_number == dispatch.broker_order_reference
-                and (
+            checks.update({
+                "order_reference": row.order_number == dispatch.broker_order_reference,
+                "branch": (
                     not compare_known_branch
                     or dispatch.broker_order_branch_number is None
                     or row.order_branch_number
                     == dispatch.broker_order_branch_number
-                )
-                and (
+                ),
+                "time": (
                     dispatch.broker_order_time is None
                     or row.order_time == dispatch.broker_order_time
-                )
-            )
-        if dispatch.dispatch_claimed_at is None:
-            return False
-        row_time = _row_order_datetime(row)
-        claimed_at = dispatch.dispatch_claimed_at.astimezone(KST)
-        delta = (row_time - claimed_at).total_seconds()
-        return -5 <= delta <= self._match_window_seconds
+                ),
+            })
+        elif dispatch.dispatch_claimed_at is None:
+            checks["dispatch_time"] = False
+        else:
+            # Unrelated malformed rows must not abort recovery of a valid order.
+            try:
+                delta = (_row_order_datetime(row) - dispatch.dispatch_claimed_at.astimezone(KST)).total_seconds()
+                checks["dispatch_time"] = -5 <= delta <= self._match_window_seconds
+            except ValueError:
+                checks["dispatch_time"] = False
+        return [key for key, matched in checks.items() if not matched]
+
+    def diagnose_match(self, dispatch, rows):
+        matches = sum(self._matches(dispatch, row) for row in rows)
+        near = [self.match_failure_fields(dispatch, row) for row in rows
+                if row.order_number == dispatch.broker_order_reference or row.symbol == dispatch.symbol]
+        return {"order_plan_id": dispatch.order_plan_id, "matched_rows": matches,
+                "failure_fields": sorted({field for fields in near for field in fields})
+                if not matches else [], "query_rows": len(rows)}
 
     def _blocked(
         self,

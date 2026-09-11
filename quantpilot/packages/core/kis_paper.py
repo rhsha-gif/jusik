@@ -1157,6 +1157,22 @@ def _safe_response_code(value: Any) -> str:
     return code if _SAFE_CODE.fullmatch(code) else "unavailable"
 
 
+def is_original_order(value: str) -> bool:
+    """KIS denotes an original order with blank or an ASCII zero-filled ID.
+
+    Keep nonzero references distinct: they identify corrections/cancellations.
+    The observed paper response uses ten zeroes; the ID boundary is 16 digits.
+    """
+    return isinstance(value, str) and (value == "" or re.fullmatch(r"0{1,16}", value) is not None)
+
+
+def safe_failure(exc: Exception, stage: str) -> dict:
+    """Only classifications, never provider text, URLs or account identifiers."""
+    code = re.search(r"\(code=([A-Za-z0-9_.-]{1,32})\)", str(exc))
+    return {"stage": stage, "error": type(exc).__name__,
+            "broker_code": code.group(1) if code else None}
+
+
 def _required_safe_code(source: Mapping[str, Any], key: str, context: str) -> str:
     value = source.get(key)
     code = _safe_response_code(value)

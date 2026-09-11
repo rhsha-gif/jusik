@@ -37,6 +37,8 @@ def process_lock(path):
 
 
 def build_runtime(store, env):
+    if store.get("recovery_pending_since"):
+        raise ValueError("recovery_incomplete")
     if not environment_safe(env):
         raise ValueError("unsafe_environment")
     if store.policy.data_mode != "paper_trading":
@@ -105,6 +107,9 @@ def parser():
     worker.add_argument("--once", action="store_true")
     reporter = sub.add_parser("reporter")
     reporter.add_argument("--once", action="store_true")
+    reconciliation = sub.add_parser("reconcile")
+    reconciliation.add_argument("--apply", action="store_true")
+    reconciliation.add_argument("--dry-run", action="store_true")
     conf = sub.add_parser("config")
     conf.add_argument("--set", dest="changes")
     conf.add_argument("--expected-version", type=int)
@@ -139,6 +144,21 @@ def main(argv=None):
             )
         )
         return 2
+    if args.command == "reconcile":
+        from quantpilot.paper.recovery import build_client, preview, apply_recovery
+        from quantpilot.paper.calendar import Calendar
+
+        try:
+            if args.apply and args.dry_run:
+                raise ValueError("conflicting_recovery_modes")
+            clock = lambda: datetime.now(timezone.utc)
+            client = build_client(os.environ, clock)
+            result = (apply_recovery if args.apply else preview)(directory, client, Calendar(), clock())
+            print(json.dumps(result, ensure_ascii=False, allow_nan=False))
+            return 0 if result["status"] == "reconciled" else 2
+        except Exception as exc:
+            print(json.dumps(blocked_result(exc)))
+            return 2
     if args.command == "dashboard":
         # Read-only viewer: never constructs Store (a writer) and takes no trader lock.
         from quantpilot.paper.dashboard import serve
@@ -191,6 +211,7 @@ def main(argv=None):
                     "UPDATE outbox SET state='delivery_unknown',error='reporter_interrupted' WHERE state='sending'"
                 )
                 while True:
+                    store.put("reporter_heartbeat", datetime.now(timezone.utc).isoformat())
                     if store.policy.slack_enabled:
                         drain_outbox(store, SlackDM(os.environ))
                     result = {"status": "reporter_ready"}
@@ -203,6 +224,7 @@ def main(argv=None):
             with process_lock(directory / "worker.lock"):
                 recover_interrupted_jobs(store)
                 while True:
+                    store.put("worker_heartbeat", datetime.now(timezone.utc).isoformat())
                     result = work_once(store)
                     if args.once:
                         break

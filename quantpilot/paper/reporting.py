@@ -10,11 +10,30 @@ from uuid import uuid5, NAMESPACE_URL
 from quantpilot.paper.store import encode
 
 
-def snapshot(store):
+def snapshot(store, now=None):
     from quantpilot.paper.recommendations import propose_concentration
 
+    now = now or datetime.now(timezone.utc)
+    def fresh(value, seconds=180):
+        try:
+            age = (now - datetime.fromisoformat(value)).total_seconds()
+            return 0 <= age <= seconds
+        except (TypeError, ValueError):
+            return False
+
+    paper = store.policy.data_mode == "paper_trading"
+    reconciled = (not paper or (store.get("reconciliation_complete") is True
+                  and fresh(store.get("last_reconciled_at"))))
     marks = store.get("marks", {})
     positions = store.positions()
+    incomplete = not reconciled or any(
+        p["symbol"] not in marks or (paper and not fresh(store.get("marks_at", {}).get(p["symbol"])))
+        for p in positions)
+    outbox = {r[0]: r[1] for r in store.db.execute("SELECT state,COUNT(*) FROM outbox GROUP BY state")}
+    notifications = ("disabled" if not store.policy.slack_enabled else
+                     "reporter_unavailable" if not fresh(store.get("reporter_heartbeat")) else
+                     "delivery_unknown" if outbox.get("delivery_unknown", 0) else
+                     "pending" if outbox.get("pending", 0) else "ready")
     equity = store.get("cash") + sum(
         p["quantity"] * marks.get(p["symbol"], p["basis"] / p["quantity"])
         for p in positions
@@ -64,6 +83,8 @@ def snapshot(store):
         "cash": round(store.get("cash"), 2),
         "daily_pnl": round(equity - base, 2),
         "daily_return": equity / base - 1,
+        "daily_pnl_incomplete": incomplete or (paper and not store.get("day_base_valid", False)),
+        "day_base_source": store.get("day_base_source"),
         "cumulative_pnl": round(equity - initial, 2),
         "cumulative_return": equity / initial - 1,
         "realized_net_pnl": round(store.get("realized"), 2),
@@ -75,6 +96,20 @@ def snapshot(store):
         "heartbeat": store.get("heartbeat"),
         "collector_heartbeat": store.get("collector_heartbeat"),
         "collector_error": store.get("collector_error"),
+        "reconciliation_complete": reconciled,
+        "reconciliation_reason": store.get("reconciliation_reason"),
+        "last_reconciled_at": store.get("last_reconciled_at"),
+        "protection_status": ("reconciliation_required" if not reconciled else
+                              "no_positions" if not positions else
+                              "trader_unavailable" if paper and not fresh(store.get("heartbeat")) else
+                              "quarantined_next_session" if any(p["quarantined"] for p in positions) else
+                              "monitoring"),
+        "notification_status": notifications,
+        "reporter_heartbeat": store.get("reporter_heartbeat"),
+        "worker_heartbeat": store.get("worker_heartbeat"),
+        "outbox_counts": outbox,
+        "last_report_superseded": store.get("last_report_superseded", False),
+        "valuation_invalidated_before": store.get("valuation_invalidated_before"),
         "universe_source": store.get("universe_source"),
         "flatten_pending": store.get("control") == "flattening",
         "unverified_symbols": store.get("unverified_symbols", []),
@@ -82,7 +117,7 @@ def snapshot(store):
             s: store.get("candidate_status:" + s, "not_evaluated")
             for s in store.get("universe", [])
         },
-        "valuation_incomplete": any(p["symbol"] not in marks for p in positions),
+        "valuation_incomplete": incomplete,
         "cost_basis": "modeled_fee_tax; slippage_separate",
         "live_trading_enabled": False,
     }
@@ -91,11 +126,17 @@ def snapshot(store):
 def render(report, review=""):
     lines = [
         f"QuantPilot {report['data_mode']} 일일 보고",
-        f"당일 {report['daily_return']:+.2%} / {report['daily_pnl']:+,.0f}원",
-        f"누적 {report['cumulative_return']:+.2%} / {report['cumulative_pnl']:+,.0f}원",
-        f"평가자산 {report['equity']:,.0f}원 · 현금 {report['cash']:,.0f}원",
-        "손익은 체결금액에 설정된 수수료·세금 가정을 반영합니다.",
     ]
+    if report["valuation_incomplete"]:
+        lines.append("당일·누적 손익과 평가자산: 확인 불가 (대사 또는 평가 근거 미완료)")
+    else:
+        lines.append("당일 손익: 확인 불가 (직전 거래일 평가 기준 미확인)" if report.get("daily_pnl_incomplete") else
+                     f"당일 {report['daily_return']:+.2%} / {report['daily_pnl']:+,.0f}원")
+        lines.extend([
+            f"누적 {report['cumulative_return']:+.2%} / {report['cumulative_pnl']:+,.0f}원",
+            f"평가자산 {report['equity']:,.0f}원 · 현금 {report['cash']:,.0f}원",
+        ])
+    lines.append("손익은 체결금액에 설정된 수수료·세금 가정을 반영합니다.")
     for s in report["strategies"]:
         gross = s.get("gross_fill_pnl")
         gross_text = f"{gross:+,.0f}원" if gross is not None else "확인 필요"
@@ -110,7 +151,7 @@ def render(report, review=""):
     )
     if report["valuation_incomplete"]:
         lines.append(
-            "일부 보유분은 최신 평가 미확인: 표시 자산에 취득원가 평가가 포함됩니다."
+            "표시된 보유수량은 원장 기준입니다. 대사 미완료 시 브로커 잔고를 별도로 확인하세요."
         )
     loss = report.get("intraday_loss_state")
     if loss:
@@ -127,6 +168,7 @@ def render(report, review=""):
             + ", ".join(report["unverified_symbols"])
             + " — 브로커 수량 대사 필요"
         )
+    lines.append(f"보호 상태: {report.get('protection_status', 'unknown')} · 알림: {report.get('notification_status', 'unknown')}")
     for failure in report.get("ai_failures", []):
         lines.append(f"AI 실패: {failure['id']} · {failure['error']}")
     research = report.get("research", {})
@@ -218,3 +260,24 @@ def drain_outbox(store, sender):
             store.audit("slack_delivery_unknown", {"id": row["id"]})
         else:
             store.db.execute("UPDATE outbox SET state='sent' WHERE id=?", (row["id"],))
+
+
+def enqueue_recovery_report(store, now):
+    """Supersede unsent history atomically; never requeue ambiguous deliveries."""
+    key = "recovery:" + str(store.get("valuation_invalidated_before", now.isoformat()))
+    with store.transaction():
+        if store.db.execute("SELECT 1 FROM outbox WHERE id=?", (key,)).fetchone():
+            return key
+        old = [r[0] for r in store.db.execute("SELECT id FROM outbox WHERE state='pending'")]
+        store.db.execute("UPDATE outbox SET state='superseded',error='recovery_report_replaced' WHERE state='pending'")
+        previous = store.get("last_report")
+        if previous is not None:
+            store.put("report_before_recovery:" + key, previous)
+        report = snapshot(store, now=now)
+        report["notification_status"] = "pending"
+        store.put("last_report", report)
+        store.put("last_report_superseded", False)
+        store.enqueue(key, "QuantPilot 원장 복구 정정 보고\n복구 적용 시점: " + now.isoformat() + "\n" + render(report) +
+                      "\n신규 진입 중지 유지. 장후 잔량은 다음 거래 가능 시간의 기존 지정가 청산 대상입니다.", now)
+        store.audit("recovery_report_queued", {"id": key, "superseded_ids": old}, now)
+    return key

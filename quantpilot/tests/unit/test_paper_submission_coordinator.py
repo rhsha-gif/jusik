@@ -1091,6 +1091,8 @@ def test_kis_paper_client_is_constructed_only_by_paper_jobs_and_never_by_api(
         "jobs/check_kis_paper_connection.py",
         # ReadinessTransport independently blocks every order/cancel request.
         "jobs/check_paper_readiness.py",
+        # RecoveryTransport permits only token POST and balance/daily-order GETs.
+        "paper/recovery.py",
         # Explicit read-only intraday collector reuses token/GET-only transport;
         # websocket subscriptions are restricted to public paper market channels.
         "paper/intraday/collection.py",

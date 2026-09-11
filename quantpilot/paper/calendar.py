@@ -43,3 +43,7 @@ class Calendar:
     def current_open_session_date(self, now):
         session = self.session(now)
         return now.astimezone(KST).date() if session and session.trading(now) else None
+
+    def previous_session_date(self, now):
+        day = aware(now).astimezone(KST).date().isoformat()
+        return self.calendar.previous_session(day).date().isoformat()

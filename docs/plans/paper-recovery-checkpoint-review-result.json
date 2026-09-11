@@ -1,0 +1,111 @@
+{
+  "objective": "Review only the final recovery checkpoint across the projection-to-report crash window",
+  "decomposed": false,
+  "runId": "b8d6a6c6-4661-40a2-b094-e45db0c18788",
+  "planFingerprint": "541141e15b2f97a6296d06ddadcb855d47ada22a0ca2b194b07c73e5b11b3d1a",
+  "status": "complete",
+  "results": [
+    {
+      "taskId": "paper-recovery-checkpoint-review",
+      "agentRole": "reviewer",
+      "agentId": "aorch-reviewer",
+      "agent": "aorch-reviewer",
+      "status": "complete",
+      "route": {
+        "provider": "anthropic",
+        "profileId": "claude-sonnet-general",
+        "model": "sonnet",
+        "effort": "high"
+      },
+      "runDir": "C:\\Users\\goyan\\OneDrive\\문서\\코덱스\\주식트레이더\\.aorch\\task-runs\\b8d6a6c6-4661-40a2-b094-e45db0c18788\\paper-recovery-checkpoint-review",
+      "receiptPath": "C:\\Users\\goyan\\OneDrive\\문서\\코덱스\\주식트레이더\\.aorch\\task-runs\\b8d6a6c6-4661-40a2-b094-e45db0c18788\\paper-recovery-checkpoint-review\\receipt.json",
+      "receipt": {
+        "status": "complete",
+        "summary": "PASS. Independently traced the new transaction boundary in apply_recovery/build_runtime and the new regression test; found no defect. recovery_pending_since is autocommitted before any real reconcile call, build_runtime blocks restart on that marker before touching credentials, and the post-reconcile block that supersedes the pending report, writes the audit row, and clears the marker all execute inside one store.transaction() so a repeat crash leaves the marker set (fail-closed). Scoped verification passed (24/24, 0 failures/errors).",
+        "filesInspected": [
+          "quantpilot/paper/recovery.py",
+          "quantpilot/paper/cli.py",
+          "quantpilot/paper/reporting.py",
+          "quantpilot/paper/store.py",
+          "quantpilot/tests/unit/test_paper_recovery.py",
+          "docs/plans/paper-recovery-followup-review-result.json"
+        ],
+        "filesChanged": [],
+        "commands": [
+          {
+            "command": "git log --oneline -10 -- quantpilot/paper/recovery.py quantpilot/paper/cli.py quantpilot/paper/reporting.py quantpilot/tests/unit/test_paper_recovery.py",
+            "exitCode": 0,
+            "outcome": "confirmed recovery.py is a new untracked file (no prior committed diff to compare)"
+          },
+          {
+            "command": "git status --porcelain=v1",
+            "exitCode": 0,
+            "outcome": "baseline working-tree delta captured; unchanged after review"
+          },
+          {
+            "command": "python scripts/verify-paper.py quantpilot/tests/unit/test_paper_recovery.py -q --basetemp \".pytest_tmp/review_669\" --junitxml \".pytest_tmp/junit_review_669.xml\"",
+            "exitCode": 0,
+            "outcome": "junit summary tests=24 failures=0 errors=0 skipped=0"
+          },
+          {
+            "command": "rm -f .pytest_tmp/junit_review_669.xml; rm -rf .pytest_tmp/review_669",
+            "exitCode": 0,
+            "outcome": "removed review-generated temp artifacts; git status confirmed no residual change"
+          }
+        ],
+        "criteria": [
+          {
+            "criterion": "A crash after projection commit cannot lose correction-report completion",
+            "status": "pass",
+            "evidence": "recovery_pending_since is put() outside any store.transaction() (autocommit) before gateway.reconcile(now) runs (recovery.py:186-189), so it survives a crash injected right after the internal projection commit. On retry with changed_orders==0, the marker being non-null still forces the report-supersede + enqueue_recovery_report path (recovery.py:201-211), proven by test_restart_after_projection_commit_still_finishes_correction asserting old_report becomes 'superseded' and one 'recovery:%' outbox row exists."
+          },
+          {
+            "criterion": "Recovery marker clears with report/audit commit and blocks premature runtime restart",
+            "status": "pass",
+            "evidence": "store.put('recovery_pending_since', None) is the last statement inside the same `with store.transaction()` block that also does store.audit('recovery_applied', ...) and enqueue_recovery_report (recovery.py:199-212), so a repeat crash mid-block rolls back the whole thing and the marker stays set. build_runtime's very first check (cli.py:40-41) raises ValueError('recovery_incomplete') on a non-null marker, before environment_safe, data_mode checks, or any credential/config construction (cli.py:42-67); test asserts this raises with the marker still set."
+          },
+          {
+            "criterion": "Transport and fill semantics remain unchanged",
+            "status": "pass",
+            "evidence": "RecoveryTransport's allowlist (recovery.py:27-35) still only permits TOKEN POST and BALANCE/DAILY_ORDERS GET, identical to the prior reviewed version (per paper-recovery-followup-review-result.json F1); this delta does not touch RecoveryTransport, KisGateway.reconcile, or fill-matching logic."
+          }
+        ],
+        "findings": [],
+        "unresolvedRisks": [
+          "Pre-existing, not introduced by this delta: if reconciliation genuinely cannot reach 'reconciled' status (e.g. a broker POST truly never appears in the daily-order window), recovery_pending_since and runtime restart stay blocked indefinitely with no documented manual escape path — already flagged in the prior follow-up review."
+        ],
+        "confidence": 0.92
+      },
+      "verification": {
+        "passed": true,
+        "results": [
+          {
+            "command": "python scripts/verify-paper.py quantpilot/tests/unit/test_paper_recovery.py -q",
+            "status": "complete",
+            "exitCode": 0,
+            "timedOut": false,
+            "durationMs": 6526,
+            "stdoutTail": "........................                                                 [100%]\r\n",
+            "stderrTail": ""
+          }
+        ]
+      },
+      "attempts": [
+        {
+          "attempt": 1,
+          "route": {
+            "provider": "anthropic",
+            "profileId": "claude-sonnet-general",
+            "model": "sonnet",
+            "effort": "high"
+          },
+          "passed": true,
+          "changeGuardPassed": true
+        }
+      ]
+    }
+  ],
+  "ok": true,
+  "planPath": "C:\\Users\\goyan\\OneDrive\\문서\\코덱스\\주식트레이더\\.aorch\\task-runs\\b8d6a6c6-4661-40a2-b094-e45db0c18788\\plan.json",
+  "resultPath": "C:\\Users\\goyan\\OneDrive\\문서\\코덱스\\주식트레이더\\.aorch\\task-runs\\b8d6a6c6-4661-40a2-b094-e45db0c18788\\dispatch.json"
+}

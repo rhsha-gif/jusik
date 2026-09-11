@@ -1,0 +1,125 @@
+{
+  "objective": "Verify the six bounded corrections from the independent paper-recovery review",
+  "decomposed": false,
+  "runId": "6b40aa5d-ec09-4de2-b641-c65640327efe",
+  "planFingerprint": "5b64d5e62f32237bead816fe8fd42f506530c34c1f5a24e32f0610b422e969bb",
+  "status": "complete",
+  "results": [
+    {
+      "taskId": "paper-recovery-followup-review",
+      "agentRole": "reviewer",
+      "agentId": "aorch-reviewer",
+      "agent": "aorch-reviewer",
+      "status": "complete",
+      "route": {
+        "provider": "anthropic",
+        "profileId": "claude-sonnet-general",
+        "model": "sonnet",
+        "effort": "high"
+      },
+      "runDir": "C:\\Users\\goyan\\OneDrive\\문서\\코덱스\\주식트레이더\\.aorch\\task-runs\\6b40aa5d-ec09-4de2-b641-c65640327efe\\paper-recovery-followup-review",
+      "receiptPath": "C:\\Users\\goyan\\OneDrive\\문서\\코덱스\\주식트레이더\\.aorch\\task-runs\\6b40aa5d-ec09-4de2-b641-c65640327efe\\paper-recovery-followup-review\\receipt.json",
+      "receipt": {
+        "status": "complete",
+        "summary": "PASS. All six corrections (F1-F6) from the prior cross-provider review are present, correctly wired, and covered by meaningful new tests. Scoped verification command (test_paper_recovery.py + test_paper_review_regressions.py) passes 30/30 with 0 failures/errors. No safety gate (transport allowlist, identity match, owner locks, provenance) was weakened.",
+        "filesInspected": [
+          ".aorch/task-runs/0b808b55-da5d-4480-80b0-d72e8e51f2ca/paper-recovery-review/receipt.json",
+          "quantpilot/paper/recovery.py",
+          "quantpilot/paper/broker.py (diff)",
+          "quantpilot/paper/calendar.py (diff)",
+          "quantpilot/paper/reporting.py (diff)",
+          "quantpilot/paper/runtime.py (diff)",
+          "quantpilot/paper/valuation.py",
+          "quantpilot/paper/dashboard.py (excerpt)",
+          "quantpilot/packages/core/execution/paper_reconciliation.py (diff)",
+          "quantpilot/packages/core/kis_paper.py (is_original_order/safe_failure excerpt)",
+          "quantpilot/tests/unit/test_paper_recovery.py (full)",
+          "quantpilot/tests/unit/test_paper_submission_coordinator.py (diff)",
+          "docs/paper_intraday_runbook.md (diff)"
+        ],
+        "filesChanged": [],
+        "commands": [
+          {
+            "command": "git status --short; git log --oneline -10",
+            "exitCode": 0,
+            "outcome": "Confirmed pre-existing working-tree delta (11 modified + new untracked files including recovery.py, valuation.py, dashboard.py, test_paper_recovery.py); nothing changed by this review"
+          },
+          {
+            "command": "git diff <scoped files>",
+            "exitCode": 0,
+            "outcome": "Read exact diffs for broker.py, calendar.py, reporting.py, runtime.py, paper_reconciliation.py, test_paper_submission_coordinator.py, docs/paper_intraday_runbook.md"
+          },
+          {
+            "command": "python scripts/verify-paper.py quantpilot/tests/unit/test_paper_recovery.py quantpilot/tests/unit/test_paper_review_regressions.py -q --basetemp \".pytest_tmp/reviewx\" --junitxml \".pytest_tmp/junit_review.xml\"",
+            "exitCode": 0,
+            "outcome": "junit summary: tests=30 failures=0 errors=0 skipped=0 (the task's exact required verification command)"
+          },
+          {
+            "command": "python scripts/verify-paper.py quantpilot/tests/unit/test_paper_submission_coordinator.py quantpilot/tests/unit/test_paper_dashboard.py -q --basetemp \".pytest_tmp/reviewy\" --junitxml \".pytest_tmp/junit_review2.xml\"",
+            "exitCode": 0,
+            "outcome": "31 passed, 0 failed - spot-check that F1's allowlist edit and dashboard chart-preservation code did not regress adjacent suites (not the full backend suite; parent owns that)"
+          }
+        ],
+        "criteria": [
+          {
+            "criterion": "F1-F3 are corrected without weakening transport or identity boundaries",
+            "status": "pass",
+            "evidence": "F1: test_paper_submission_coordinator.py now allowlists 'paper/recovery.py' with a comment citing RecoveryTransport's token+balance+daily-order-only scope (matches recovery.py:27-35's allowed set, unchanged and still fail-closed). F2: broker.py:427-433 restores the original short-circuit via a conditional expression, so dispatch.broker_forwarding_order_org_number is only read when len(matches)==1, exactly reproducing the pre-diff guard. F3: paper_reconciliation.py match_failure_fields wraps only the dispatch_claimed_at branch's _row_order_datetime() call in try/except ValueError, setting dispatch_time=False on parse failure instead of raising; all identity fields (date/symbol/side/quantity/price/original_order via is_original_order) are still required to match, and is_original_order is a strictly bounded '' or 1-16-ASCII-zero regex (rejects full-width zero, '0.0', '-0', 17 zeros), already accepted by the parent review's identity criterion. Verified by test_bad_date_row_does_not_hide_a_valid_unknown_dispatch_fill (junk ord_dt row no longer aborts a valid unknown-order fill) and the 3 new sentinel-rejection parametrized cases, all passing."
+          },
+          {
+            "criterion": "F4 correction wiring preserves pending history and never requeues uncertain deliveries",
+            "status": "pass",
+            "evidence": "apply_recovery (recovery.py:194-208) calls enqueue_recovery_report inside the same reentrant store.transaction() as the recovery_applied audit, under recovery_locks held for the whole apply call. enqueue_recovery_report (reporting.py:265-283) only UPDATEs outbox rows WHERE state='pending' to state='superseded' (rows kept, not deleted) and is idempotent via an outbox id keyed on valuation_invalidated_before; it never touches state='delivery_unknown' rows. test_recovery_report_supersedes_only_pending_and_is_idempotent and the end-to-end test_apply_itself_supersedes_pending_report_and_preserves_unknown_delivery both assert a 'delivery_unknown' row stays 'delivery_unknown' after apply_recovery, and a second enqueue call at a later timestamp returns the same key with no duplicate pending row. Both pass."
+          },
+          {
+            "criterion": "F5 quarantines preopen and carried holdings while entries remain paused",
+            "status": "pass",
+            "evidence": "recovery.py:187-192 now uses `session is None or not session.trading(now) or carried`, where Session.trading is `opens <= now < closes` (calendar.py:22-23) - covers pre-open, after-close, and non-trading days, and `carried` is computed independently from session.trading(now) so a position opened on a prior date is quarantined even when now IS mid-session. test_recovery_quarantines_preopen_and_carried_intraday_positions is parametrized over both cases (pre-open same-day, and 3-days-later mid-session with a carried position) and both assert quarantined==1 and control stays 'paused'; both pass."
+          },
+          {
+            "criterion": "F6 cannot publish a stale daily baseline as confirmed and protection remains available",
+            "status": "pass",
+            "evidence": "valuation.py roll_baselines only marks day_base_valid True when the day is the profile's first session or when last_close_day equals calendar.previous_session_date(now) AND last_close_equity_valid is True; otherwise day_base still rolls forward but day_base_valid=False. reporting.py separates masking: valuation_incomplete (full mask) vs daily_pnl_incomplete = incomplete or not day_base_valid (masks only 당일 손익, not 누적/평가자산). runtime.py:151 sets no_entries=True whenever paper_trading and day_base_valid is falsy, so entries stay blocked on an unproven baseline; the reconciliation error path also now normalizes exc.detail to always contain an 'error' key before indexing it. test_stale_previous_close_masks_daily_pnl_until_a_valid_session_close exercises a stale last_close_day, confirms daily_pnl_incomplete=True while valuation_incomplete stays False, then confirms record_close(valid=True) + roll clears the mask and updates day_base; passes."
+          }
+        ],
+        "findings": [],
+        "unresolvedRisks": [
+          "Not re-verified in this bounded pass (explicitly out of scope per task instructions): full repository suite and `tach check`, which the parent runs independently in its configured venv.",
+          "Pre-existing operational risk carried from the parent receipt, unaffected by F1-F6: entry_reconciled now requires all(d['matched_rows']==1) over every queryable unresolved dispatch, so a genuinely lost broker POST that never appears in the daily-order window can hold apply_recovery at 'blocked' indefinitely with no documented manual escape path.",
+          "diagnose_match's 'near' filter (paper_reconciliation.py) compares row.order_number == dispatch.broker_order_reference without a None guard; if broker_order_reference is None and a broker row carries a null/empty order_number, it could appear in diagnostics' failure_fields list. This only affects human-facing diagnostics text, not the reconciliation decision itself (which uses the separately-computed strict matched_rows), so it is not a safety defect."
+        ],
+        "confidence": 0.9
+      },
+      "verification": {
+        "passed": true,
+        "results": [
+          {
+            "command": "python scripts/verify-paper.py quantpilot/tests/unit/test_paper_recovery.py quantpilot/tests/unit/test_paper_review_regressions.py -q",
+            "status": "complete",
+            "exitCode": 0,
+            "timedOut": false,
+            "durationMs": 6936,
+            "stdoutTail": "..............................                                           [100%]\r\n",
+            "stderrTail": ""
+          }
+        ]
+      },
+      "attempts": [
+        {
+          "attempt": 1,
+          "route": {
+            "provider": "anthropic",
+            "profileId": "claude-sonnet-general",
+            "model": "sonnet",
+            "effort": "high"
+          },
+          "passed": true,
+          "changeGuardPassed": true
+        }
+      ]
+    }
+  ],
+  "ok": true,
+  "planPath": "C:\\Users\\goyan\\OneDrive\\문서\\코덱스\\주식트레이더\\.aorch\\task-runs\\6b40aa5d-ec09-4de2-b641-c65640327efe\\plan.json",
+  "resultPath": "C:\\Users\\goyan\\OneDrive\\문서\\코덱스\\주식트레이더\\.aorch\\task-runs\\6b40aa5d-ec09-4de2-b641-c65640327efe\\dispatch.json"
+}

@@ -36,12 +36,12 @@ class LedgerAudit:
 
 
 class KisGateway:
-    def __init__(self, store, client, calendar, clock):
+    def __init__(self, store, client, calendar, clock, *, kernel=None):
         self.store = store
         self.client = client
         self.calendar = calendar
         self.clock = clock
-        self.kernel = PaperStateStore(
+        self.kernel = kernel if kernel is not None else PaperStateStore(
             store.path.with_name("broker.sqlite3"),
             data_mode="paper_trading",
             broker_environment="kis_paper",
@@ -113,7 +113,13 @@ class KisGateway:
     def reconcile(self, now):
         self.verified_symbols = set()
         self.entry_reconciled = False
+        self.store.put("reconciliation_complete", False)
+        self.store.put("reconciliation_attempt_at", now.isoformat())
         result = self.reconciler.reconcile_unresolved()
+        diagnostics = list(result.diagnostics)
+        if diagnostics != self.store.get("reconciliation_diagnostics"):
+            self.store.audit("reconciliation_diagnostics", {"orders": diagnostics}, now)
+        self.store.put("reconciliation_diagnostics", diagnostics)
         self.balance = result.broker_balance
         for order in self.store.orders(True):
             dispatch = self.kernel.load_paper_order_dispatch(order["id"])
@@ -149,7 +155,7 @@ class KisGateway:
             for symbol, quantity in local.items()
             if remote.get(symbol) == quantity
         }
-        self.store.put("unverified_symbols", sorted(set(local) - self.verified_symbols))
+        self.store.put("unverified_symbols", sorted((set(local) | set(remote)) - self.verified_symbols))
         from quantpilot.paper.calendar import KST
 
         business_date = now.astimezone(KST).date()
@@ -205,9 +211,26 @@ class KisGateway:
         # an individual dispatch is uncertain. No new entry is authorized in that state.
         self.entry_reconciled = (
             not bool(result.blocked_order_plan_ids)
+            and all(d["matched_rows"] == 1 for d in diagnostics)
             and local == remote
             and not unmanaged
         )
+        self.store.put("reconciliation_complete", self.entry_reconciled)
+        if self.entry_reconciled:
+            self.store.put("reconciliation_reason", None)
+            self.store.put("last_reconciled_at", now.isoformat())
+        # Balance marks are valuation observations, never executable quotes.
+        marks = self.store.get("marks", {})
+        times = self.store.get("marks_at", {})
+        sources = self.store.get("mark_sources", {})
+        for position in self.balance.positions:
+            if position.symbol in self.verified_symbols and position.current_price > 0:
+                marks[position.symbol] = float(position.current_price)
+                times[position.symbol] = now.isoformat()
+                sources[position.symbol] = "broker_balance"
+        self.store.put("marks", marks)
+        self.store.put("marks_at", times)
+        self.store.put("mark_sources", sources)
         return self.entry_reconciled
 
     def protection_allowed(self, symbol):
@@ -403,7 +426,11 @@ class KisGateway:
         ]
         if len(matches) != 1 or not dispatch.broker_forwarding_order_org_number:
             self.store.audit(
-                "cancel_deferred_to_reconciliation", {"order_id": order["id"]}, now
+                "cancel_deferred_to_reconciliation", {
+                    "order_id": order["id"],
+                    "reason": "daily_evidence_unmatched" if len(matches) != 1
+                    else "missing_forwarding_id",
+                }, now
             )
             return
         with self.store.transaction():

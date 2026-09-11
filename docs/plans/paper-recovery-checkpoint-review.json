@@ -1,0 +1,20 @@
+{
+  "objective": "Review only the final recovery checkpoint across the projection-to-report crash window",
+  "decomposed": false,
+  "tasks": [{
+    "id": "paper-recovery-checkpoint-review",
+    "agentRole": "reviewer",
+    "agentId": "aorch-reviewer",
+    "kind": "review",
+    "risk": "high",
+    "complexity": "standard",
+    "write": false,
+    "maxTurns": 14,
+    "allowedProviders": ["anthropic"],
+    "allowedScope": ["quantpilot/paper/recovery.py", "quantpilot/paper/cli.py", "quantpilot/paper/reporting.py", "quantpilot/tests/unit/test_paper_recovery.py", "docs/plans"],
+    "forbiddenScope": [".env*", ".claude", ".codex", ".agents"],
+    "objective": "READ ONLY final narrow review, concise English. Prior full critical review plus F1-F6 follow-up PASS are docs/plans/paper-recovery-review-result.json and paper-recovery-followup-review-result.json. Do not repeat those reviews or the full suite. Only new production delta after that PASS: apply_recovery persists recovery_pending_since before any real reconciliation when preview predicts changed orders; successful metadata transaction also executes when this marker survived a crash even if changed_orders=0; it queues the existing idempotent correction and clears the marker atomically with audit; build_runtime rejects an unfinished marker before credentials. New test_restart_after_projection_commit_still_finishes_correction proved old code leaves old_report pending after projection commit + injected crash + retry; it now additionally checks startup is blocked until the retry finishes and clears the marker. Check this transaction boundary, no POST capability expansion, idempotency and completion. Only inspect relevant functions and the new test, use prior receipts for unchanged core. Parent runs full suite and tach. No network, credentials/env values, private runtime data, edits, commits or delegation; parent holds source stable. Return PASS/BLOCK and concrete material evidence.",
+    "acceptanceCriteria": ["A crash after projection commit cannot lose correction-report completion", "Recovery marker clears with report/audit commit and blocks premature runtime restart", "Transport and fill semantics remain unchanged"],
+    "verificationCommands": ["python scripts/verify-paper.py quantpilot/tests/unit/test_paper_recovery.py -q"]
+  }]
+}

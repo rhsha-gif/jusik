@@ -1,0 +1,20 @@
+{
+  "objective": "Verify the six bounded corrections from the independent paper-recovery review",
+  "decomposed": false,
+  "tasks": [{
+    "id": "paper-recovery-followup-review",
+    "agentRole": "reviewer",
+    "agentId": "aorch-reviewer",
+    "kind": "review",
+    "risk": "high",
+    "complexity": "standard",
+    "write": false,
+    "maxTurns": 24,
+    "allowedProviders": ["anthropic"],
+    "allowedScope": ["quantpilot/paper", "quantpilot/packages/core/execution/paper_reconciliation.py", "quantpilot/tests/unit/test_paper_recovery.py", "quantpilot/tests/unit/test_paper_submission_coordinator.py", "quantpilot/tests/unit/test_paper_review_regressions.py", "docs/plans", "docs/paper_intraday_runbook.md"],
+    "forbiddenScope": [".env*", ".claude", ".codex", ".agents"],
+    "objective": "READ ONLY bounded follow-up, concise English. Prior cross-provider critical review is .aorch/task-runs/0b808b55-da5d-4480-80b0-d72e8e51f2ca/paper-recovery-review/receipt.json. Its core transport/preview/atomic replay/provenance/locks criteria passed; do not repeat the full repository audit or full suite. Verify only F1-F6 corrections and their direct implications: F1 adds recovery.py with transport justification to the exact constructor inventory; F2 restores short-circuit audit reason; F3 catches ValueError in unknown-order datetime matching; F4 apply_recovery now queues the correction atomically while owner locks remain held, preserving uncertain deliveries; F5 quarantine covers nontrading hours and carried positions even mid-session; F6 new valuation.py records session-date/validity for close baselines, rolls only proven prior-session or first-day initial baselines, masks daily PnL separately, blocks new entries with unknown baseline, and updates runtime/report/dashboard/recovery integration. Review tests added to test_paper_recovery.py for malformed junk date plus valid unknown fill, pre-open/carried quarantine, apply-to-outbox wiring, stale prior close, chart preservation, unsafe factory flags. Parent's scoped regression set passed 56 tests; parent independently runs the full suite and tach in its configured tool venv. Verify fixtures are meaningful and no safety gate was weakened. Return PASS/BLOCK with exact evidence and material findings. No network, credentials/environment values, private runtime data, broker or Slack calls, edits, commits or delegation. You are not alone in the codebase; preserve all changes. Source stays stable until receipt.",
+    "acceptanceCriteria": ["F1-F3 are corrected without weakening transport or identity boundaries", "F4 correction wiring preserves pending history and never requeues uncertain deliveries", "F5 quarantines preopen and carried holdings while entries remain paused", "F6 cannot publish a stale daily baseline as confirmed and protection remains available"],
+    "verificationCommands": ["python scripts/verify-paper.py quantpilot/tests/unit/test_paper_recovery.py quantpilot/tests/unit/test_paper_review_regressions.py -q"]
+  }]
+}

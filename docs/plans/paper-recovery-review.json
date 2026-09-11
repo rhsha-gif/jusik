@@ -1,0 +1,20 @@
+{
+  "objective": "Independently review the approved paper execution recovery implementation before applying it to the paper ledger",
+  "decomposed": false,
+  "tasks": [{
+    "id": "paper-recovery-review",
+    "agentRole": "reviewer",
+    "agentId": "aorch-reviewer",
+    "kind": "review",
+    "risk": "critical",
+    "complexity": "high",
+    "write": false,
+    "maxTurns": 40,
+    "allowedProviders": ["anthropic"],
+    "allowedScope": ["quantpilot/paper", "quantpilot/packages/core/kis_paper.py", "quantpilot/packages/core/execution/paper_reconciliation.py", "quantpilot/packages/db", "quantpilot/tests", "scripts/verify-paper.py", "scripts/paper-runtime.ps1", "docs/plans/2026-09-11-paper-recovery.md"],
+    "forbiddenScope": [".env*", ".claude", ".codex", ".agents"],
+    "objective": "READ ONLY independent safety review in concise English. The owner approved implementing a recovery plan, with entries remaining paused, broker-evidence recovery, Slack correction reporting, and resumption of protection using the existing after-hours quarantine/next-session limit-exit policy. Actual query-only investigation proved the only mismatching field was orgn_odno containing ten ASCII zeros. Core matching and paper order_evidence now share a bounded zero-sentinel helper. Review new recovery.py, CLI reconcile preview/apply, broker projection/diagnostics/valuation, runtime backoff, reporting/outbox correction, jobs evidence readiness, and additive dashboard changes. Preview copies ledgers to memory; apply locks owners, previews, backs up, then invokes existing cumulative fill paths with an order-blocking transport. Verify lost-update/partial-write/idempotency, attribution, pause, freshness, privilege, reporting correctness, no POST replay, and reader behavior. Pre-existing dashboard work is uncommitted and preserved; review its current additive integration only as relevant. Existing scoped verification passed 52 tests. Read test_paper_recovery.py and run bounded offline checks via dedicated Python and scripts/verify-paper.py if useful. Never read secrets, environment values, private runtime/account data or call network/broker/Slack/provider tools. Do not edit, commit, delegate or revert anything; you are not alone in the codebase. Parent holds source stable during this review. Return PASS or BLOCK with precise material findings and evidence, explicitly distinguish hypotheses from confirmed defects.",
+    "acceptanceCriteria": ["Recovery cannot submit or cancel broker orders and default preview changes no source DB", "Matched cumulative fills replay exactly once across both DBs and errors keep entries blocked", "Account/provenance/owner locks and exact identity protections remain enforced", "Reports do not show incomplete valuations as confirmed and notification correction preserves uncertain delivery", "Existing protection, cancellation and live-disabled boundaries remain intact"],
+    "verificationCommands": ["python scripts/verify-paper.py quantpilot/tests/unit/test_paper_recovery.py -q"]
+  }]
+}

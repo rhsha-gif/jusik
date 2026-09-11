@@ -1,0 +1,40 @@
+{
+  "objective": "Independently review the approved paper execution recovery implementation before applying it to the paper ledger",
+  "decomposed": false,
+  "runId": "0b808b55-da5d-4480-80b0-d72e8e51f2ca",
+  "planFingerprint": "8bf5a5eb85c471e2f18c82497e5067da9af7d0c41ef3529525c595259b6d5b5f",
+  "status": "failed",
+  "results": [
+    {
+      "taskId": "paper-recovery-review",
+      "agentRole": "reviewer",
+      "agent": "aorch-reviewer",
+      "status": "failed",
+      "route": {
+        "provider": "anthropic",
+        "profileId": "claude-opus-deep",
+        "model": "opus",
+        "effort": "xhigh"
+      },
+      "error": "worker receipt marks 2 criterion(s) failed: Reports do not show incomplete valuations as confirmed and notification correction preserves uncertain delivery; Existing protection, cancellation and live-disabled boundaries remain intact; manual review required. Evidence: C:\\Users\\goyan\\OneDrive\\문서\\코덱스\\주식트레이더\\.aorch\\task-runs\\0b808b55-da5d-4480-80b0-d72e8e51f2ca\\paper-recovery-review\\verification.json",
+      "runDir": "C:\\Users\\goyan\\OneDrive\\문서\\코덱스\\주식트레이더\\.aorch\\task-runs\\0b808b55-da5d-4480-80b0-d72e8e51f2ca\\paper-recovery-review",
+      "attempts": [
+        {
+          "attempt": 1,
+          "route": {
+            "provider": "anthropic",
+            "profileId": "claude-opus-deep",
+            "model": "opus",
+            "effort": "xhigh"
+          },
+          "passed": false,
+          "changeGuardPassed": true,
+          "receiptStatus": "complete"
+        }
+      ]
+    }
+  ],
+  "ok": false,
+  "planPath": "C:\\Users\\goyan\\OneDrive\\문서\\코덱스\\주식트레이더\\.aorch\\task-runs\\0b808b55-da5d-4480-80b0-d72e8e51f2ca\\plan.json",
+  "resultPath": "C:\\Users\\goyan\\OneDrive\\문서\\코덱스\\주식트레이더\\.aorch\\task-runs\\0b808b55-da5d-4480-80b0-d72e8e51f2ca\\dispatch.json"
+}

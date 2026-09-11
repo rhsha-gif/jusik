@@ -96,3 +96,24 @@ python scripts/verify-paper.py
 실제 모의 API·슬랙 전송·Docker 코드 실행은 자동 테스트 통과와 구별해 기록한다. 과거 수익성을 운용 시작 조건으로 요구하지 않는다.
 
 참고: [한투 당일 분봉 공식 예제](https://github.com/koreainvestment/open-trading-api/blob/main/examples_llm/domestic_stock/inquire_time_itemchartprice/inquire_time_itemchartprice.py), [수급 공식 예제](https://github.com/koreainvestment/open-trading-api/blob/main/examples_llm/domestic_stock/inquire_investor/inquire_investor.py), [Codex 설정](https://developers.openai.com/codex/config-reference/).
+
+## 체결 누락 진단과 원장 복구
+
+`python -m quantpilot.paper --runtime-dir <원장> --json reconcile`은 브로커 잔고와
+일별 주문·체결을 조회하고 메모리에 복사한 원장에만 대사를 적용한다. 기본값은 읽기 전용이며
+`--dry-run`으로 명시할 수도 있다. 계좌 결합과 `paused` 상태가 필요하고 주문 제출 플래그는 필요 없다.
+
+`reconcile --apply`는 trader·worker·reporter·계좌 잠금을 모두 확보한 뒤 최신 미리보기,
+두 DB의 SQLite 백업, 실제 대사 순서로 처리한다. 해당 프로세스가 실행 중이면 실패한다.
+백업은 원장 디렉터리의 `recovery-backups`에 보관한다. 주문·취소 POST는 transport에서 차단한다.
+수량이나 매입가를 직접 입력하지 않으며, 커널 반영 뒤 중단돼도 재실행으로 누적 체결을 한 번만 반영한다.
+
+개장 전·장후·비거래일에 복구한 보유분과 이전 거래일의 이월분은 격리한다. 신규 진입 중지를
+유지하고 기존 운용기를 재시작하면 다음 거래 가능 시간에 대사·호가·위험 점검을 거쳐 지정가
+청산을 시도한다. 접수나 시각 도달만으로 청산 완료로 보지 않는다.
+
+변경이 반영되면 미전송 과거 보고는 보존한 채 `superseded`로 표시하고 정정 보고를 한 번 큐에 넣는다.
+Slack 설정은 자동으로 활성화하지 않으며, `delivery_unknown`은 재전송하지 않는다.
+정정 보고는 복구 적용 시점의 상태다. 재시작 후 현재 보호·전송 상태는 `status`로 확인한다.
+이전 자산 표본은 삭제하지 않고 그래프에서 제외한다. 전일 평가 기준이 불확실하면 당일 손익을
+확인 불가로 표시하고 신규 진입을 막는다. 실시간 평가와 누적 손익의 확인 여부는 별도로 표시한다.

@@ -359,7 +359,9 @@ def sample_once(ledger_path: Path, series: SeriesStore, now: datetime) -> bool:
     """Record mark-to-market equity when it changed, or at least every minute."""
 
     with ledger(ledger_path) as view:
-        report = snapshot(view)
+        report = snapshot(view, now=now)
+    if report["valuation_incomplete"] or report.get("daily_pnl_incomplete"):
+        return False
     sample = {
         "at": now.isoformat(),
         "equity": report["equity"],
@@ -454,6 +456,11 @@ def summary(ledger_path: Path, series_path: Path, timeline_limit: int = 200) -> 
             "audit": audit_tail(view),
         }
     payload["series"] = SeriesStore(series_path).recent() if series_path.is_file() else []
+    invalid_before = report.get("valuation_invalidated_before")
+    if invalid_before:
+        cutoff = datetime.fromisoformat(invalid_before)
+        # Preserve original samples on disk; exclude superseded valuations from charts.
+        payload["series"] = [s for s in payload["series"] if datetime.fromisoformat(s["at"]) >= cutoff]
     return payload
 
 
@@ -663,7 +670,10 @@ function alerts(d){
   if(r.collector_error)out.push(['warn','수집 오류',esc(r.collector_error)+' — 분봉 수집이 실패하고 있습니다.']);
   if((r.unverified_symbols||[]).length)out.push(['warn','보호 대기',r.unverified_symbols.map(esc).join(', ')+' — 브로커 수량 대사가 필요합니다.']);
   const q=r.positions.filter(p=>p.quarantined);if(q.length)out.push(['warn','격리 보유분',q.map(p=>esc(p.symbol)).join(', ')+' — 마감 미청산분이 격리되어 있습니다.']);
-  if(r.valuation_incomplete)out.push(['warn','평가 미확인','일부 보유분의 최신 시세가 없어 표시 자산에 취득원가가 섞여 있습니다.']);
+  if(r.valuation_incomplete)out.push(['warn','평가 미확인','대사 또는 평가 근거가 불완전해 손익을 확정할 수 없습니다. 원장 보유 0건이 브로커 미보유를 뜻하지 않습니다.']);
+  else if(r.daily_pnl_incomplete)out.push(['warn','당일 손익 미확인','직전 거래일의 평가 기준이 확인되지 않았습니다.']);
+  if(r.notification_status&&r.notification_status!=='ready')out.push(['warn','알림 상태',esc(r.notification_status)]);
+  if(r.valuation_invalidated_before)out.push(['warn','평가 기록 정정','복구 이전의 자산 표본은 보존되며 그래프에서 제외됩니다.']);
   const stale=(d.open_orders||[]).filter(o=>age(o.at)>600);
   if(stale.length)out.push(['warn','오래된 미종결 주문',stale.map(o=>esc(o.symbol)+' '+SIDE[o.side]+' '+o.quantity+'주 ('+ageText(age(o.at))+', '+esc(o.state)+')').join(' · ')]);
   if(r.flatten_pending)out.push(['warn','청산 진행 중','flatten 요청이 처리 중입니다. 잔량과 미체결을 확인하세요.']);
@@ -681,9 +691,9 @@ function render(d){
   alerts(d);
   const openN=(d.open_orders||[]).length;
   $('tiles').innerHTML=[
-    tile('평가자산',won(r.equity),'현금 '+won(r.cash)),
-    tile('당일 손익',won(r.daily_pnl),pct(r.daily_return),cls(r.daily_pnl)),
-    tile('누적 손익',won(r.cumulative_pnl),pct(r.cumulative_return),cls(r.cumulative_pnl)),
+    tile('평가자산',r.valuation_incomplete?'확인 불가':won(r.equity),'원장 현금 '+won(r.cash)),
+    tile('당일 손익',r.daily_pnl_incomplete?'확인 불가':won(r.daily_pnl),r.daily_pnl_incomplete?'대사·평가 기준 확인 필요':pct(r.daily_return),r.daily_pnl_incomplete?'':cls(r.daily_pnl)),
+    tile('누적 손익',r.valuation_incomplete?'확인 불가':won(r.cumulative_pnl),r.valuation_incomplete?'대사·평가 확인 필요':pct(r.cumulative_return),r.valuation_incomplete?'':cls(r.cumulative_pnl)),
     tile('실현 손익',won(r.realized_net_pnl),'비용 반영',cls(r.realized_net_pnl)),
     tile('보유 / 미종결',r.positions.length+' / '+openN,(r.intraday_loss_state?'손실 예산 잔여 '+won(r.intraday_loss_state.available):'')),
   ].join('');
@@ -692,7 +702,7 @@ function render(d){
   let live='';
   if(r.positions.length){live+=table([{t:'종목',l:1},{t:'전략',l:1},{t:'수량'},{t:'평가손익'},{t:'현재가'},{t:'손절'},{t:'목표'}],
     r.positions.map(p=>'<tr><td class="l">'+esc(p.symbol)+(p.quarantined?' <span class="badge warn">격리</span>':'')+'</td><td class="l">'+esc(sname(p.strategy))+'</td><td>'+p.quantity+'</td><td class="'+cls(p.unrealized)+'">'+won(p.unrealized)+'</td><td>'+(p.mark==null?'-':num(p.mark,0))+'</td><td>'+num(p.stop,0)+'</td><td>'+num(p.target,0)+'</td></tr>'));}
-  else live+='<div class="muted small">보유 포지션 없음</div>';
+  else live+='<div class="muted small">'+(r.reconciliation_complete?'보유 포지션 없음':'원장 보유 없음 · 브로커 잔고 확인 필요')+'</div>';
   if(openN){live+='<div style="height:8px"></div>'+table([{t:'미종결 주문',l:1},{t:'종목',l:1},{t:'수량'},{t:'체결'},{t:'지정가'},{t:'상태',l:1},{t:'경과'}],
     d.open_orders.map(o=>'<tr><td class="l">'+SIDE[o.side]+'</td><td class="l">'+esc(o.symbol)+'</td><td>'+o.quantity+'</td><td>'+o.filled+'</td><td>'+num(o.price,0)+'</td><td class="l">'+esc(o.state)+'</td><td>'+ageText(age(o.at))+'</td></tr>'));}
   else live+='<div class="muted small" style="margin-top:6px">미종결 주문 없음</div>';
@@ -710,6 +720,9 @@ function render(d){
   $('state').innerHTML='<div class="kv">'
     +'<div>제어</div><div>'+esc(r.control)+(r.flatten_pending?' (청산 진행 중)':'')+'</div>'
     +'<div>incident</div><div>'+esc(r.incident||'없음')+'</div>'
+    +'<div>마지막 대사 성공</div><div>'+kst(r.last_reconciled_at)+'</div>'
+    +'<div>보호 상태</div><div>'+esc(r.protection_status||'확인 필요')+'</div>'
+    +'<div>알림 상태</div><div>'+esc(r.notification_status||'확인 필요')+'</div>'
     +'<div>데이터 모드</div><div>'+esc(r.data_mode)+' · 전략 세대 '+esc(r.strategy_generation)+' · 정책 v'+r.policy_version+'</div>'
     +'<div>평가 모드</div><div>'+esc(r.assessment_mode)+'</div>'
     +'<div>활성 전략</div><div>'+d.active_strategies.map(s=>esc(sname(s))).join(', ')+'</div>'

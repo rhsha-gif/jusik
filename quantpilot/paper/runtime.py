@@ -11,6 +11,8 @@ from quantpilot.paper.calendar import KST
 from quantpilot.paper.config import environment_safe
 from quantpilot.paper.risk import entry_size, fresh_quote, limit_price, sell_quantity
 from quantpilot.paper.store import OPEN
+from quantpilot.packages.core.kis_paper import safe_failure
+from quantpilot.paper.valuation import roll_baselines, record_close
 
 
 class Runtime:
@@ -71,6 +73,10 @@ class Runtime:
             return {"status": "blocked", "reason": "paper_submission_disabled"}
         if self.store.get("control") == "stopped":
             return {"status": "stopped"}
+        self.store.put("heartbeat", now.isoformat())
+        retry_after = self.store.get("broker_retry_after")
+        if retry_after and now < datetime.fromisoformat(retry_after):
+            return {"status": "blocked", "reason": "broker_read_backoff"}
         session = self.calendar.session(now)
         if session is None:
             return {"status": "closed"}
@@ -101,6 +107,7 @@ class Runtime:
                 "ai_due", {"kind": "hourly", "key": f"{day}:hourly:{hourly}"}
             )
         begun = False
+        cycle_failed = False
         try:
             self.gateway.begin()
             begun = True
@@ -116,22 +123,7 @@ class Runtime:
                 self.store.audit("recovered", {"code": self.store.get("incident")}, now)
                 self.store.put("incident", None)
             positions = self.store.positions()
-            if self.store.get("day") != day:
-                self.store.put("day", day)
-                self.store.put(
-                    "day_base",
-                    self.store.get(
-                        "last_close_equity", self.store.get("initial_capital")
-                    ),
-                )
-            if self.store.get("month") != day[:7]:
-                self.store.put("month", day[:7])
-                self.store.put(
-                    "month_base",
-                    self.store.get(
-                        "last_close_equity", self.store.get("initial_capital")
-                    ),
-                )
+            roll_baselines(self.store, self.calendar, now)
             if now >= session.closes:
                 for p in positions:
                     self.store.db.execute(
@@ -140,7 +132,10 @@ class Runtime:
                     )
                 if positions:
                     self.alert("unclosed_positions_quarantined", now, block=False)
-                self.store.put("last_close_equity", self.equity())
+                from quantpilot.paper.reporting import snapshot
+                record_close(self.store, now,
+                             valid=not snapshot(self.store, now=now)["valuation_incomplete"],
+                             equity=self.equity())
                 self.store.put(
                     "ai_due", {"kind": "postclose", "key": day + ":postclose"}
                 )
@@ -153,6 +148,8 @@ class Runtime:
             ) != "running" or now >= session.closes - timedelta(
                 minutes=policy.entry_cutoff_minutes
             )
+            if policy.data_mode == "paper_trading" and not self.store.get("day_base_valid", False):
+                no_entries = True
             if policy.strategy_generation == "intraday_v2":
                 from quantpilot.paper.intraday.controls import feed_fresh
 
@@ -174,7 +171,7 @@ class Runtime:
                         self.alert("cancel_reconciliation_required", self.clock())
                         self.store.audit(
                             "cancel_failed",
-                            {"order_id": order["id"], "error": type(exc).__name__},
+                            {"order_id": order["id"], **safe_failure(exc, "cancel")},
                             self.clock(),
                         )
             if not self.gateway.reconcile(self.clock()):
@@ -503,16 +500,36 @@ class Runtime:
                 "data_mode": policy.data_mode,
             }
         except Exception as exc:
+            cycle_failed = True
             self.alert("execution_reconciliation_required", self.clock())
-            self.store.audit(
-                "cycle_failed", {"error": type(exc).__name__}, self.clock()
-            )
+            self.store.put("reconciliation_complete", False)
+            detail = getattr(exc, "detail", None) or safe_failure(exc, "execution_cycle")
+            if not isinstance(detail, dict) or "error" not in detail:
+                detail = safe_failure(exc, "execution_cycle")
+            previous = self.store.get("last_cycle_error", {})
+            at = self.clock()
+            key = ":".join(str(detail.get(k) or "") for k in ("stage", "error", "broker_code"))
+            counts = self.store.get("cycle_error_counts", {})
+            counts[key] = counts.get(key, 0) + 1
+            self.store.put("cycle_error_counts", counts)
+            if (previous.get("key") != key or not previous.get("at") or
+                    (at - datetime.fromisoformat(previous["at"])).total_seconds() >= 60):
+                self.store.audit("cycle_failed", detail | {"count": counts[key]}, at)
+                self.store.put("last_cycle_error", {"key": key, "at": at.isoformat()})
+            if detail["error"] == "KisPaperTransportError":
+                failures = min(6, self.store.get("broker_read_failures", 0) + 1)
+                self.store.put("broker_read_failures", failures)
+                self.store.put("broker_retry_after", (at + timedelta(seconds=min(60, 2 ** failures))).isoformat())
             if self.clock() >= session.closes:
+                record_close(self.store, self.clock(), valid=False)
                 self.store.put(
                     "ai_due", {"kind": "postclose", "key": day + ":postclose"}
                 )
             return {"status": "blocked", "reason": "execution_reconciliation_required"}
         finally:
+            if not cycle_failed:
+                self.store.put("broker_read_failures", 0)
+                self.store.put("broker_retry_after", None)
             if begun:
                 try:
                     self.gateway.end()

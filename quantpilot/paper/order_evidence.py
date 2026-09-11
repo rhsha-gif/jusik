@@ -1,6 +1,7 @@
 """Daily-order evidence is not native cancelable-quantity authority."""
 
 from decimal import Decimal
+from quantpilot.packages.core.kis_paper import is_original_order
 
 
 def daily_quantities_valid(row):
@@ -30,7 +31,7 @@ def daily_identity_matches(dispatch, row, business_date):
         and dispatch.broker_order_branch_number is not None
         and dispatch.broker_order_branch_number == row.order_branch_number
         and dispatch.broker_order_time == row.order_time
-        and row.original_order_number in {"", "0"}
+        and is_original_order(row.original_order_number)
         and dispatch.symbol == row.symbol
         and dispatch.side == row.side
         and Decimal(str(dispatch.quantity)) == row.order_quantity

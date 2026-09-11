@@ -17,6 +17,16 @@ def work_once(store, now=None, runner=None, sender=None):
     job = store.get("ai_due")
     if not job:
         return {"status": "idle"}
+    # An hourly job must remain claimable when initial collection has not arrived.
+    if job["kind"] != "postclose" and store.policy.ai_enabled:
+        from datetime import timedelta
+        try:
+            observed = datetime.fromisoformat(store.get("evidence", {})["observed_at"])
+            valid = observed.tzinfo is not None and observed <= now < observed + timedelta(minutes=75)
+        except (KeyError, TypeError, ValueError):
+            valid = False
+        if not valid:
+            return {"status": "waiting_for_evidence", "job": job["key"]}
     with store.transaction():
         claimed = store.db.execute(
             "INSERT OR IGNORE INTO jobs(id,kind,state,at) VALUES(?,?,'running',?)",

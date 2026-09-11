@@ -28,7 +28,10 @@ python -m quantpilot.paper --json pause
 python -m quantpilot.paper --json resume
 python -m quantpilot.paper --json flatten
 python -m quantpilot.paper --json report
+python -m quantpilot.paper --runtime-dir <원장 디렉터리> dashboard --port 8770
 ```
+
+`dashboard`는 읽기 전용 현황 페이지다. 원장을 `mode=ro`로만 열고 127.0.0.1에만 바인딩하며 trader·worker·reporter 잠금을 잡지 않는다. 첫 화면에는 주의 경고(incident·손실 한도·오래된 미종결 주문·보호 대기·격리), 자산·손익 타일, 평가자산 곡선, 보유·미종결 주문, 전략별 요약만 둔다. 왕복 거래·주문 타임라인·운영 상태 상세·후보 종목 상태·감사 기록은 접힌 섹션이며 펼침 상태는 브라우저에만 저장된다. 5초마다 다시 읽는다. 평가자산 곡선은 이 프로세스가 `dashboard.sqlite3`에 직접 표본을 저장하므로 서버가 꺼진 시간은 비어 있다. 제어 명령은 제공하지 않으며 `powershell -NoProfile -File scripts/paper-runtime.ps1 -Action Dashboard -RuntimeDirectory <원장 디렉터리>`로 숨김 창에서 시작할 수 있다. 기본 포트 8770이 사용 중이면 실행 중인 프로세스를 종료하지 말고 `--port`로 다른 포트를 지정한다.
 
 설정 갱신에는 조회한 현재 버전을 전달한다. 예를 들어 PowerShell에서:
 

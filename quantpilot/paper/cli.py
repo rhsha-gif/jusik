@@ -110,7 +110,22 @@ def parser():
     conf.add_argument("--expected-version", type=int)
     review = sub.add_parser("review-drawdown")
     review.add_argument("--reason", required=True)
+    dashboard = sub.add_parser("dashboard")
+    dashboard.add_argument("--port", type=int, default=8770)
+    dashboard.add_argument("--sample-seconds", type=float, default=10)
     return p
+
+
+def blocked_result(exc):
+    # Never print transport/provider/config exception strings containing external payloads.
+    result = {"status": "blocked", "reason": type(exc).__name__}
+    if (
+        isinstance(exc, ValueError)
+        and len(str(exc)) < 100
+        and str(exc).replace("_", "").isalnum()
+    ):
+        result["reason"] = str(exc)
+    return result
 
 
 def main(argv=None):
@@ -124,6 +139,19 @@ def main(argv=None):
             )
         )
         return 2
+    if args.command == "dashboard":
+        # Read-only viewer: never constructs Store (a writer) and takes no trader lock.
+        from quantpilot.paper.dashboard import serve
+
+        try:
+            serve(directory, args.port, args.sample_seconds)
+        except KeyboardInterrupt:
+            print(json.dumps({"status": "dashboard_stopped"}))
+            return 130
+        except Exception as exc:
+            print(json.dumps(blocked_result(exc)))
+            return 2
+        return 0
     store = Store(directory / "experiment.sqlite3")
     try:
         if args.command in {"status", "report"}:
@@ -225,15 +253,7 @@ def main(argv=None):
         )
         return 130
     except Exception as exc:
-        # Never print transport/provider/config exception strings containing external payloads.
-        result = {"status": "blocked", "reason": type(exc).__name__}
-        if (
-            isinstance(exc, ValueError)
-            and len(str(exc)) < 100
-            and str(exc).replace("_", "").isalnum()
-        ):
-            result["reason"] = str(exc)
-        print(json.dumps(result))
+        print(json.dumps(blocked_result(exc)))
         return 2
     finally:
         store.close()

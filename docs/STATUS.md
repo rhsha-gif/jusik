@@ -1,5 +1,18 @@
 # QuantPilot 현재 상태 (living document)
 
+## 최근 완료 (2026-09-11, 읽기 전용 모의운용 대시보드)
+
+`python -m quantpilot.paper --runtime-dir <원장> dashboard`가 127.0.0.1 로컬 페이지로
+활성 전략, 전략별 왕복 거래·승률·평균 R·낙폭, 보유·미체결·운영 상태, 감사 기록을 보여준다
+(`quantpilot/paper/dashboard.py`, [운용 문서](paper_intraday_runbook.md)). 원장은 `mode=ro`로만
+열고 trader 잠금과 쓰기 경로를 건드리지 않는다. 매도 주문이 매수를 참조하지 않으므로 왕복 거래는
+주문 재생으로 복원한다. 평가자산 곡선은 대시보드가 `dashboard.sqlite3`에 직접 표본을 저장한다.
+검증: 전용 venv `scripts/verify-paper.py` **1,608 passed·2 skipped**, smoke·`tach check` 통과.
+실제 시험 원장에 붙여 페이지·요약 응답과 `PRAGMA data_version` 불변을 확인했고 브라우저 캡처로
+배치를 점검했다. 첫 화면은 경고·자산·열린 포지션/주문·전략 요약이고 나머지는 접힌 섹션이다.
+감사 기록은 연속 동일 항목을 건수로 접는다.
+기본 포트는 8770이다(8765는 이 PC에서 Anki가 사용). 제어 버튼은 없다.
+
 ## 9월 11일 시험운영 준비 (2026-09-10)
 
 [전용 운영표](paper_trial_20260911.md)와 주문 없는 Readiness 점검을 추가했다.
@@ -21,7 +34,7 @@ Slack 수정 후 최종 검증 **1,489 passed·2 skipped**, smoke·tach 통과.
 
 > 이 문서는 시점별 보고서가 아니라 **갱신형 현황판**입니다.
 > 스테이지가 끝날 때마다 이 파일을 덮어쓰고, 상세 근거는 기존 `docs/*_report.md`에 남깁니다.
-> 마지막 갱신: **2026-09-10**
+> 마지막 갱신: **2026-09-11**
 
 ## 목적 (한 줄)
 
@@ -32,6 +45,7 @@ Slack 수정 후 최종 검증 **1,489 passed·2 skipped**, smoke·tach 통과.
 | 영역 | 상태 | 비고 |
 |---|---|---|
 | CLI 모의운용 하네스 | ✅ 구현·자동 검증 완료 | `quantpilot.paper`; 실제 API·Slack·Docker 인수는 미완료 |
+| 모의운용 읽기 전용 대시보드 | ✅ 완료 (2026-09-11) | `quantpilot.paper dashboard`, loopback 전용, 원장 `mode=ro`, 제어 없음 |
 | 구형 웹 클라이언트 | 제거 완료 | 2026-09-10 승인 목록 59개 삭제; 아래 Level·UI 관련 항목은 구형 구현의 역사적 상태 |
 | Level 1-2 신호→제안/모의체결 | ✅ 완료 | `/run` 제안 전용, `/mock-execute` MockBroker 체결 + 타이밍 판단 요약 |
 | Level 3 승인 기반 오토파일럿 | ✅ 완료 (플래그 잠김) | 제안 생성→사용자 승인→제출; UI는 승인 티켓 레일만 연결되고 `/api/orders/*`는 API 전용 — 2026-09-03 확인: `FULLY_AUTOMATED_OPERATOR_ENABLED=true`를 일반 런타임(API·`run_smoke`)에 주면 `generic_runtime_rejects_paper_arming_environment`로 기동 자체를 거부하므로(`services/api/dependencies.py:56`) 잠금 해제 도그푸딩은 `QUANTPILOT_RUNTIME_ROLE=paper-session` 잡 경로에서만 가능 |

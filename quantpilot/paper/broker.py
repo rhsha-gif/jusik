@@ -6,6 +6,7 @@ from decimal import Decimal
 
 from quantpilot.paper.store import OPEN, TERMINAL
 from quantpilot.paper.risk import fresh_quote, authorize_order
+from quantpilot.paper.order_evidence import daily_identity_matches, daily_quantities_valid
 from quantpilot.packages.core.schemas import (
     OrderIntent,
     OrderPlan,
@@ -149,24 +150,29 @@ class KisGateway:
             if remote.get(symbol) == quantity
         }
         self.store.put("unverified_symbols", sorted(set(local) - self.verified_symbols))
-        from quantpilot.packages.core.execution.paper_kill import (
-            _cancel_identity_matches,
-        )
         from quantpilot.paper.calendar import KST
 
+        business_date = now.astimezone(KST).date()
+        rows = self.client.get_daily_orders_and_fills(
+            business_date, business_date, exchange="KRX", as_of_date=business_date,
+        ).rows
         dispatches = self.kernel.list_paper_order_dispatches()
+        # Terminal, conserved rows need no working-order attribution. Invalid or
+        # ambiguous daily evidence blocks entries rather than disappearing as zero.
+        invalid_rows = any(not daily_quantities_valid(row) for row in rows)
+        identities = [(r.order_date, r.order_branch_number, r.order_number) for r in rows]
+        duplicate_rows = len(identities) != len(set(identities))
         unmatched_rows = [
             row
-            for row in self.client.get_cancelable_orders().rows
+            for row in rows
+            if row.remaining_quantity > 0
             if not any(
-                _cancel_identity_matches(
-                    d, row, business_date=now.astimezone(KST).date()
-                )
+                daily_identity_matches(d, row, business_date)
                 for d in dispatches
             )
         ]
-        unmanaged = bool(unmatched_rows)
-        known_state_changed = unmanaged and all(
+        unmanaged = bool(unmatched_rows) or invalid_rows or duplicate_rows
+        known_state_changed = bool(unmatched_rows) and all(
             any(
                 d.broker_order_reference == row.order_number
                 and d.broker_order_branch_number == row.order_branch_number
@@ -181,7 +187,9 @@ class KisGateway:
             "reconciliation_reason",
             (
                 (
-                    "known_order_state_changed"
+                    "daily_order_evidence_invalid"
+                    if invalid_rows or duplicate_rows
+                    else "known_order_state_changed"
                     if known_state_changed
                     else "external_working_order"
                 )
@@ -381,39 +389,38 @@ class KisGateway:
             return
         if dispatch.status not in {"accepted", "partially_filled"}:
             return
-        rows = self.client.get_cancelable_orders().rows
-        from quantpilot.packages.core.execution.paper_kill import (
-            _cancel_identity_matches,
-        )
         from quantpilot.paper.calendar import KST
 
+        business_date = now.astimezone(KST).date()
+        rows = self.client.get_daily_orders_and_fills(
+            business_date, business_date, exchange="KRX", as_of_date=business_date,
+        ).rows
         matches = [
             r
             for r in rows
-            if _cancel_identity_matches(
-                dispatch, r, business_date=now.astimezone(KST).date()
-            )
-            and r.order_division_code == "00"
+            if r.remaining_quantity > 0
+            and daily_identity_matches(dispatch, r, business_date)
         ]
-        if len(matches) != 1:
+        if len(matches) != 1 or not dispatch.broker_forwarding_order_org_number:
             self.store.audit(
                 "cancel_deferred_to_reconciliation", {"order_id": order["id"]}, now
             )
             return
-        row = matches[0]
         with self.store.transaction():
             self.store.put("cancel_claim:" + order["id"], True)
+            self.store.audit("cancel_claimed", {"order_id": order["id"]}, now)
             self.store.update_order(
                 order["id"], "cancel_unknown", order["filled"], order["amount"], now
             )
         # A crash/timeout after the claim is query-only, never an automatic re-POST.
-        self.client.cancel_full_remaining_order(
-            order_branch_number=row.order_branch_number,
-            original_order_number=row.order_number,
-            order_division_code=row.order_division_code,
-            cancelable_quantity=row.cancelable_quantity,
-            original_order_price=row.order_price,
+        acknowledgement = self.client.cancel_paper_remaining_order(
+            forwarding_org_number=dispatch.broker_forwarding_order_org_number,
+            original_order_number=dispatch.broker_order_reference,
         )
+        self.store.audit("cancel_acknowledged", {
+            "order_id": order["id"], "message_code": acknowledgement.message_code,
+            "final_state_confirmed": False,
+        }, now)
 
 
 class FixtureGateway:

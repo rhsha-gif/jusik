@@ -54,7 +54,7 @@ def test_exclusive_restart_reclaims_orphan_before_lease_expiry(tmp_path):
 def test_cancel_fill_race_is_query_only(tmp_path):
     store = Store(tmp_path / "s")
     client = Client()
-    client.get_cancelable_orders = lambda: SimpleNamespace(rows=[])
+    client.get_daily_orders_and_fills = lambda *args, **kwargs: SimpleNamespace(rows=[])
     gateway = KisGateway(store, client, None, lambda: NOW)
     # Dispatch load is the only seam; zero rows must never reach POST.
     gateway.kernel.load_paper_order_dispatch = lambda _: SimpleNamespace(

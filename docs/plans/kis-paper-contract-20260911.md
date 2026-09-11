@@ -26,12 +26,14 @@ Regression tests cover both spellings, conflicts, missing/negative/nonfinite/fra
 
 ## Runtime evidence and remaining prerequisite
 
+**Superseded prerequisite:** Subsequent [OSS implementation research](kis-paper-oss-research-20260911.md) found direct full-remaining cancellation paths and a maintainer-reported paper-account success with the current TR. Broker clarification is no longer treated as the sole route forward. The historical question below remains unsent; the next prerequisite is implementation, independent review and bounded KIS paper verification. No startup or successful paper fill is established by this revision.
+
 Read-only balance and daily-order probes passed again. Native unsupported inquiry is no longer repeatedly called by the external diagnostic script. The trader remains stopped with its control paused; no new order was submitted. Minute collection continues separately with no order authority. These observations do not establish a successful paper trading session.
 
 Independent architecture review identified the same cancellation contract gap. The cross-provider design review exhausted its turn limit without a final receipt; it is not a PASS. The parser correction receives separate verification/review and does not authorize trading.
 
-The exact question requiring broker clarification is:
+The question formulated before the OSS investigation was:
 
 > 모의투자에서 주식정정취소가능주문조회는 미지원인데, `VTTC0013U` 전량취소(`QTY_ALL_ORD_YN=Y`)를 원주문 접수 식별자와 일별 주문·체결 조회로 확인한 뒤 호출해도 되나요? 이 경우 `ORD_QTY`에는 어떤 값을 보내야 하며, 취소 요청 중 추가 체결이 발생하면 어느 잔량을 대상으로 처리되나요?
 
-This question has not been sent externally. No owner approval is treated as a substitute for the missing broker contract. Until clarified and tested, the cancellation prerequisite and existing fail-closed startup behavior remain intact.
+This question has not been sent externally. The earlier conclusion that a broker answer was mandatory was too strong and is superseded above. Existing fail-closed startup behavior remains intact until the replacement execution path is implemented and verified.

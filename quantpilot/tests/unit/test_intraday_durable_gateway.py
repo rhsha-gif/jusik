@@ -65,6 +65,8 @@ class Client(FakePaperClient):
         )
 
     def get_daily_orders_and_fills(self, *args, **kw):
+        if not self.order_calls and not self.filled:
+            return KisDailyOrdersResult((), 1)
         return KisDailyOrdersResult(
             (
                 KisDailyOrderFill(

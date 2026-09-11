@@ -374,6 +374,8 @@ def _row_consistency_error(
         return "broker_quantity_negative"
     if filled > quantity or filled + remaining + rejected + cancelled > quantity:
         return "broker_quantity_inconsistent"
+    if row.cancelled and filled + remaining + rejected + cancelled != quantity:
+        return "broker_quantity_inconsistent"
     if row.total_filled_amount < 0 or row.average_fill_price < 0:
         return "broker_amount_negative"
     if filled == 0 and row.total_filled_amount != 0:

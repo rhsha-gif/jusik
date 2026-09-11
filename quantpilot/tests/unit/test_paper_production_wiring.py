@@ -35,6 +35,7 @@ def test_refreshed_real_client_reaches_the_closed_order_transport(tmp_path):
             assert method == "POST" and url.endswith(
                 "/uapi/domestic-stock/v1/trading/order-cash"
             )
+            fixture.order_calls += 1
             return KisHttpResponse(
                 200,
                 {

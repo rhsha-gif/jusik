@@ -466,6 +466,18 @@ class KisCancelOrderResult:
     transaction_id: str = KIS_CANCEL_ORDER_TR_ID
 
 
+@dataclass(frozen=True)
+class KisCancelAcknowledgement:
+    """Transport acceptance only; quantities require daily-order reconciliation."""
+
+    original_order_number: str
+    cancel_order_number: str
+    forwarding_org_number: str
+    order_time: str
+    message_code: str
+    transaction_id: str = KIS_CANCEL_ORDER_TR_ID
+
+
 class KisPaperClient:
     def __init__(
         self,
@@ -887,6 +899,49 @@ class KisPaperClient:
             "EXCG_ID_DVSN_CD": "KRX",
             "CNDT_PRIC": "",
         }
+        ack = self._submit_cancel_request(body, original_number)
+        return KisCancelOrderResult(
+            original_order_number=ack.original_order_number,
+            cancel_order_number=ack.cancel_order_number,
+            order_branch_number=ack.forwarding_org_number,
+            cancelled_quantity=cancelable_quantity,
+            order_time=ack.order_time,
+            message_code=ack.message_code,
+        )
+
+    def cancel_paper_remaining_order(
+        self, *, forwarding_org_number: str, original_order_number: str,
+        exchange: str = "KRX",
+    ) -> KisCancelAcknowledgement:
+        """One paper limit-order full-remaining request, without native psbl inquiry.
+
+        The caller must hold durable cancellation authority for the original order.
+        Zero quantity means all remaining, not a confirmed cancelled quantity.
+        """
+        _validate_exchange(exchange)
+        forwarding = _validate_digit_identifier(
+            forwarding_org_number, "cancel forwarding organization", maximum_length=8,
+        )
+        original = _validate_digit_identifier(
+            original_order_number, "cancel original order number", maximum_length=16,
+        )
+        return self._submit_cancel_request({
+            "CANO": self._config.account_number,
+            "ACNT_PRDT_CD": self._config.product_code,
+            "KRX_FWDG_ORD_ORGNO": forwarding,
+            "ORGN_ODNO": original,
+            "ORD_DVSN": "00",
+            "RVSE_CNCL_DVSN_CD": "02",
+            "ORD_QTY": "0",
+            "ORD_UNPR": "0",
+            "QTY_ALL_ORD_YN": "Y",
+            "EXCG_ID_DVSN_CD": "KRX",
+            "CNDT_PRIC": "",
+        }, original)
+
+    def _submit_cancel_request(
+        self, body: Mapping[str, str], original_number: str,
+    ) -> KisCancelAcknowledgement:
         try:
             response = self._request(
                 "POST",
@@ -932,11 +987,10 @@ class KisPaperClient:
             raise KisPaperCancelOutcomeUnknown(
                 "KIS paper cancel-order outcome is unknown; reconcile before any retry"
             ) from None
-        return KisCancelOrderResult(
+        return KisCancelAcknowledgement(
             original_order_number=original_number,
             cancel_order_number=cancel_order_number,
-            order_branch_number=forwarding_number,
-            cancelled_quantity=cancelable_quantity,
+            forwarding_org_number=forwarding_number,
             order_time=order_time,
             message_code=message_code,
         )

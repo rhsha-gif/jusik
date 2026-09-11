@@ -678,6 +678,53 @@ def test_cancel_business_rejection_is_definitive_and_not_unknown() -> None:
     assert len(transport.calls) == 1
 
 
+def test_paper_full_remaining_cancel_is_ack_only_and_uses_original_forwarding_id():
+    transport = RecordingTransport(_response({
+        "rt_cd": "0", "msg_cd": "40630000", "output": {
+            "KRX_FWDG_ORD_ORGNO": "91234", "ODNO": "0000099999",
+            "ORD_TMD": "101531",
+        },
+    }))
+    client = KisPaperClient(_config(), transport=transport)
+    ack = client.cancel_paper_remaining_order(
+        forwarding_org_number="91234", original_order_number="0000012345",
+    )
+    assert ack.original_order_number == "0000012345"
+    assert not hasattr(ack, "cancelled_quantity")
+    assert len(transport.calls) == 1
+    call = transport.calls[0]
+    assert call["headers"]["tr_id"] == "VTTC0013U"
+    assert call["body"]["KRX_FWDG_ORD_ORGNO"] == "91234"
+    assert call["body"]["ORD_QTY"] == call["body"]["ORD_UNPR"] == "0"
+    assert call["body"]["QTY_ALL_ORD_YN"] == "Y"
+    assert call["body"]["ORD_DVSN"] == "00"
+    assert call["body"]["RVSE_CNCL_DVSN_CD"] == "02"
+    assert call["body"]["EXCG_ID_DVSN_CD"] == "KRX"
+
+
+@pytest.mark.parametrize("org", ["", "abc", "123456789"])
+def test_paper_remaining_cancel_requires_forwarding_identity_before_post(org):
+    transport = RecordingTransport()
+    client = KisPaperClient(_config(), transport=transport)
+    with pytest.raises(KisPaperConfigurationError):
+        client.cancel_paper_remaining_order(
+            forwarding_org_number=org, original_order_number="0000012345",
+        )
+    assert not transport.calls
+
+
+@pytest.mark.parametrize("outcome", [TimeoutError("fixture"),
+    _response({"rt_cd": "0", "msg_cd": "40630000", "output": {}})])
+def test_paper_remaining_cancel_never_retries_unknown_response(outcome):
+    transport = RecordingTransport(outcome)
+    client = KisPaperClient(_config(), transport=transport)
+    with pytest.raises(KisPaperCancelOutcomeUnknown):
+        client.cancel_paper_remaining_order(
+            forwarding_org_number="91234", original_order_number="0000012345",
+        )
+    assert len(transport.calls) == 1
+
+
 def test_daily_order_window_uses_calendar_months_instead_of_fixed_days() -> None:
     assert kis_recent_three_month_start(date(2026, 7, 10)) == date(2026, 4, 10)
     assert kis_recent_three_month_start(date(2026, 5, 31)) == date(2026, 2, 28)

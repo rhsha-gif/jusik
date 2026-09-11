@@ -334,6 +334,12 @@ class Runtime:
                 self.store.put("universe_source", source)
             for symbol in self.store.get("universe", []):
                 try:
+                    from quantpilot.paper.risk import data_quarantined
+
+                    if data_quarantined(self.store, symbol, self.clock()):
+                        self.store.put("candidate_status:" + symbol,
+                                       "completed_bar_revised_quarantined")
+                        continue
                     fetched_at = self.clock()
                     if not self.background_data:
                         bars = self.market.minutes(symbol, fetched_at)

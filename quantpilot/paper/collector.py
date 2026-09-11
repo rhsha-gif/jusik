@@ -4,6 +4,7 @@ from datetime import datetime
 import threading
 
 from quantpilot.paper.store import Store
+from quantpilot.paper.calendar import KST
 
 
 class Collector:
@@ -76,6 +77,14 @@ class Collector:
                     },
                 )
             except Exception as exc:
+                if isinstance(exc, ValueError) and str(exc) == "completed_bar_revised":
+                    store.put("data_quarantine:" + symbol, {
+                        "day": observed.astimezone(KST).date().isoformat(),
+                        "reason": "completed_bar_revised",
+                    })
+                    store.audit("market_data_quarantined", {
+                        "symbol": symbol, "reason": "completed_bar_revised",
+                    }, observed)
                 store.put("candidate_status:" + symbol, type(exc).__name__)
         store.put("collector_heartbeat", self.clock().isoformat())
         if observations:

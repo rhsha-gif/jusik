@@ -4,6 +4,12 @@ from __future__ import annotations
 import math
 from datetime import datetime
 from quantpilot.paper.config import aware
+from quantpilot.paper.calendar import KST
+
+
+def data_quarantined(store, symbol, now):
+    quarantine = store.get("data_quarantine:" + symbol)
+    return bool(quarantine and quarantine["day"] == now.astimezone(KST).date().isoformat())
 
 
 def fresh_quote(quote, now, ttl):
@@ -43,6 +49,8 @@ def limit_price(quote, side):
 
 def entry_size(store, signal, quote, weight, now, *, trial=False, ignore_order_id=None):
     policy = store.policy
+    if data_quarantined(store, signal.symbol, now):
+        return 0
     if signal.strategy_id not in policy.active_strategies:
         from quantpilot.paper.research import candidates
 

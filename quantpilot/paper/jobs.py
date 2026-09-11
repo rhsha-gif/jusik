@@ -41,6 +41,12 @@ def work_once(store, now=None, runner=None, sender=None):
             symbols=evidence.get("symbols", []),
             strategies=list(store.policy.active_strategies),
         )
+        if store.policy.strategy_generation == "intraday_v2":
+            store.audit(
+                "intraday_advisory_input",
+                {"job": job["key"], "evidence": evidence},
+                now,
+            )
         if job["kind"] == "postclose":
             evidence = dict(evidence, report=snapshot(store))
             result = run_review(
@@ -58,6 +64,14 @@ def work_once(store, now=None, runner=None, sender=None):
                 evidence, observed, primary=store.policy.primary_ai, runner=runner
             )
             if not isinstance(result, IntelligenceError):
+                if store.policy.strategy_generation == "intraday_v2":
+                    result = result.model_copy(
+                        update={
+                            "expires_at": min(
+                                result.expires_at, observed + timedelta(minutes=30)
+                            )
+                        }
+                    )
                 store.put("assessment", result.model_dump(mode="json"))
         if isinstance(result, IntelligenceError):
             error = result.code.value
@@ -87,6 +101,12 @@ def work_once(store, now=None, runner=None, sender=None):
             "UPDATE jobs SET state=?,result=?,error=? WHERE id=?",
             ("failed" if error else "completed", encode(payload), error, job["key"]),
         )
+        if store.policy.strategy_generation == "intraday_v2":
+            store.audit(
+                "intraday_advisory_result",
+                {"job": job["key"], "result": payload, "error": error},
+                now,
+            )
         if report is not None:
             store.put("last_report", report)
             store.enqueue("report:" + job["key"], render(report, review), now)

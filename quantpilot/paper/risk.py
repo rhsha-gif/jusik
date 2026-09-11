@@ -126,13 +126,54 @@ def entry_size(store, signal, quote, weight, now, *, trial=False, ignore_order_i
     roundtrip = (
         2 * policy.fee_bps + policy.sell_tax_bps + 2 * policy.slippage_bps
     ) / 10000
+    risk_budget = equity * policy.trade_risk
+    if policy.strategy_generation == "intraday_v2":
+        from quantpilot.paper.intraday.controls import (
+            feed_fresh,
+            loss_budget,
+            universe_current,
+        )
+        from quantpilot.paper.intraday.deployment import admitted
+
+        if not admitted(
+            store, signal.strategy_id, getattr(signal, "version", None)
+        ) or not feed_fresh(store, now, signal.symbol):
+            return 0
+        if store.get("incident") or not universe_current(store, signal.symbol, now):
+            return 0
+        mark_times = store.get("marks_at", {})
+        for position in positions:
+            mark_at = datetime.fromisoformat(
+                mark_times.get(position["symbol"], position["opened"])
+            )
+            if not 0 <= (now - mark_at).total_seconds() < policy.quote_ttl_seconds:
+                return 0
+        # Use an executable target tick and charge both legs before ranking or sizing.
+        target = math.floor(signal.target / tick(signal.target)) * tick(signal.target)
+        net_target = target * (
+            1 - (policy.fee_bps + policy.sell_tax_bps + policy.slippage_bps) / 10000
+        ) - price * (1 + (policy.fee_bps + policy.slippage_bps) / 10000)
+        if net_target <= 0:
+            return 0
+        budget = loss_budget(store, now, ignore_order_id)
+        risk_budget = min(
+            risk_budget, budget["equity"] * policy.trade_risk, budget["available"]
+        )
+        cash_budget = max(
+            0,
+            min(
+                cash_budget,
+                budget["equity"] * policy.symbol_cap,
+                budget["equity"] * cap - strategy_used,
+            ),
+        )
     per_share_risk = price - signal.stop + price * roundtrip
     return max(
         0,
         math.floor(
             min(
                 cash_budget / (price * (1 + policy.fee_bps / 10000)),
-                equity * policy.trade_risk / per_share_risk,
+                risk_budget / per_share_risk,
             )
         ),
     )

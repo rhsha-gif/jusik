@@ -52,6 +52,11 @@ def snapshot(store):
         "data_mode": store.policy.data_mode,
         "control": store.get("control"),
         "policy_version": store.policy.version,
+        "strategy_generation": store.policy.strategy_generation,
+        "intraday_loss_state": store.get("intraday_loss_state"),
+        "intraday_qualified_versions": {
+            s: r.get("version") for s, r in store.get("intraday_admission", {}).items()
+        },
         "ai_failures": failures,
         "research": store.get("last_research", {"status": "disabled"}),
         "strategy_proposal": propose_concentration(store),
@@ -107,6 +112,15 @@ def render(report, review=""):
         lines.append(
             "일부 보유분은 최신 평가 미확인: 표시 자산에 취득원가 평가가 포함됩니다."
         )
+    loss = report.get("intraday_loss_state")
+    if loss:
+        lines.append(
+            f"신규 진입 잔여 손실 예산 {loss['available']:,.0f}원 · 예약 {loss['reserved']:,.0f}원"
+        )
+        if loss.get("daily_halted"):
+            lines.append("당일 손실 한도 도달: 다음 거래일까지 신규 진입 중단")
+        if loss.get("drawdown_halted"):
+            lines.append("누적 낙폭 한도 도달: 원인 검토와 명시적 재개 필요")
     if report.get("unverified_symbols"):
         lines.append(
             "보호 대기: "

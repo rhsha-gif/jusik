@@ -12,6 +12,7 @@ dependencies = [
 
 [project.optional-dependencies]
 paper = [
+  "websockets==15.0.1",
   "exchange-calendars==4.13.2",
   "fastapi==0.133.1",
   "starlette==1.0.1",

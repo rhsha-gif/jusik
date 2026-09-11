@@ -108,6 +108,8 @@ def parser():
     conf = sub.add_parser("config")
     conf.add_argument("--set", dest="changes")
     conf.add_argument("--expected-version", type=int)
+    review = sub.add_parser("review-drawdown")
+    review.add_argument("--reason", required=True)
     return p
 
 
@@ -142,6 +144,13 @@ def main(argv=None):
                 "lab": [
                     json.loads(r[0]) for r in store.db.execute("SELECT body FROM lab")
                 ],
+            }
+        elif args.command == "review-drawdown":
+            store.review_intraday_halt(args.reason, datetime.now(timezone.utc))
+            result = {
+                "control": store.get("control"),
+                "drawdown_reviewed": True,
+                "orders_armed": False,
             }
         elif args.command in {"pause", "resume", "flatten"}:
             store.control(args.command)

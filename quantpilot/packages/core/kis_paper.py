@@ -20,6 +20,7 @@ from typing import Any, Literal, Protocol, runtime_checkable
 
 KIS_PAPER_BASE_URL = "https://openapivts.koreainvestment.com:29443"
 KIS_TOKEN_ENDPOINT = "/oauth2/tokenP"
+KIS_WS_APPROVAL_ENDPOINT = "/oauth2/Approval"
 KIS_CURRENT_PRICE_ENDPOINT = "/uapi/domestic-stock/v1/quotations/inquire-price"
 KIS_CURRENT_PRICE_TR_ID = "FHKST01010100"
 KIS_L2_ENDPOINT = "/uapi/domestic-stock/v1/quotations/inquire-asking-price-exp-ccn"
@@ -44,6 +45,7 @@ _PAPER_PORT = 29443
 _ALLOWED_ENDPOINTS = frozenset(
     {
         KIS_TOKEN_ENDPOINT,
+        KIS_WS_APPROVAL_ENDPOINT,
         KIS_CURRENT_PRICE_ENDPOINT,
         KIS_L2_ENDPOINT,
         KIS_DAILY_PRICE_ENDPOINT,

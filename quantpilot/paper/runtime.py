@@ -92,7 +92,11 @@ class Runtime:
             self.store.put("ai_due", {"kind": "preopen", "key": day + ":preopen"})
             return {"status": "preopen"}
         hourly = max(0, int((now - session.opens).total_seconds() // 3600))
-        if hourly >= 1 and now < session.closes:
+        if (
+            policy.strategy_generation == "legacy"
+            and hourly >= 1
+            and now < session.closes
+        ):
             self.store.put(
                 "ai_due", {"kind": "hourly", "key": f"{day}:hourly:{hourly}"}
             )
@@ -149,6 +153,17 @@ class Runtime:
             ) != "running" or now >= session.closes - timedelta(
                 minutes=policy.entry_cutoff_minutes
             )
+            if policy.strategy_generation == "intraday_v2":
+                from quantpilot.paper.intraday.controls import feed_fresh
+
+                loss_state = self.store.get("intraday_loss_state", {})
+                no_entries = (
+                    no_entries
+                    or loss_state.get("daily_halted", False)
+                    and loss_state.get("day") == day
+                    or loss_state.get("drawdown_halted", False)
+                    or not feed_fresh(self.store, now)
+                )
             # Cancel stale entry/exit limits once, then let reconciliation prove final status.
             for order in self.store.orders(True):
                 age = (now - datetime.fromisoformat(order["at"])).total_seconds()
@@ -185,6 +200,54 @@ class Runtime:
                     marks = self.store.get("marks", {})
                     marks[p["symbol"]] = quote.last
                     self.store.put("marks", marks)
+                    mark_times = self.store.get("marks_at", {})
+                    mark_times[p["symbol"]] = at.isoformat()
+                    self.store.put("marks_at", mark_times)
+                    extra_exit = None
+                    if policy.strategy_generation == "intraday_v2" and p[
+                        "version"
+                    ].startswith("intraday2:"):
+                        from quantpilot.paper.intraday.strategy import (
+                            get_spec,
+                            protective_exit,
+                        )
+
+                        history = [
+                            b
+                            for b in self.store.load_bars(p["symbol"])
+                            if session.opens <= b.start
+                            and b.start + timedelta(minutes=1) <= at
+                        ]
+                        opened = datetime.fromisoformat(p["opened"])
+                        try:
+                            stop, extra_exit = protective_exit(
+                                dict(p, opened=opened),
+                                history,
+                                at,
+                                get_spec(p["version"]),
+                            )
+                        except (ValueError, StopIteration):
+                            # Evidence invalidation or unusable bars cannot disable liquidation.
+                            stop, extra_exit = (
+                                p["stop"],
+                                "strategy_protection_unavailable",
+                            )
+                            self.store.audit(
+                                "intraday_protection_fallback",
+                                {"symbol": p["symbol"]},
+                                at,
+                            )
+                        if stop > p["stop"]:
+                            self.store.db.execute(
+                                "UPDATE positions SET stop=? WHERE symbol=?",
+                                (stop, p["symbol"]),
+                            )
+                            self.store.audit(
+                                "intraday_trailing_stop",
+                                {"symbol": p["symbol"], "stop": stop},
+                                at,
+                            )
+                            p["stop"] = stop
                     reason = (
                         "flatten"
                         if self.store.get("control") == "flattening"
@@ -197,7 +260,11 @@ class Runtime:
                                 else (
                                     "stop"
                                     if quote.bid <= p["stop"]
-                                    else "target" if quote.bid >= p["target"] else None
+                                    else (
+                                        "target"
+                                        if quote.bid >= p["target"]
+                                        else extra_exit
+                                    )
                                 )
                             )
                         )
@@ -238,6 +305,15 @@ class Runtime:
             ):
                 self.store.put("control", "paused")
                 self.store.audit("flatten_completed", {}, self.clock())
+            if policy.strategy_generation == "intraday_v2":
+                from quantpilot.paper.intraday.controls import loss_budget, feed_fresh
+
+                budget = loss_budget(self.store, self.clock())
+                no_entries = (
+                    no_entries
+                    or not budget["available"]
+                    or not feed_fresh(self.store, self.clock())
+                )
             if no_entries or self.store.get("incident"):
                 return {"status": "protecting", "new_entries": False}
             # Evaluate each completed minute once. Position protection remains on every cycle.
@@ -245,6 +321,8 @@ class Runtime:
             if self.store.get("signal_bucket") == bucket:
                 return {"status": "waiting"}
             signals = []
+            intraday_histories = {}
+            intraday_waiting = False
             selected_at = self.store.get("universe_at")
             if not self.background_data and (
                 selected_at is None
@@ -293,9 +371,22 @@ class Runtime:
                     ):
                         self.store.put("candidate_status:" + symbol, "no_fresh_bars")
                         continue
-                    signals.extend(
-                        evaluate_strategies(today, fetched_at, session.opens)
-                    )
+                    if policy.strategy_generation == "intraday_v2":
+                        from quantpilot.paper.intraday.runtime import signals_for
+
+                        intraday_histories[symbol] = today
+                        if today[-1].start + timedelta(minutes=1) != fetched_at.replace(
+                            second=0, microsecond=0
+                        ):
+                            intraday_waiting = True
+                            continue
+                        signals.extend(
+                            signals_for(self.store, today, fetched_at, session.opens)
+                        )
+                    else:
+                        signals.extend(
+                            evaluate_strategies(today, fetched_at, session.opens)
+                        )
                     self.store.put(
                         "candidate_status:" + symbol,
                         "ready" if len(today) >= 110 else "warming",
@@ -315,7 +406,7 @@ class Runtime:
                     )
             ai = self.assessment(self.clock())
             ai_scores = ai.strategy_scores if ai else None
-            if ai:
+            if ai and policy.strategy_generation == "legacy":
                 from dataclasses import replace
 
                 signals = [
@@ -329,6 +420,13 @@ class Runtime:
             weights = allocate_weights(
                 scores, self.performance(), ai_scores, cap=policy.strategy_cap
             )
+            if policy.strategy_generation == "intraday_v2":
+                from quantpilot.paper.intraday.runtime import allocate, schedule
+                from quantpilot.paper.intraday.strategy import rank
+
+                weights = allocate(signals, ai, policy.strategy_cap)
+                select_signals = rank
+                schedule(self.store, intraday_histories, self.clock(), session)
             if policy.research_enabled:
                 from quantpilot.paper.research import candidates
                 from quantpilot.paper.strategy import Signal
@@ -373,9 +471,10 @@ class Runtime:
                 )
                 if qty:
                     self.place(signal, qty, quote, "buy", signal.reason, at)
-            self.store.put("signal_bucket", bucket)
+            if not intraday_waiting:
+                self.store.put("signal_bucket", bucket)
             hourly = max(0, int((now - session.opens).total_seconds() // 3600))
-            if hourly >= 1:
+            if policy.strategy_generation == "legacy" and hourly >= 1:
                 self.store.put(
                     "ai_due", {"kind": "hourly", "key": f"{day}:hourly:{hourly}"}
                 )
@@ -466,6 +565,11 @@ class Runtime:
             from quantpilot.paper.store import encode
 
             value = Assessment.model_validate_json(encode(raw))
+            if (
+                self.store.policy.strategy_generation == "intraday_v2"
+                and (now - value.observed_at).total_seconds() >= 1800
+            ):
+                return None
             return value if value.usable(now) else None
         except Exception:
             return None
@@ -499,6 +603,10 @@ class Runtime:
         return result
 
     def equity(self):
+        if self.store.policy.strategy_generation == "intraday_v2":
+            from quantpilot.paper.intraday.controls import loss_budget
+
+            return loss_budget(self.store, self.clock())["equity"]
         marks = self.store.get("marks", {})
         return self.store.get("cash") + sum(
             p["quantity"] * marks.get(p["symbol"], p["basis"] / p["quantity"])

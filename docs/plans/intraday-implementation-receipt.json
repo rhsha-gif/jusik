@@ -1,0 +1,351 @@
+{
+  "phase": "implementation_complete",
+  "implementer": "root",
+  "head": "a0b8b6343eb4dd13f89a09fdd123410ebcd6afa3",
+  "filesChanged": [
+    "docs/intraday_redesign_report.md",
+    "docs/plans/intraday-redesign-20260911.md",
+    "pyproject.toml",
+    "quantpilot/jobs/collect_intraday_data.py",
+    "quantpilot/jobs/evaluate_intraday_candidate.py",
+    "quantpilot/jobs/run_intraday_backtest.py",
+    "quantpilot/paper/cli.py",
+    "quantpilot/paper/config.py",
+    "quantpilot/paper/intraday/__init__.py",
+    "quantpilot/paper/intraday/advisor.py",
+    "quantpilot/paper/intraday/collection.py",
+    "quantpilot/paper/intraday/controls.py",
+    "quantpilot/paper/intraday/data.py",
+    "quantpilot/paper/intraday/deployment.py",
+    "quantpilot/paper/intraday/evaluation.py",
+    "quantpilot/paper/intraday/replay.py",
+    "quantpilot/paper/intraday/runtime.py",
+    "quantpilot/paper/intraday/shadow.py",
+    "quantpilot/paper/intraday/strategy.py",
+    "quantpilot/paper/intraday/stream.py",
+    "quantpilot/paper/intraday/universe.py",
+    "quantpilot/paper/jobs.py",
+    "quantpilot/paper/reporting.py",
+    "quantpilot/paper/risk.py",
+    "quantpilot/paper/runtime.py",
+    "quantpilot/paper/store.py",
+    "quantpilot/tests/unit/test_intraday_advisory.py",
+    "quantpilot/tests/unit/test_intraday_data.py",
+    "quantpilot/tests/unit/test_intraday_evaluation.py",
+    "quantpilot/tests/unit/test_intraday_replay.py",
+    "quantpilot/tests/unit/test_intraday_shadow.py",
+    "quantpilot/tests/unit/test_intraday_stream.py",
+    "quantpilot/tests/unit/test_intraday_v2_risk.py",
+    "quantpilot/tests/unit/test_intraday_v2_strategy.py",
+    "quantpilot/tests/unit/test_paper_submission_coordinator.py"
+  ],
+  "verification": [
+    {
+      "command": "C:/Users/goyan/.quantpilot/runtime-venv/Scripts/python.exe scripts/verify-paper.py",
+      "result": "1548 passed, 2 skipped, 1 third-party deprecation warning in 97.06s; mock smoke passed; exact final code"
+    },
+    {
+      "command": "tach check",
+      "result": "passed"
+    },
+    {
+      "command": "Synthetic sparse 180-trading-day end-to-end study",
+      "result": "6 trials, 3 frozen candidates, identical rerun; all data_insufficient; not market performance evidence"
+    },
+    {
+      "command": "run_intraday_backtest and evaluate_intraday_candidate CLI on empty dataset",
+      "result": "data_insufficient; 0/180 days; no frozen candidate; orders_armed=false"
+    }
+  ],
+  "empirical_status": "data_insufficient: empty dataset CLI has 0/180 required trading days; no market profitability or 20-day observation claim",
+  "safety": {
+    "live_trading_enabled": false,
+    "broker_used_for_tests": "mock",
+    "external_orders_submitted": 0,
+    "commits_created": 0
+  },
+  "worker_evidence": "Data/replay worker processes timed out after producing bounded files; no accepted worker receipt is claimed. Root reviewed and repaired their changes and ran verification.",
+  "source_hashes": {
+    "docs/intraday_redesign_report.md": "4b81afdfd9000d65016cd1d11b087139afc8a8784b8a64161e47583768599c7f",
+    "docs/plans/intraday-redesign-20260911.md": "c0ba5fc6c5795b09d713537403650dc2cd17d5aa0ffad356838147879b7a8c26",
+    "pyproject.toml": "f93855d731e931eaf193b6e2dd845c9eeb2c9f5f31f43d48ef1803624930f36b",
+    "quantpilot/jobs/collect_intraday_data.py": "f29d6b7da783031528491380f69787c5772fddeaff23c9edae2efff53e3f150a",
+    "quantpilot/jobs/evaluate_intraday_candidate.py": "b1b7f75c6d5ca8ea01654f5570233d167f83728586c53125675b86d5cb2408ea",
+    "quantpilot/jobs/run_intraday_backtest.py": "858a597d76f3700a6aed52dd688ac39523491889c91a7060548d51c3379bceba",
+    "quantpilot/paper/cli.py": "dba818bcfd31cf5a55300fdbef6fa483ed9649480f1c34fccb9e42d2ee0e4ba1",
+    "quantpilot/paper/config.py": "63755a457a9829fc65af2859c96daf5db8b63d4e3b9e5d8fe4581f2d76747d8c",
+    "quantpilot/paper/intraday/__init__.py": "296998eec32702244eed4718587893017e98436056abc16334d7dabdd5d9dae8",
+    "quantpilot/paper/intraday/advisor.py": "7420bc2c9de313d068da9acbaaf78de7e504ae2c38e28d118d26faef1bb3051b",
+    "quantpilot/paper/intraday/collection.py": "a7844ec8753c388285da40fac65a23467525bc95b27983afbe66520190464d6a",
+    "quantpilot/paper/intraday/controls.py": "5380ad078ebc0a571bd271fa76da7ec1703d563ce066b46bd015d3f231bf41d0",
+    "quantpilot/paper/intraday/data.py": "270a5ded1290a2b73ab9130b03b00b476288048b6c8a342c77c5436a7f5179af",
+    "quantpilot/paper/intraday/deployment.py": "dfa7b8e67c623ffed31faeb790ba2be04c8794b402fd1c23541356c7d138dede",
+    "quantpilot/paper/intraday/evaluation.py": "6af5f56848ce3c3ca97541f5a60eedc3adf0ad622d51b36f82df16f949340135",
+    "quantpilot/paper/intraday/replay.py": "d4a1219935c7140dada2d5c90ced12851d04dde8475f1ca4da09cdf7c5794072",
+    "quantpilot/paper/intraday/runtime.py": "9680c4c69696940605bc1f9db1921bf1dc454c8eb98f239c8dad114e0f6f99eb",
+    "quantpilot/paper/intraday/shadow.py": "1796835d17d8ee4ae98e303b30e0939206e0faa8e56b80301b149e4dec2cb757",
+    "quantpilot/paper/intraday/strategy.py": "68ec95d027feb8eb2a169979e72b1bff248f3ce6ff0d455c5af57f7314cc2403",
+    "quantpilot/paper/intraday/stream.py": "4d3fa2abbc09799265efebb983c4e81a15877543d548ac2e001b25b44ceab14d",
+    "quantpilot/paper/intraday/universe.py": "083c7fda4a36e150dcb291500e27a6134657bbf4c27655956427b89d3961dde6",
+    "quantpilot/paper/jobs.py": "9cc1a28f0f6c0fdd2987e96011eea88e8367685a6dcc04b2a43bdc6a0e09b50a",
+    "quantpilot/paper/reporting.py": "5b0cb074cc300d4f4893b335925728e81f45a63b1ed83e87f0ba7829ab5bd49a",
+    "quantpilot/paper/risk.py": "f5f0ab7a93e4074bf8758390555d28633fee04e570f4b9fbc13d5c9088d21ce3",
+    "quantpilot/paper/runtime.py": "6dd3e5f4e0e5881849e956289562d10f3f82904b9e9b31d2ce7cd0a2d1223360",
+    "quantpilot/paper/store.py": "f4e5e8a9a09c807ed42c2e95831830377d441c6c43f7ac35e6073fbe873a2278",
+    "quantpilot/tests/unit/test_intraday_advisory.py": "87cbbd63fb35bac25e2460a1135977917dc511124d415c42f730bb63dada16f4",
+    "quantpilot/tests/unit/test_intraday_data.py": "8e6fb07dc2c96c762d43a07cfa173dab78bf9e8337673575fef789adb47874e9",
+    "quantpilot/tests/unit/test_intraday_evaluation.py": "83004640eb6992d42734494c4c4564ac8774a337b541893a2a85227c8a29aeb8",
+    "quantpilot/tests/unit/test_intraday_replay.py": "20f08429a036f5af400111cbeeb0e7cc2fa371e7015f7b118c541cb9ce899c0b",
+    "quantpilot/tests/unit/test_intraday_shadow.py": "4b445d0709eccc035a4bce2ef77e14fe06cdba9a4d9cccca20e915c183319db9",
+    "quantpilot/tests/unit/test_intraday_stream.py": "96e211ab99c543a8725400ca5f2756ba759eef26996cfd97582a63e931c74bbc",
+    "quantpilot/tests/unit/test_intraday_v2_risk.py": "ba32140a216bc3fb9b32c6d51d95a1f96d54d3eb16b3cd6951fff03307fb96b9",
+    "quantpilot/tests/unit/test_intraday_v2_strategy.py": "66099c1d5562a920c601117556600184fc6467ebf31355f0cf86977a83978985",
+    "quantpilot/tests/unit/test_paper_submission_coordinator.py": "0cd83315e4de64200df2ce314cc74879fd5d3488d5f49fe92cfa567ba3c53469"
+  },
+  "review_attempt": {
+    "provider": "anthropic",
+    "result": "timed_out_without_receipt",
+    "run_dir": "C:/Users/goyan/.cache/aorch-intraday-implementation/task-runs/271276e4-75e1-4f3d-b692-e4999c26d8c5/intraday-critical-review-20260911"
+  },
+  "independent_review_status": "pass",
+  "reviewed_code_matches_root": true,
+  "review_receipts": [
+    {
+      "stage": "initial",
+      "provider": "anthropic",
+      "source": "C:/Users/goyan/.cache/aorch-intraday-implementation/task-runs/d7752e9b-9486-44ab-8869-be8d0848b59f/intraday-alternate-critical-review-20260911/receipt.json",
+      "sha256": "e77095e1334b9d0dfe608912ff6d7608c12f895f497b240188abc0c9fc4d9f22",
+      "receipt": {
+        "status": "complete",
+        "summary": "독립 교차 검토 결과 BLOCK. P1 1건(protective_exit가 미완성 5분봉을 사용할 수 있어 evaluate()의 완결봉 원칙과 충돌), P2 3건(승인 게이트가 실행 시점 정책의 수수료·세금·슬리피지·컷오프 파라미터 변경을 재검증하지 않음; run_study가 계산한 지연/미체결/절반체결 민감도가 최종 report에 노출되지 않고 계획서가 요구한 '갭' 민감도 시나리오 자체가 없음; update_order 매도 경로가 매수 경로와 달리 version 귀속을 재검증하지 않음)을 확인. 0/180 이력일·섀도우 20일 미달로 인한 자격 차단(admitted() 게이트)은 코드상 정상 동작함을 확인했다 — historical_passed·shadow_days 조건이 충족 불가능하므로 현재 상태에서 실주문 경로로 이어질 안전불변식 우회는 발견되지 않았다. 다만 위 P1/P2는 재현 가능한 구조적 결함이며, 특히 P1은 백테스트·라이브·섀도우 세 경로 모두에 동일하게 존재해 자체정합적이지만 문서화된 'completed-bar' 전제와 충돌한다. 도구 사용이 금지된 순수 정적 검토이므로 패킷에 없는 quantpilot/paper/strategy.py의 aggregate_five_minutes/_atr/_ema 본문과 broker.py/calendar.py/jobs/* 등은 확인하지 못했다.",
+        "filesInspected": [
+          "docs/plans/intraday-redesign-20260911.md",
+          "quantpilot/paper/config.py",
+          "quantpilot/paper/risk.py",
+          "quantpilot/paper/runtime.py",
+          "quantpilot/paper/store.py",
+          "quantpilot/paper/intraday/advisor.py",
+          "quantpilot/paper/intraday/collection.py",
+          "quantpilot/paper/intraday/controls.py",
+          "quantpilot/paper/intraday/data.py",
+          "quantpilot/paper/intraday/deployment.py",
+          "quantpilot/paper/intraday/evaluation.py",
+          "quantpilot/paper/intraday/replay.py",
+          "quantpilot/paper/intraday/runtime.py",
+          "quantpilot/paper/intraday/shadow.py",
+          "quantpilot/paper/intraday/strategy.py",
+          "quantpilot/paper/intraday/stream.py",
+          "quantpilot/paper/intraday/universe.py"
+        ],
+        "filesChanged": [],
+        "commands": [],
+        "criteria": [
+          {
+            "criterion": "Safety invariant audit grounded in actual code and tests",
+            "status": "pass",
+            "evidence": "environment_safe() (config.py:63-73) fail-closes on malformed flags; runtime.cycle() blocks on unsafe env and on data_mode=paper_trading without explicit KIS_PAPER_ORDER_SUBMISSION_ENABLED=true (runtime.py:61-71); authorize_order re-derives entry_size independently inside the reservation transaction (risk.py:192-252, runtime.py:516-557); loss_budget reserves planned loss for both open positions and pending buy orders against the daily limit (controls.py:63-78); peak-drawdown halt persists across restarts and only clears via review_intraday_halt's explicit, reason-gated, flat-ledger-only path (store.py:156-176). No path found that lets an order bypass admitted()/feed_fresh()/universe_current() gates for intraday_v2 (risk.py:130-169)."
+          },
+          {
+            "criterion": "Identify material correctness flaws or explicitly PASS",
+            "status": "pass",
+            "evidence": "Identified via findings F1-F4 below rather than a blanket pass; F1 is a P1 correctness flaw in protective stop logic."
+          },
+          {
+            "criterion": "Verify known insufficient evidence stays blocked",
+            "status": "pass",
+            "evidence": "run_study() returns status=data_insufficient when trading_days < 180 (evaluation.py:165-172) without writing any 'frozen'/'holdout' record; evaluate_candidate() then finds candidate=None, forces historical_passed=False and reasons includes missing_frozen_experiment_history/minimum_20_realtime_shadow_days (evaluation.py:326-411); admitted() requires historical_passed is True and shadow_days>=20 and shadow_round_trips>0 (deployment.py:69-74), all unreachable with 0/180 days and no shadow runs, so paper_eligible cannot be produced and admit()/admitted() stay closed."
+          },
+          {
+            "criterion": "No writes or external actions",
+            "status": "pass",
+            "evidence": "No file edits made; no tool/network/broker calls invoked; this response contains only the required structured receipt."
+          }
+        ],
+        "findings": [
+          {
+            "id": "F1-protective-exit-partial-5m-candle",
+            "severity": "high",
+            "fixCost": "standard",
+            "axis": "correctness",
+            "location": "quantpilot/paper/intraday/strategy.py:173-189 (protective_exit) vs quantpilot/paper/intraday/strategy.py:78-95 (evaluate)",
+            "evidence": "evaluate() explicitly drops the still-forming 5-minute context candle before computing ATR/EMA: `five = [b for b in aggregate_five_minutes(today) if b.start + timedelta(minutes=5) <= current.start]` (strategy.py:88-92). protective_exit() computes `five = aggregate_five_minutes(validate_bars(bars, now))` with no equivalent exclusion (strategy.py:179), then uses `five[-1].close` for the trend_failed comparison and `b.high for b in eligible` (eligible drawn from the same possibly-incomplete `five`) for the trailing-stop high (strategy.py:183-189). Trigger: any cycle where 'now' falls inside a partially-completed 5-minute bucket while a position is open (i.e. most cycles, since positions are marked every runtime cycle at 10s granularity per config.py cycle_seconds). Consequence: the trailing stop and 'trend_failed' exit can be computed from an incomplete final 5-minute bar rather than the last fully-closed one, contradicting the module's own docstring ('Only completed, contiguous intraday bars enter rules') and this function's own docstring ('optional completed-bar exit'). This function is shared verbatim by live runtime.py:222-228, replay.py:825-827 (the qualification backtest), and shadow.py:182-187 (the shadow-qualification simulator), so the bias is self-consistent across all three but is not what the code claims to do, and could cause spurious premature exits (or delayed tightening) versus the documented completed-bar model. Confidence is high on the structural asymmetry from the given source; confidence on functional severity is moderate because aggregate_five_minutes' exact truncation behavior is defined in quantpilot/paper/strategy.py, which was not included in this review packet.",
+            "proposal": "Apply the same exclusion evaluate() uses (drop any 5-minute bucket whose end exceeds the current minute) before computing atr/ema/high inside protective_exit, so trailing-stop and trend_failed decisions only ever consult fully-closed 5-minute bars; add a regression test asserting protective_exit's output is unchanged when extra partial-bucket 1m bars are appended mid-bucket."
+          },
+          {
+            "id": "F2-admission-not-bound-to-runtime-policy",
+            "severity": "high",
+            "fixCost": "standard",
+            "axis": "correctness",
+            "location": "quantpilot/paper/intraday/deployment.py:53-74 (admitted); quantpilot/paper/store.py:124-154 (configure); quantpilot/paper/intraday/replay.py:37-40; quantpilot/paper/intraday/shadow.py:147,227,338,363",
+            "evidence": "replay.py hardcodes FEE_BPS=1.40527, SELL_TAX_BPS=20.0, ENTRY_CUTOFF_MINUTES=30, LIQUIDATION_MINUTES=20 as module constants (replay.py:37-40), and shadow.py hardcodes the same round-trip cost as the literal `31.40527`/`11.40527` in four places (shadow.py:147,227,338,363) rather than reading them from Policy. store.configure() only forbids changing 'version' and 'initial_capital' (store.py:129-130); fee_bps, sell_tax_bps, slippage_bps, entry_cutoff_minutes and liquidation_minutes can be changed at any time, including while strategy_generation is already 'intraday_v2' and control is 'running', by bumping the policy version. admitted() (deployment.py:53-74) binds admission to IMPLEMENTATION_HASH (a hash of the source code, i.e. Field defaults) and to the frozen candidate/report hashes, but never compares the live store.policy.fee_bps/sell_tax_bps/slippage_bps/entry_cutoff_minutes/liquidation_minutes against the values the admitted evidence was actually computed with. Trigger: operator calls store.configure({'fee_bps': X, ...}) after a strategy is already paper_eligible/admitted. Consequence: risk.py's live entry_size/loss_budget (which read policy.fee_bps etc. live, e.g. risk.py:104-129,170) and authorize_order's entry-cutoff check (risk.py:206) immediately start using the new values, while admitted() keeps returning True because none of its checks reference these fields — the strategy keeps 'paper_eligible' status even though its live cost/timing behavior no longer matches the backtested/shadow-validated assumptions baked into replay.py/shadow.py.",
+            "proposal": "Include the admission-time values of fee_bps/sell_tax_bps/slippage_bps/entry_cutoff_minutes/liquidation_minutes in the frozen candidate or report (or hash them alongside candidate_hash), and have admitted() reject when the currently configured policy's values diverge from what was validated."
+          },
+          {
+            "id": "F3-sensitivity-not-in-report-and-gap-scenario-missing",
+            "severity": "standard",
+            "fixCost": "low",
+            "axis": "correctness",
+            "location": "quantpilot/paper/intraday/evaluation.py:248-262 (sensitivity computed) and :412-432 (report dict); docs/plans/intraday-redesign-20260911.md:16",
+            "evidence": "The approved plan requires '지연·미체결·갭·부분체결 민감도 별도 보고' (docs/plans/intraday-redesign-20260911.md:16). run_study() computes three sensitivity scenarios — delay_2m, half_fills, no_fills (evaluation.py:249-262) — and stores them under result['sensitivity'] inside the 'holdout' evidence record. evaluate_candidate()'s report construction (evaluation.py:412-432) has no 'sensitivity' key at all and never reads result['sensitivity'] anywhere in the function body (evaluation.py:316-437), so this data is computed but never surfaces in the qualification report that admit()/admitted() and any downstream reviewer would consult. Separately, of the four sensitivity dimensions the plan names (지연/delay, 미체결/no-fill, 갭/gap, 부분체결/partial-fill), only three are implemented — delay_2m (delay), no_fills (no-fill), half_fills (partial-fill); there is no gap-sensitivity scenario anywhere in run_study or replay's keyword-argument surface (replay.py's replay() signature at :390-401 has no gap-related parameter).",
+            "proposal": "Add the missing sensitivity dict (or a summary of it) to the report returned by evaluate_candidate, and add a gap-sensitivity replay scenario (e.g. simulate a session with a synthetic overnight/intraday price gap at the open of the eligible window) alongside delay_2m/half_fills/no_fills."
+          },
+          {
+            "id": "F4-sell-fill-attribution-missing-version-check",
+            "severity": "low",
+            "fixCost": "low",
+            "axis": "correctness",
+            "location": "quantpilot/paper/store.py:340-353 (sell branch of update_order) vs :317-322 (buy branch) and quantpilot/paper/risk.py:222-230 (authorize_order sell check)",
+            "evidence": "update_order's buy branch checks both strategy and version for attribution conflicts: `if p and (p[\"strategy\"] != order[\"strategy\"] or p[\"version\"] != order[\"version\"]): raise ValueError(\"position_attribution_conflict\")` (store.py:318-322). The sell branch only checks strategy and quantity: `if not p or p[\"strategy\"] != order[\"strategy\"] or delta > p[\"quantity\"]: raise ValueError(\"sell_exceeds_attributed_position\")` (store.py:342-346) — version is not compared. authorize_order's own pre-submission sell check does compare version (risk.py:227), and in the current code path sell orders are always constructed with version=p[\"version\"] copied directly from the position (runtime.py:283), so this is not known to be exploitable through the shown call graph. It is nonetheless an asymmetric defense-in-depth gap in update_order, the function documented as 'the ONLY cash/position mutation source' (store.py:264), meaning it is the last line of defense against any upstream bug or broker-reconciliation anomaly that produced a version-mismatched order/position pair.",
+            "proposal": "Add `or p[\"version\"] != order[\"version\"]` to the sell-branch guard in update_order for symmetry with the buy branch, independent of upstream checks."
+          }
+        ],
+        "unresolvedRisks": [
+          "검증 명령을 실행하지 않았다(과제 지침상 도구 사용이 금지됨). 패킷이 주장하는 '1542 passed, 2 skipped, mock smoke/tach check 통과'는 독립적으로 재현·확인하지 못했다.",
+          "quantpilot/paper/strategy.py의 aggregate_five_minutes/_atr/_ema/validate_bars/Bar/Signal 정의가 패킷에 포함되지 않아 F1의 실제 런타임 동작(부분 5분봉이 실제로 생성되는지 여부)을 100% 확정하지 못했다 — 구조적 비대칭(코드 대조)만으로 판단했다.",
+          "quantpilot/paper/broker.py, calendar.py, data.py, auth.py, intelligence.py, jobs/* 는 패킷에 없어 브로커 재조정(reconcile), 세션 캘린더, KIS 인증/토큰 갱신 로직은 검토 범위에서 제외됐다 — runtime.py가 이들에 크게 의존하므로 잔여 위험으로 남긴다.",
+          "day_base 이중 추적(store.get('day_base') vs intraday_loss_state['day_base'])의 설계 의도가 완전히 명확하지 않다 — 버그로 확정할 증거는 없으나 롤오버 시점의 기준 자산 산정 경로가 두 곳으로 나뉘어 있어 향후 변경 시 주의가 필요하다."
+        ],
+        "confidence": 0.6
+      }
+    },
+    {
+      "stage": "corrective",
+      "provider": "anthropic",
+      "source": "C:/Users/goyan/.cache/aorch-intraday-implementation/task-runs/83c1b11f-7d7e-4887-9c52-33f31ad25a7d/intraday-corrective-review-20260911/receipt.json",
+      "sha256": "b34322208a9009dd30ccf7b788a2146c41100d585ab10c8aab93e59d0f54685c",
+      "receipt": {
+        "status": "blocked",
+        "summary": "BLOCK. F1/F3/F4 are adequately resolved with source-level evidence, but F2's own corrective code in deployment.py.admit() contains a newly introduced, untested logic defect: it diffs the full VALIDATED_POLICY dict (which includes \"initial_capital\": 5_000_000) against the live store.policy and feeds any mismatch into store.configure(changes, ...), while store.configure() unconditionally raises `immutable_policy_field` whenever \"initial_capital\" appears in `changes` (store.py:129-130). Any deployment whose store.policy.initial_capital differs from the hardcoded 5,000,000 would make admit() always fail with the wrong error, i.e. the exact admission workflow F2 was supposed to fix becomes unusable. The new regression test (test_admission_is_bound_to_validated_runtime_policy) tellingly excludes \"initial_capital\" from its own direct store.configure() call, proving the test author knew this exclusion was required, yet admit() itself was never patched to do the same exclusion, and no test exercises admit() end-to-end to catch this. Separately (non-blocking, informational): the new completed-bar guard added to protective_exit (`b.start + timedelta(minutes=5) <= now`) is provably a no-op given validate_bars' precondition that every bar already satisfies `bar.start+1min<=now` before reaching aggregate_five_minutes — so every complete 5-bar group's end is already <= now by construction. The paired regression test also does not discriminate pre-fix vs post-fix behavior (the added 4-bar \"partial\" group is already excluded by aggregate_five_minutes' own group-size==5 check, independent of the new filter), so F1's fix, while harmless, is not actually demonstrated to change any behavior. Also, F2's original finding cited shadow.py's hardcoded round-trip-cost literals (31.40527/11.40527) alongside replay.py's; this diff does not touch shadow.py at all, so that half of F2's original evidence remains unaddressed. F3 and F4 hold up under inspection: the gap_50bps scenario is correctly restricted to reason==\"stop\" exits and is exposed in evaluate_candidate's report with a matching regression test; the sell-branch version check in update_order mirrors the buy branch exactly and its regression test confirms atomic rollback on rejection. Per task instructions, no tool calls or edits were made; the listed verify-paper.py command was not executed by this reviewer.",
+        "filesInspected": [
+          "quantpilot/paper/intraday/deployment.py",
+          "quantpilot/paper/intraday/evaluation.py",
+          "quantpilot/paper/intraday/replay.py",
+          "quantpilot/paper/intraday/strategy.py",
+          "quantpilot/paper/strategy.py",
+          "quantpilot/paper/store.py",
+          "quantpilot/tests/unit/test_intraday_evaluation.py",
+          "quantpilot/tests/unit/test_intraday_replay.py",
+          "quantpilot/tests/unit/test_intraday_v2_risk.py",
+          "quantpilot/tests/unit/test_intraday_v2_strategy.py"
+        ],
+        "filesChanged": [],
+        "commands": [],
+        "criteria": [
+          {
+            "criterion": "Resolve F1-F4 with source evidence",
+            "status": "fail",
+            "evidence": "F1 fix is structurally a no-op given validate_bars/aggregate_five_minutes invariants (harmless but not proven to change behavior; test doesn't discriminate). F3 (sensitivity exposure + gap scenario) and F4 (sell version check) are fully and correctly resolved with dispositive tests. F2's admission-binding mechanism (VALIDATED_POLICY + admitted()'s live re-check + configure() immutability guard) closes the original live-mutation bypass, but admit()'s own new `changes` computation includes the immutable \"initial_capital\" field, which will unconditionally trip store.configure()'s pre-existing `immutable_policy_field` guard whenever store.policy.initial_capital != 5_000_000 — an untested, newly introduced failure mode in the exact function F2 targets. F2's original shadow.py hardcoded-cost-literal evidence is also untouched by this diff."
+          },
+          {
+            "criterion": "Inspect corrective diff for material regressions",
+            "status": "fail",
+            "evidence": "deployment.py admit(): `changes = {key: value for key, value in VALIDATED_POLICY.items() if getattr(store.policy, key) != value}` includes \"initial_capital\" (VALIDATED_POLICY line 9: `\"initial_capital\": 5_000_000`), then `if changes: store.configure(changes, store.policy.version)` — but store.py:129-130 `if any(k in changes for k in (\"version\", \"initial_capital\")): raise ValueError(\"immutable_policy_field\")` fires unconditionally on any configure() call whose changes dict contains \"initial_capital\". Contrast with test_intraday_evaluation.py:90 which manually strips \"initial_capital\" before calling s.configure() directly, demonstrating the exclusion is known-necessary but was not applied inside admit() itself. No test calls admit() end-to-end to catch this."
+          },
+          {
+            "criterion": "Return explicit PASS or BLOCK",
+            "status": "pass",
+            "evidence": "Verdict: BLOCK, on the grounds of the admit()/initial_capital defect above."
+          },
+          {
+            "criterion": "No edits or tool calls",
+            "status": "pass",
+            "evidence": "No file edits, no delegation, no tool/command invocations performed; review is based entirely on the supplied diff, numbered source excerpts, and prior receipt, per the task's explicit instruction not to call tools."
+          }
+        ],
+        "findings": [
+          {
+            "id": "F2-admit-initial-capital-immutable-conflict",
+            "severity": "high",
+            "fixCost": "low",
+            "axis": "correctness",
+            "location": "quantpilot/paper/intraday/deployment.py admit() (changes comprehension over VALIDATED_POLICY) vs quantpilot/paper/store.py:124-130 (configure's unconditional immutable_policy_field guard)",
+            "evidence": "VALIDATED_POLICY includes `\"initial_capital\": 5_000_000`. admit()'s `changes = {key: value for key, value in VALIDATED_POLICY.items() if getattr(store.policy, key) != value}` will include \"initial_capital\" whenever the live store's initial_capital differs from 5,000,000, and the subsequent `store.configure(changes, store.policy.version)` call will raise `ValueError(\"immutable_policy_field\")` from store.py:129-130, which fires for ANY value of initial_capital present in changes, not just an actual attempted-change conflict. This breaks admit() for any account whose funding level differs from the hardcoded validated figure — precisely the workflow this correction round targets for F2 — and is not exercised by any new or shown test; the new test (test_admission_is_bound_to_validated_runtime_policy) manually excludes \"initial_capital\" before its own direct configure() call, evidencing the author's awareness of this exact hazard without applying the fix inside admit() itself.",
+            "proposal": "Exclude \"initial_capital\" (and \"version\") from the VALIDATED_POLICY-derived diff in admit(), mirroring the exclusion already applied in the new test, and add a regression test that calls admit() (not just store.configure()+manual admission-record injection) against a store whose initial_capital differs from VALIDATED_POLICY's value to lock in correct behavior."
+          },
+          {
+            "id": "F2-shadow-hardcoded-costs-unaddressed",
+            "severity": "standard",
+            "fixCost": "standard",
+            "axis": "correctness",
+            "location": "quantpilot/paper/intraday/shadow.py (unchanged by this diff; cited in prior review at lines 147,227,338,363)",
+            "evidence": "The prior review's F2 evidence cited shadow.py's hardcoded round-trip cost literals (31.40527 / 11.40527) as part of the same root-cause as replay.py's hardcoded FEE_BPS/SELL_TAX_BPS/ENTRY_CUTOFF_MINUTES/LIQUIDATION_MINUTES constants. This corrective diff touches replay.py, deployment.py, evaluation.py, strategy.py, and store.py, but contains no hunk for shadow.py. Live store.policy is now bound to VALIDATED_POLICY via admitted(), but shadow.py's independent hardcoded simulation constants remain an unverified, un-hashed, un-tested duplicate source that could silently diverge from VALIDATED_POLICY on a future edit to either file.",
+            "proposal": "Have shadow.py read its round-trip cost assumption from VALIDATED_POLICY (or Policy) directly, or add an explicit consistency assertion/test tying shadow.py's literals to VALIDATED_POLICY so a future edit to one without the other fails loudly."
+          },
+          {
+            "id": "F1-guard-provably-noop-test-nondiscriminating",
+            "severity": "low",
+            "fixCost": "low",
+            "axis": "correctness",
+            "location": "quantpilot/paper/intraday/strategy.py:179-183 (protective_exit) vs quantpilot/paper/strategy.py:112-192 (validate_bars, aggregate_five_minutes); quantpilot/tests/unit/test_intraday_v2_strategy.py:42-59",
+            "evidence": "validate_bars(bars, now) rejects any bar where `bar.start + timedelta(minutes=1) > now` (strategy.py:139-140) before aggregate_five_minutes ever groups them; aggregate_five_minutes only emits a bucket when all 5 consecutive 1-minute bars are present (strategy.py:177: `if len(group) != 5 ...: continue`). Therefore every bucket returned by `aggregate_five_minutes(validate_bars(bars, now))` already has its last (5th) bar's start+1min <= now, i.e. bucket.start+5min <= now always holds — the newly added filter `if b.start + timedelta(minutes=5) <= now` in protective_exit can never actually exclude anything given these preconditions, making it a provable no-op relative to the prior code. The paired regression test adds only 4 extra 1-minute bars (100-103) forming an incomplete 5-bar bucket, which aggregate_five_minutes' own `len(group) != 5` check already excludes independent of the new guard — so this test would pass identically against the pre-fix code and does not demonstrate the guard changes any observable behavior.",
+            "proposal": "Either accept this as intentional defensive/documentation-parity code (harmless, matches evaluate()'s style) and note it as non-functional, or construct a regression test that actually exercises a case distinguishing pre-fix from post-fix behavior, to make the guard's necessity verifiable rather than tautological."
+          }
+        ],
+        "unresolvedRisks": [
+          "config.py (Policy model definition) was not in this packet, so the actual mutability/default of Policy.initial_capital could not be confirmed — if it is a fixed literal always equal to 5,000,000 at Store genesis, the F2-admit-initial-capital-immutable-conflict finding would currently be unreachable in practice even though the code path is still latently defective and untested.",
+          "The task explicitly instructed not to call tools; the listed verification command (scripts/verify-paper.py against test_intraday_evaluation.py, test_intraday_shadow.py, test_intraday_v2_risk.py) was not executed by this reviewer, so the claimed 'tests passed' / in-progress full regression could not be independently confirmed.",
+          "shadow.py source was not included in this packet (only cited from the prior review), so the current state of its hardcoded cost literals relative to VALIDATED_POLICY could not be directly re-verified in this pass, only inferred from the absence of any shadow.py diff hunk.",
+          "risk.py, runtime.py, and broker.py were not re-inspected in this pass (unchanged by this diff per the provided hunks); their prior-confirmed gating behavior around admitted() is assumed unchanged but not re-verified here."
+        ],
+        "confidence": 0.7
+      }
+    },
+    {
+      "stage": "final_pass",
+      "provider": "anthropic",
+      "source": "C:/Users/goyan/.cache/aorch-intraday-implementation/task-runs/651de7e6-d747-4cff-b346-36ecc4130b59/intraday-final-f2-review-20260911/receipt.json",
+      "sha256": "4aa1eae6938c103341708e524beecee8c45460ed95d29576f1788e8f45fde460",
+      "receipt": {
+        "commands": [],
+        "confidence": 0.86,
+        "criteria": [
+          {
+            "criterion": "Verify explicit fixed-capital admission and untouched rejected ledger",
+            "status": "pass",
+            "evidence": "deployment.py admit() now checks `store.policy.initial_capital != capital or store.get(\"initial_capital\") != capital or store.get(\"cash\") != capital` (capital=VALIDATED_POLICY[\"initial_capital\"]=5_000_000) and raises ValueError(\"validated_initial_capital_required\") BEFORE any write in the transaction (it precedes the `changes` dict construction and the only prior check is the read-only control/orders/positions guard). New test test_admit_boundary_requires_the_frozen_experiment_capital[3000000] forces a 3M ledger, asserts the raise, and then asserts s.get(\"intraday_admission\") is None, s.policy.version == 1, s.get(\"control\")==\"stopped\", s.orders()==[] and critically s.get(\"cash\")==capital (still 3M, unchanged) -- proving no funds/policy mutation on rejection. The [5000000] branch of the same parametrized test calls admit() directly (not manual configure()+injection like the prior test) and confirms admitted()==True with slippage_bps==10 and max_positions==2 applied, so the normal path is unaffected."
+          },
+          {
+            "criterion": "Verify shared validated costs and risk parameters",
+            "status": "pass",
+            "evidence": "replay.py's CAPITAL/MAX_NAMES/MAX_NAME_FRACTION/MAX_TRADE_LOSS_FRACTION/MAX_DAILY_LOSS_FRACTION/MAX_PEAK_DRAWDOWN_FRACTION/FEE_BPS/SELL_TAX_BPS/ENTRY_CUTOFF_MINUTES/LIQUIDATION_MINUTES are now all sourced from VALIDATED_POLICY (imported from deployment.py) instead of separately hardcoded literals. shadow.py now imports VALIDATED_POLICY and derives ENTRY_COST_RATE=(fee_bps+slippage_bps)/10000=11.40527/10000 and EXIT_COST_RATE=(fee_bps+sell_tax_bps+slippage_bps)/10000=31.40527/10000, numerically identical to the previously hardcoded literals they replace at every call site (equity(), reserved_cash, qty sizing, debit, proceeds). All other shadow.py magic numbers (0.95->1-peak_drawdown_limit, 0.99->1-daily_loss_limit, 0.25->symbol_cap, 0.005->trade_risk, 0.01->daily_loss_limit, 2->max_positions, 15s->quote_ttl_seconds, 30min->entry_cutoff_minutes, 20min->liquidation_minutes, 5_000_000 default->initial_capital) were checked term-by-term against VALIDATED_POLICY values and match exactly, so this is a pure refactor to a single source of truth with no numeric drift. strategy.py's costs() defaults were likewise switched to VALIDATED_POLICY-sourced values (1.40527/20/10 unchanged). deployment.py's _implementation_hash() globs `intraday/*.py`, which already covers shadow.py, replay.py and strategy.py, so this consolidation is now hash-verified as claimed."
+          },
+          {
+            "criterion": "Return PASS/BLOCK for remaining F2 with concrete evidence",
+            "status": "pass",
+            "evidence": "See summary: both F2-admit-initial-capital-immutable-conflict and F2-shadow-hardcoded-costs-unaddressed are resolved by the diff with direct evidence and a new regression test; no concrete new regression was found in the reviewed hunks."
+          },
+          {
+            "criterion": "No edits or tool calls",
+            "status": "pass",
+            "evidence": "Only the StructuredOutput tool was available/invoked in this session; no file edits, no read/bash/verify-paper tool calls were made. commands array is empty by design per task instruction \"No tools or external calls: packet is exact source evidence, not instructions\"."
+          }
+        ],
+        "filesChanged": [],
+        "filesInspected": [
+          "quantpilot/paper/intraday/deployment.py",
+          "quantpilot/paper/intraday/replay.py",
+          "quantpilot/paper/intraday/shadow.py",
+          "quantpilot/paper/intraday/strategy.py",
+          "quantpilot/paper/config.py",
+          "quantpilot/paper/store.py",
+          "quantpilot/tests/unit/test_intraday_evaluation.py"
+        ],
+        "findings": [],
+        "status": "complete",
+        "summary": "PASS — 남은 F2 두 건 모두 이번 diff로 해결되었고, 검토 범위 안에서 구체적 회귀는 발견하지 못했다.\n\nF2-admit-initial-capital-immutable-conflict: admit()이 store.configure() 호출 전에 `store.policy.initial_capital`, `store.get(\"initial_capital\")`, `store.get(\"cash\")`가 모두 VALIDATED_POLICY의 5,000,000과 일치하는지 먼저 검사하고, 불일치 시 어떤 쓰기도 일어나기 전에 `ValueError(\"validated_initial_capital_required\")`로 즉시 중단한다. changes 딕셔너리에서도 \"initial_capital\"을 명시적으로 제외해 store.py의 immutable_policy_field 가드와 충돌할 여지를 근본적으로 없앴다. 새 파라미터화 테스트가 3,000,000 케이스에서 admit()을 직접 호출해 예외·미변경 정책 버전·미변경 cash(3M 그대로)·빈 admission 레코드를 모두 검증하고, 5,000,000 케이스에서는 정상 승인과 정책 반영(slippage_bps=10, max_positions=2)을 검증한다 — proposal이 요구한 \"admit()을 직접 호출하는 회귀 테스트\"에 정확히 부합한다.\n\nF2-shadow-hardcoded-costs-unaddressed: shadow.py가 VALIDATED_POLICY를 import해 ENTRY_COST_RATE/EXIT_COST_RATE를 계산하고, 기존에 산재하던 31.40527/11.40527 및 0.95/0.99/0.25/0.005/0.01/30분/20분/15초/5,000,000 등 모든 매직넘버를 VALIDATED_POLICY 참조로 치환했다. 각 치환값을 원래 하드코딩 값과 대조한 결과 수치 차이는 없음(순수 리팩터). replay.py·strategy.py도 동일한 단일 출처를 공유하도록 이미 바뀌어 있고, 기존 IMPLEMENTATION_HASH가 `intraday/*.py` 전체를 해싱하므로 향후 값이 벌어지면 해시가 깨진다 — \"silently diverge\" 우려의 근본 원인이 제거되었다.\n\n부수적으로 replay.py의 CAPITAL이 `5_000_000.0`(float)에서 `VALIDATED_POLICY[\"initial_capital\"]`(int)로 타입만 바뀌었는데, 이후 전부 나눗셈/곱셈 컨텍스트에서만 쓰여 Python이 자동으로 float로 승격하므로 기능적 영향은 없다고 판단했다. 이 세션은 StructuredOutput 외 도구가 제공되지 않아 정적 diff/테스트 코드 대조만으로 판정했으며, \"37 cases / full offline suite\" 실행 결과는 직접 재현하지 않았다(과제 지시상 도구·외부 호출 금지).",
+        "unresolvedRisks": [
+          "replay.py의 CAPITAL이 float 리터럴(5_000_000.0)에서 VALIDATED_POLICY의 int(5_000_000)로 타입이 바뀌었다 — 현재 사용처는 모두 나눗셈/곱셈뿐이라 실질 영향은 없어 보이지만, 향후 정수 전용 연산(예: 나머지 연산, 직렬화 스키마 비교)이 추가되면 잠재적 타입 불일치가 될 수 있다.",
+          "admit()의 신규 자본 가드는 store.transaction()의 롤백 시맨틱에 의존하지 않는다(예외가 어떤 쓰기보다도 먼저 발생하므로) — 다만 store.transaction()의 실제 커밋/롤백 동작 자체는 이번 diff에 포함되지 않아 이 리뷰에서 직접 검증하지 못했다.",
+          "이 리뷰는 정적 소스 대조로만 수행되었고 scripts/verify-paper.py 등 실제 pytest 실행은 이 세션에서 수행하지 않았다 — 과제 설명에 언급된 '37 cases 통과' 및 'full offline suite 진행 중'은 독립적으로 재확인되지 않았다.",
+          "cash가 정확히 initial_capital과 같아야 한다는 3중 검사는 '승인은 거래 시작 전 상태에서만 발생한다(control=stopped, orders/positions 없음)'는 기존 불변식에 의존한다 — 이 전제가 깨지는 향후 변경(예: cash를 조작할 수 있는 관리 경로)이 생기면 정당한 후속 승인이 부당하게 거부될 수 있다."
+        ]
+      }
+    }
+  ],
+  "review_method": "Aorch-selected cross-provider static review of exact source packets; strict empty MCP configuration and no file tools; aorch change guard passed. Root independently ran the full offline suite and verified final source equality. Timed-out Opus route was excluded after three failures; Sonnet availability was verified before routing the review.",
+  "remaining_validation": [
+    "No real historical study met 180 trading days and 100 completed OOS round trips per strategy",
+    "No frozen candidate completed 20 qualifying realtime shadow sessions",
+    "Real paper-market collection throughput and broker integration were not exercised"
+  ]
+}

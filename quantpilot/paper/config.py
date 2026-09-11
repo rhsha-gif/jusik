@@ -13,11 +13,14 @@ class Policy(BaseModel):
     model_config = ConfigDict(extra="forbid", frozen=True, allow_inf_nan=False)
     version: int = Field(default=1, ge=1)
     data_mode: Literal["fixture", "paper_trading"] = "fixture"
+    strategy_generation: Literal["legacy", "intraday_v2"] = "legacy"
     initial_capital: int = Field(default=5_000_000, gt=0, le=5_000_000)
     trade_risk: float = Field(default=0.005, gt=0, le=0.005)
     symbol_cap: float = Field(default=0.25, gt=0, le=0.25)
     strategy_cap: float = Field(default=0.60, gt=0, le=0.60)
     max_positions: int = Field(default=4, ge=1, le=4)
+    daily_loss_limit: float = Field(default=0.01, gt=0, le=0.01)
+    peak_drawdown_limit: float = Field(default=0.05, gt=0, le=0.05)
     fee_bps: float = Field(default=1.40527, ge=0, le=100)
     sell_tax_bps: float = Field(default=20, ge=0, le=100)
     slippage_bps: float = Field(default=5, ge=0, le=100)
@@ -35,6 +38,11 @@ class Policy(BaseModel):
 
     @model_validator(mode="after")
     def valid(self):
+        if self.strategy_generation == "intraday_v2":
+            if self.max_positions > 2 or self.research_enabled:
+                raise ValueError(
+                    "intraday_v2 requires at most two positions and frozen strategies"
+                )
         if self.entry_cutoff_minutes < self.liquidation_minutes:
             raise ValueError("entry cutoff must precede liquidation")
         if not self.active_strategies or len(set(self.active_strategies)) != len(

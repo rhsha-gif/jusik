@@ -61,8 +61,7 @@ class FakeSessionAuthority:
     def current_open_session_date(self, observed_at: datetime) -> date | None:
         self.calls += 1
         if not self.open_now or (
-            self.close_after_calls is not None
-            and self.calls > self.close_after_calls
+            self.close_after_calls is not None and self.calls > self.close_after_calls
         ):
             return None
         return observed_at.astimezone(timezone(timedelta(hours=9))).date()
@@ -441,9 +440,7 @@ def test_fractional_capacity_inputs_round_conservatively(tmp_path) -> None:
             snapshot_max_age_seconds=30,
             minimum_cash_reserve=200_000.2,
         )
-        reservation = store.load_paper_risk_reservation(
-            prepared.order_plan_id
-        )
+        reservation = store.load_paper_risk_reservation(prepared.order_plan_id)
 
         assert reservation is not None
         assert prepared.broker_orderable_cash == 249_999
@@ -524,9 +521,7 @@ def test_migrated_open_dispatch_reprepare_uses_backfilled_cash_reserve(
             clock=MutableClock(),
         )
         migrated = reopened.load_paper_order_dispatch(prepared.order_plan_id)
-        reservation = reopened.load_paper_risk_reservation(
-            prepared.order_plan_id
-        )
+        reservation = reopened.load_paper_risk_reservation(prepared.order_plan_id)
         assert migrated is not None
         assert migrated.minimum_cash_reserve_krw is None
         assert reservation is not None
@@ -759,7 +754,9 @@ def test_wrong_account_provenance_fails_before_any_client_query(tmp_path) -> Non
     assert client.order_calls == 0
 
 
-def test_sell_uses_snapshot_orderable_quantity_without_buying_power_query(tmp_path) -> None:
+def test_sell_uses_snapshot_orderable_quantity_without_buying_power_query(
+    tmp_path,
+) -> None:
     client = FakePaperClient()
     clock = MutableClock()
     sell_explanation = _explanation().model_copy(
@@ -996,9 +993,7 @@ def test_stale_submission_evidence_blocks_before_buying_power_or_post(
     quote = _quote()
     snapshot = _snapshot()
     if stale_evidence == "quote":
-        quote = quote.model_copy(
-            update={"as_of": NOW - timedelta(seconds=31)}
-        )
+        quote = quote.model_copy(update={"as_of": NOW - timedelta(seconds=31)})
     else:
         snapshot = snapshot.model_copy(
             update={"captured_at": NOW - timedelta(seconds=31)}
@@ -1096,6 +1091,9 @@ def test_kis_paper_client_is_constructed_only_by_paper_jobs_and_never_by_api(
         "jobs/check_kis_paper_connection.py",
         # ReadinessTransport independently blocks every order/cancel request.
         "jobs/check_paper_readiness.py",
+        # Explicit read-only intraday collector reuses token/GET-only transport;
+        # websocket subscriptions are restricted to public paper market channels.
+        "paper/intraday/collection.py",
         "jobs/run_kis_paper_kill.py",
         "jobs/run_kis_paper_session.py",
         # Explicit intraday profile checks submission flags before construction.
@@ -1231,9 +1229,7 @@ def test_recovered_unknown_row_keeps_its_interruption_reason(tmp_path) -> None:
             session=successor,
             recovered_at=recovered_at,
         )
-        assert [item.last_error_code for item in recovered] == [
-            "process_interrupted"
-        ]
+        assert [item.last_error_code for item in recovered] == ["process_interrupted"]
 
         restarted = DurablePaperSubmissionCoordinator(
             store=store,

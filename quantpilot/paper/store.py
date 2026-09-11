@@ -43,7 +43,8 @@ class Store:
         self.db.row_factory = sqlite3.Row
         self.db.execute("PRAGMA journal_mode=WAL")
         self.db.execute("PRAGMA synchronous=FULL")
-        self.db.executescript("""
+        self.db.executescript(
+            """
         CREATE TABLE IF NOT EXISTS settings(key TEXT PRIMARY KEY, value TEXT NOT NULL);
         CREATE TABLE IF NOT EXISTS audit(id INTEGER PRIMARY KEY, at TEXT NOT NULL, kind TEXT NOT NULL, payload TEXT NOT NULL);
         CREATE TABLE IF NOT EXISTS orders(id TEXT PRIMARY KEY, symbol TEXT NOT NULL, strategy TEXT NOT NULL,
@@ -63,7 +64,8 @@ class Store:
         CREATE TABLE IF NOT EXISTS outbox(id TEXT PRIMARY KEY, text TEXT NOT NULL, state TEXT NOT NULL,
           at TEXT NOT NULL, error TEXT);
         CREATE TABLE IF NOT EXISTS lab(id TEXT PRIMARY KEY, body TEXT NOT NULL);
-        """)
+        """
+        )
         if "entry_atr14" not in {
             r[1] for r in self.db.execute("PRAGMA table_info(orders)")
         }:
@@ -126,6 +128,26 @@ class Store:
                 raise ValueError("policy_version_conflict")
             if any(k in changes for k in ("version", "initial_capital")):
                 raise ValueError("immutable_policy_field")
+            if current.strategy_generation == "intraday_v2" and self.get(
+                "intraday_admission"
+            ):
+                from quantpilot.paper.intraday.deployment import VALIDATED_POLICY
+
+                if any(
+                    k in VALIDATED_POLICY and v != getattr(current, k)
+                    for k, v in changes.items()
+                ):
+                    raise ValueError("admitted_execution_policy_immutable")
+            if (
+                "strategy_generation" in changes
+                and changes["strategy_generation"] != current.strategy_generation
+            ):
+                if (
+                    current.strategy_generation == "intraday_v2"
+                    or self.orders()
+                    or self.get("control") != "stopped"
+                ):
+                    raise ValueError("strategy_generation_requires_new_experiment")
             if "data_mode" in changes and (
                 self.orders() or self.get("control") != "stopped"
             ):
@@ -140,6 +162,28 @@ class Store:
                 "policy_changed", {"version": updated.version, "changes": changes}
             )
             return updated
+
+    def review_intraday_halt(self, reason, now):
+        """Explicit operator review acknowledges a drawdown epoch; never starts orders."""
+        from quantpilot.paper.intraday.controls import loss_budget
+
+        if not isinstance(reason, str) or len(reason.strip()) < 10:
+            raise ValueError("drawdown_review_reason_required")
+        with self.transaction():
+            if (
+                self.get("control") not in {"paused", "stopped"}
+                or self.orders(True)
+                or self.positions()
+            ):
+                raise ValueError("drawdown_review_requires_flat_paused_ledger")
+            state = loss_budget(self, now)
+            if not state["drawdown_halted"]:
+                raise ValueError("no_drawdown_halt")
+            self.audit(
+                "intraday_drawdown_review", {"reason": reason, "previous": state}, now
+            )
+            state.update(drawdown_halted=False, peak=state["equity"])
+            self.put("intraday_loss_state", state)
 
     def control(self, action):
         states = {
@@ -307,6 +351,7 @@ class Store:
                     if (
                         not p
                         or p["strategy"] != order["strategy"]
+                        or p["version"] != order["version"]
                         or delta > p["quantity"]
                     ):
                         raise ValueError("sell_exceeds_attributed_position")

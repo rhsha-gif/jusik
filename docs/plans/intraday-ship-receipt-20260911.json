@@ -1,0 +1,192 @@
+{
+  "as_of": "2026-09-11T02:33:16.662706+00:00",
+  "status": "owner_commit_exception_approved",
+  "committed": false,
+  "pushed": false,
+  "live_orders_submitted": 0,
+  "paper_orders_submitted": 0,
+  "verification": {
+    "tests": "1554 passed, 2 skipped, 1 third-party warning; 91.16s",
+    "mock_smoke": "passed",
+    "gitleaks_findings": 0,
+    "semgrep_findings": 0,
+    "tach_violations": 0
+  },
+  "independent_review": {
+    "status": "complete",
+    "summary": "SecurityVerdict: BLOCK. gitleaks/semgrep/tach 증거는 모두 0건으로 깨끗하고 §1의 네 가지 명시 앵커(paper_submission.py 단일 POST 권한, gatekeeper.py 플래그 기본값, transitions.py 전이표, .env.example 안전 기본값)는 이번 diff에서 전혀 건드리지 않았지만, `quantpilot/paper/intraday/stream.py`(신규 파일)의 `PaperApprovalTransport`/`request_approval`이 `quantpilot/paper/intraday/collection.py`의 `collect_paper()`에서 실제로 KIS 페이퍼 브로커 호스트(`KIS_PAPER_BASE_URL + KIS_WS_APPROVAL_ENDPOINT`)로 appkey/secretkey를 담아 네트워크 POST를 수행하는 새 경로를 만든다. 이는 게이트 block 기준 3의 '브로커로 POST하는 새 경로가 생긴다'에 문자 그대로 해당한다. 구현이 허용목록을 그 엔드포인트 하나로 엄격히 제한하고(`_ALLOWED_ENDPOINTS`, `PaperApprovalTransport.request_json`의 (method,url) 등가 검사), 주문 POST(`KIS_CASH_ORDER_ENDPOINT`)는 여전히 `core/execution/paper_submission.py`가 단독 소유함을 `test_raw_order_post_is_confined_to_paper_submission_by_convention`이 그대로 보증하는 등 위험 완화는 확인했다. 그러나 게이트 규칙은 목적(인증 vs 주문)을 구분하지 않고 신규 브로커 POST 경로 자체를 사람 승인 없이 통과시키지 말라고 명시하므로, 위임 태스크 서술('이미 FINAL PASS로 해소됨', '이대로 커밋')과 무관하게 이 회차 diff에 대해서는 BLOCK으로 판정한다. 부수적으로 pyproject.toml에 `websockets==15.0.1` 의존성이 프로젝트 관례인 /dependency-audit 없이 추가된 점을 참고용 finding으로 남긴다(차단 사유 아님).",
+    "filesInspected": [
+      "C:/Users/goyan/.cache/quantpilot-ship-fix-gate-20260911/summary.json",
+      "C:/Users/goyan/.cache/quantpilot-ship-fix-gate-20260911/gitleaks.json",
+      "C:/Users/goyan/.cache/quantpilot-ship-fix-gate-20260911/semgrep.json",
+      "C:/Users/goyan/.cache/quantpilot-ship-fix-gate-20260911/tach.txt",
+      "C:/Users/goyan/.cache/quantpilot-ship-fix-gate-20260911/diff.patch",
+      "C:/Users/goyan/.cache/quantpilot-ship-fix-verification.log",
+      "docs/roadmap_acceptance_matrix.md",
+      "quantpilot/tests/unit/test_paper_submission_coordinator.py"
+    ],
+    "filesChanged": [],
+    "commands": [
+      {
+        "command": "ls -la \"/c/Users/goyan/.cache/quantpilot-ship-fix-gate-20260911\"",
+        "exitCode": 0,
+        "outcome": "confirmed evidence bundle files present"
+      },
+      {
+        "command": "cat summary.json",
+        "exitCode": 0,
+        "outcome": "status=complete; gitleaks 0 findings; semgrep 0 findings; tach 0 violations exit 0; 38 changed files listed"
+      },
+      {
+        "command": "cat gitleaks.json",
+        "exitCode": 0,
+        "outcome": "empty array, no secrets"
+      },
+      {
+        "command": "python3 -c \"import json; ...\" (count semgrep results)",
+        "exitCode": 0,
+        "outcome": "results: 0, no ERROR/WARNING entries"
+      },
+      {
+        "command": "cat tach.txt",
+        "exitCode": 0,
+        "outcome": "'All modules validated!' (0 boundary violations)"
+      },
+      {
+        "command": "grep -n \"^diff --git\" diff.patch",
+        "exitCode": 0,
+        "outcome": "enumerated 38 touched files; confirmed paper_submission.py, gatekeeper.py, transitions.py, .env.example absent"
+      },
+      {
+        "command": "sed -n '1,80p' docs/roadmap_acceptance_matrix.md",
+        "exitCode": 0,
+        "outcome": "read §1 standing safety invariants table for anchor comparison"
+      },
+      {
+        "command": "grep -n \"test_kis_paper_client_is_constructed_only_by_paper_jobs_and_never_by_api\" -A 60 quantpilot/tests/unit/test_paper_submission_coordinator.py",
+        "exitCode": 0,
+        "outcome": "confirmed collection.py added to KisPaperClient allowlist; order-POST sole-ownership test unchanged"
+      }
+    ],
+    "criteria": [
+      {
+        "criterion": "gitleaks: 0 findings",
+        "status": "pass",
+        "evidence": "gitleaks.json is an empty array; summary.json tools.gitleaks.findings=0"
+      },
+      {
+        "criterion": "tach: no research/execution boundary violation",
+        "status": "pass",
+        "evidence": "summary.json tools.tach.exit=0, violations=0; tach.txt: 'All modules validated!'"
+      },
+      {
+        "criterion": "semgrep: no ERROR-severity results",
+        "status": "pass",
+        "evidence": "semgrep.json results array is empty (0 entries), so no ERROR/WARNING/INFO present"
+      },
+      {
+        "criterion": "diff does not alter the 4 named §1 anchors (paper_submission.py sole POST, gatekeeper.py flag defaults, transitions.py state table, .env.example safe defaults)",
+        "status": "pass",
+        "evidence": "diff.patch file list has no entries for execution/paper_submission.py, risk/gatekeeper.py, execution/transitions.py, or .env.example; test_raw_order_post_is_confined_to_paper_submission_by_convention (unchanged) still asserts sole KIS_CASH_ORDER_ENDPOINT caller is core/execution/paper_submission.py"
+      },
+      {
+        "criterion": "diff does not introduce a new path that POSTs to the broker",
+        "status": "fail",
+        "evidence": "quantpilot/paper/intraday/stream.py (new file) defines PaperApprovalTransport.request_json and request_approval(), which perform an actual HTTP POST of config.app_key/app_secret to KIS_PAPER_BASE_URL+KIS_WS_APPROVAL_ENDPOINT; quantpilot/paper/intraday/collection.py:collect_paper calls request_approval(config, LimitedTransport(PaperApprovalTransport())) on the live network path (per the task narrative, this already ran and stored 580 real bars, i.e. it reached the real KIS paper host, not a fixture). quantpilot/packages/core/kis_paper.py also adds KIS_WS_APPROVAL_ENDPOINT to _ALLOWED_ENDPOINTS to permit it. This is a brand-new broker-facing POST surface not present in the prior PASS baseline."
+      },
+      {
+        "criterion": "no submit/approve/dispatch vocabulary added under services/research_agents or services/briefing",
+        "status": "pass",
+        "evidence": "none of the 38 changed files are under quantpilot/services/research_agents/ or services/briefing/"
+      },
+      {
+        "criterion": "no loosening of .claude/agents/*.md or .claude/settings.json",
+        "status": "pass",
+        "evidence": "no such paths appear in diff.patch's changed-file list"
+      },
+      {
+        "criterion": "external connector tests stay fake/offline",
+        "status": "pass",
+        "evidence": "test_intraday_stream.py's new tests use a fake Opener/Response and a fake websocket Socket; no real network calls in tests"
+      }
+    ],
+    "findings": [
+      {
+        "id": "new-broker-post-path",
+        "severity": "critical",
+        "fixCost": "standard",
+        "axis": "correctness",
+        "location": "quantpilot/paper/intraday/stream.py (PaperApprovalTransport, request_approval); quantpilot/paper/intraday/collection.py:collect_paper (approval = request_approval(...)); quantpilot/packages/core/kis_paper.py (_ALLOWED_ENDPOINTS += KIS_WS_APPROVAL_ENDPOINT)",
+        "evidence": "diff.patch hunks at 'diff --git a/quantpilot/packages/core/kis_paper.py' (KIS_WS_APPROVAL_ENDPOINT added to allowlist), 'diff --git a/quantpilot/paper/intraday/stream.py' (new file, request_approval POSTs appkey/secretkey to KIS_PAPER_BASE_URL+KIS_WS_APPROVAL_ENDPOINT), and 'diff --git a/quantpilot/paper/intraday/collection.py' line 'approval = request_approval(config, LimitedTransport(PaperApprovalTransport()))'. Corroborated by test_paper_submission_coordinator.py's updated KisPaperClient-construction allowlist now including 'paper/intraday/collection.py'. Task narrative states this path already executed against the real network and stored 580 bars.",
+        "proposal": "Route this specific new broker-POST surface to the user for explicit approval (per project safety rule: actions touching brokers require sign-off) before committing; do not rely on the prior PASS receipt or this task's framing to treat it as already authorized, since neither the prior evidence bundle nor §1's four named anchors covered this new endpoint."
+      },
+      {
+        "id": "unaudited-dependency-addition",
+        "severity": "low",
+        "fixCost": "low",
+        "axis": "usage",
+        "location": "pyproject.toml (project.optional-dependencies.paper)",
+        "evidence": "diff.patch: '+  \"websockets==15.0.1\",' added under the paper extras group; no accompanying /dependency-audit record found in the reviewed evidence bundle.",
+        "proposal": "Run /dependency-audit on websockets==15.0.1 per project convention before or alongside commit; informational only, not a gate-block condition."
+      }
+    ],
+    "unresolvedRisks": [
+      "새 브로커 POST 경로(웹소켓 승인 엔드포인트)에 대한 사용자 명시 승인이 아직 없다 — 커밋 전 확보 필요.",
+      "이 경로가 실제 네트워크에 도달해 580개 bar를 수집했다는 태스크 서술이 사실이라면, 실거래 자격 검증과는 별개로 실제 KIS 페이퍼 계정 자격 증명이 이미 이 코드로 네트워크에 노출되었다는 의미이며 별도 운영 검토가 필요할 수 있다(본 게이트는 diff/증거 판정만 수행했고 자격 증명 파일은 열지 않았다)."
+    ],
+    "confidence": 0.82
+  },
+  "market_operation": {
+    "mode": "realtime_market_data",
+    "order_authority": false,
+    "minute_only": true,
+    "stream": "blocked_schema_mismatch: H0STASP0 62 fields versus verified 59",
+    "live_execution": "unavailable; no live broker and no empirical qualification"
+  },
+  "source_hashes": {
+    "docs/intraday_redesign_report.md": "4b81afdfd9000d65016cd1d11b087139afc8a8784b8a64161e47583768599c7f",
+    "docs/plans/intraday-implementation-receipt.json": "baa154389ffa9a7687ca02c0bf837dc9d5a0adfb3fc81f20d41310a28e8b1aa4",
+    "docs/plans/intraday-redesign-20260911.md": "c0ba5fc6c5795b09d713537403650dc2cd17d5aa0ffad356838147879b7a8c26",
+    "docs/plans/intraday-ship-20260911.md": "9a005963b37c668b2b39ef44edf2ba86cc6c04732e968c48f2a8491e15c8b786",
+    "pyproject.toml": "f93855d731e931eaf193b6e2dd845c9eeb2c9f5f31f43d48ef1803624930f36b",
+    "quantpilot/jobs/collect_intraday_data.py": "f29d6b7da783031528491380f69787c5772fddeaff23c9edae2efff53e3f150a",
+    "quantpilot/jobs/evaluate_intraday_candidate.py": "b1b7f75c6d5ca8ea01654f5570233d167f83728586c53125675b86d5cb2408ea",
+    "quantpilot/jobs/run_intraday_backtest.py": "858a597d76f3700a6aed52dd688ac39523491889c91a7060548d51c3379bceba",
+    "quantpilot/packages/core/kis_paper.py": "0a607b2b9ad61f2f9f00f72d40453a45ea7ef26258f57a3bf77d05a92f0af2a9",
+    "quantpilot/paper/cli.py": "dba818bcfd31cf5a55300fdbef6fa483ed9649480f1c34fccb9e42d2ee0e4ba1",
+    "quantpilot/paper/config.py": "63755a457a9829fc65af2859c96daf5db8b63d4e3b9e5d8fe4581f2d76747d8c",
+    "quantpilot/paper/intraday/__init__.py": "296998eec32702244eed4718587893017e98436056abc16334d7dabdd5d9dae8",
+    "quantpilot/paper/intraday/advisor.py": "7420bc2c9de313d068da9acbaaf78de7e504ae2c38e28d118d26faef1bb3051b",
+    "quantpilot/paper/intraday/collection.py": "21fbe258cbde457b7b7c6d57a294b5495a8d8e471516ab4c7058ce13ce10a91f",
+    "quantpilot/paper/intraday/controls.py": "5380ad078ebc0a571bd271fa76da7ec1703d563ce066b46bd015d3f231bf41d0",
+    "quantpilot/paper/intraday/data.py": "270a5ded1290a2b73ab9130b03b00b476288048b6c8a342c77c5436a7f5179af",
+    "quantpilot/paper/intraday/deployment.py": "dfa7b8e67c623ffed31faeb790ba2be04c8794b402fd1c23541356c7d138dede",
+    "quantpilot/paper/intraday/evaluation.py": "6af5f56848ce3c3ca97541f5a60eedc3adf0ad622d51b36f82df16f949340135",
+    "quantpilot/paper/intraday/replay.py": "d4a1219935c7140dada2d5c90ced12851d04dde8475f1ca4da09cdf7c5794072",
+    "quantpilot/paper/intraday/runtime.py": "9680c4c69696940605bc1f9db1921bf1dc454c8eb98f239c8dad114e0f6f99eb",
+    "quantpilot/paper/intraday/shadow.py": "1796835d17d8ee4ae98e303b30e0939206e0faa8e56b80301b149e4dec2cb757",
+    "quantpilot/paper/intraday/strategy.py": "68ec95d027feb8eb2a169979e72b1bff248f3ce6ff0d455c5af57f7314cc2403",
+    "quantpilot/paper/intraday/stream.py": "ea6e2191ee0eed9f10009b8dfe4749b720e19087fe7a1bdfca9eea57204e9598",
+    "quantpilot/paper/intraday/universe.py": "083c7fda4a36e150dcb291500e27a6134657bbf4c27655956427b89d3961dde6",
+    "quantpilot/paper/jobs.py": "9cc1a28f0f6c0fdd2987e96011eea88e8367685a6dcc04b2a43bdc6a0e09b50a",
+    "quantpilot/paper/reporting.py": "5b0cb074cc300d4f4893b335925728e81f45a63b1ed83e87f0ba7829ab5bd49a",
+    "quantpilot/paper/risk.py": "f5f0ab7a93e4074bf8758390555d28633fee04e570f4b9fbc13d5c9088d21ce3",
+    "quantpilot/paper/runtime.py": "6dd3e5f4e0e5881849e956289562d10f3f82904b9e9b31d2ce7cd0a2d1223360",
+    "quantpilot/paper/store.py": "f4e5e8a9a09c807ed42c2e95831830377d441c6c43f7ac35e6073fbe873a2278",
+    "quantpilot/tests/unit/test_intraday_advisory.py": "87cbbd63fb35bac25e2460a1135977917dc511124d415c42f730bb63dada16f4",
+    "quantpilot/tests/unit/test_intraday_data.py": "8e6fb07dc2c96c762d43a07cfa173dab78bf9e8337673575fef789adb47874e9",
+    "quantpilot/tests/unit/test_intraday_evaluation.py": "83004640eb6992d42734494c4c4564ac8774a337b541893a2a85227c8a29aeb8",
+    "quantpilot/tests/unit/test_intraday_replay.py": "20f08429a036f5af400111cbeeb0e7cc2fa371e7015f7b118c541cb9ce899c0b",
+    "quantpilot/tests/unit/test_intraday_shadow.py": "4b445d0709eccc035a4bce2ef77e14fe06cdba9a4d9cccca20e915c183319db9",
+    "quantpilot/tests/unit/test_intraday_stream.py": "016154ba34f0cd9f3a213f7c2f2ab0efd8543bfab57b4e8bdd50b7b2cd539703",
+    "quantpilot/tests/unit/test_intraday_v2_risk.py": "ba32140a216bc3fb9b32c6d51d95a1f96d54d3eb16b3cd6951fff03307fb96b9",
+    "quantpilot/tests/unit/test_intraday_v2_strategy.py": "66099c1d5562a920c601117556600184fc6467ebf31355f0cf86977a83978985",
+    "quantpilot/tests/unit/test_paper_submission_coordinator.py": "0cd83315e4de64200df2ce314cc74879fd5d3488d5f49fe92cfa567ba3c53469"
+  },
+  "owner_approval": {
+    "at": "2026-09-11T02:38:01.726329+00:00",
+    "statement": "승인할게. 목표는 단타 모의투자 시작이야.",
+    "scope": "Commit the reviewed paper market-data authentication change; begin intraday paper trading. No live trading or remote push.",
+    "security_disposition": "Owner exception for the existing new-broker-post-path finding; automated verdict remains BLOCK, not relabelled PASS."
+  }
+}

@@ -135,6 +135,15 @@ def entry_size(store, signal, quote, weight, now, *, trial=False, ignore_order_i
         2 * policy.fee_bps + policy.sell_tax_bps + 2 * policy.slippage_bps
     ) / 10000
     risk_budget = equity * policy.trade_risk
+    if policy.strategy_generation != "intraday_v2":
+        # The daily-loss and peak-drawdown budget gates every generation; the
+        # intraday_v2 branch below applies the same budget with its extra gates.
+        from quantpilot.paper.intraday.controls import loss_budget
+
+        budget = loss_budget(store, now, ignore_order_id)
+        if not budget["available"]:
+            return 0
+        risk_budget = min(risk_budget, budget["available"])
     if policy.strategy_generation == "intraday_v2":
         from quantpilot.paper.intraday.controls import (
             feed_fresh,

@@ -9,6 +9,6 @@ if(-not (Test-Path -LiteralPath $runtimePython)) {
     & $Python -m venv $EnvironmentDirectory
     if($LASTEXITCODE -ne 0) { throw 'paper_environment_creation_failed' }
 }
-& $runtimePython -m pip install 'fastapi==0.133.1' 'starlette==1.0.1' pydantic pyyaml uvicorn httpx pytest 'exchange-calendars==4.13.2'
+& $runtimePython -m pip install 'fastapi==0.133.1' 'starlette==1.0.1' pydantic pyyaml uvicorn httpx pytest 'exchange-calendars==4.13.2' 'websockets==15.0.1'
 if($LASTEXITCODE -ne 0) { throw 'paper_dependency_install_failed' }
 Write-Output 'Paper environment is installed. Trading remains disabled.'

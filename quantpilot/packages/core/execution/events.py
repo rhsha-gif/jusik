@@ -49,6 +49,7 @@ PaperExecutionSource = Literal[
     "broker_reconciliation",
     "process_recovery",
     "kill_cancel",
+    "operator_resolution",
     "schema_migration",
 ]
 PaperExecutionIdentityKind = Literal[
@@ -61,6 +62,7 @@ PaperMutationOrigin = Literal[
     "local_reconciliation_guard",
     "broker_reconciliation",
     "kill_cancel_journal",
+    "operator_resolution",
 ]
 
 PAPER_MUTATION_ORIGIN_SOURCES: dict[str, str] = {
@@ -73,6 +75,10 @@ PAPER_MUTATION_ORIGIN_SOURCES: dict[str, str] = {
     "local_reconciliation_guard": "local_reconciliation_guard",
     "broker_reconciliation": "broker_reconciliation",
     "kill_cancel_journal": "kill_cancel",
+    # An operator closing an outcome_unknown row after fresh broker queries found no
+    # evidence. Recorded under its own source so the audit trail never attributes a
+    # human judgement to broker evidence or to a local guard.
+    "operator_resolution": "operator_resolution",
 }
 
 

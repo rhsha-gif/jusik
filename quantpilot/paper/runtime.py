@@ -139,6 +139,14 @@ class Runtime:
                 self.store.put(
                     "ai_due", {"kind": "postclose", "key": day + ":postclose"}
                 )
+                if (
+                    policy.auto_pause_after_close
+                    and self.store.get("control") == "running"
+                ):
+                    # The next session must be resumed on purpose, never by an
+                    # unattended process that simply kept running overnight.
+                    self.store.control("pause")
+                    self.store.audit("auto_paused_after_close", {"day": day}, now)
                 return {"status": "postclose", "quarantined": len(positions)}
             liquidation = now >= session.closes - timedelta(
                 minutes=policy.liquidation_minutes
@@ -150,17 +158,17 @@ class Runtime:
             )
             if policy.data_mode == "paper_trading" and not self.store.get("day_base_valid", False):
                 no_entries = True
+            # Daily-loss and peak-drawdown halts apply to every strategy generation.
+            loss_state = self.store.get("intraday_loss_state", {})
+            no_entries = (
+                no_entries
+                or (loss_state.get("daily_halted", False) and loss_state.get("day") == day)
+                or loss_state.get("drawdown_halted", False)
+            )
             if policy.strategy_generation == "intraday_v2":
                 from quantpilot.paper.intraday.controls import feed_fresh
 
-                loss_state = self.store.get("intraday_loss_state", {})
-                no_entries = (
-                    no_entries
-                    or loss_state.get("daily_halted", False)
-                    and loss_state.get("day") == day
-                    or loss_state.get("drawdown_halted", False)
-                    or not feed_fresh(self.store, now)
-                )
+                no_entries = no_entries or not feed_fresh(self.store, now)
             # Cancel stale entry/exit limits once, then let reconciliation prove final status.
             for order in self.store.orders(True):
                 age = (now - datetime.fromisoformat(order["at"])).total_seconds()
@@ -181,6 +189,14 @@ class Runtime:
                     ),
                     self.clock(),
                 )
+            # Ambiguous rows never resolve themselves; call the operator once they persist.
+            if any(
+                o["state"] in {"outcome_unknown", "cancel_unknown"}
+                and (self.clock() - datetime.fromisoformat(o["at"])).total_seconds()
+                >= policy.manual_resolution_after_seconds
+                for o in self.store.orders(True)
+            ):
+                self.alert("manual_resolution_required", self.clock(), block=False)
             # Protect attributed positions before spending requests on discovery.
             for p in self.store.positions():
                 if not self.gateway.protection_allowed(p["symbol"]):
@@ -302,15 +318,14 @@ class Runtime:
             ):
                 self.store.put("control", "paused")
                 self.store.audit("flatten_completed", {}, self.clock())
-            if policy.strategy_generation == "intraday_v2":
-                from quantpilot.paper.intraday.controls import loss_budget, feed_fresh
+            from quantpilot.paper.intraday.controls import loss_budget
 
-                budget = loss_budget(self.store, self.clock())
-                no_entries = (
-                    no_entries
-                    or not budget["available"]
-                    or not feed_fresh(self.store, self.clock())
-                )
+            budget = loss_budget(self.store, self.clock())
+            no_entries = no_entries or not budget["available"]
+            if policy.strategy_generation == "intraday_v2":
+                from quantpilot.paper.intraday.controls import feed_fresh
+
+                no_entries = no_entries or not feed_fresh(self.store, self.clock())
             if no_entries or self.store.get("incident"):
                 return {"status": "protecting", "new_entries": False}
             # Evaluate each completed minute once. Position protection remains on every cycle.
@@ -516,7 +531,15 @@ class Runtime:
                     (at - datetime.fromisoformat(previous["at"])).total_seconds() >= 60):
                 self.store.audit("cycle_failed", detail | {"count": counts[key]}, at)
                 self.store.put("last_cycle_error", {"key": key, "at": at.isoformat()})
-            if detail["error"] == "KisPaperTransportError":
+            # Gateway refusals (per-second limit, token throttle) back off like transport
+            # failures; retrying every cycle would only keep the limit tripped.
+            if detail.get("broker_code") == "EGW00123":
+                # KIS reported the token expired ahead of our own schedule.
+                invalidate = getattr(self.gateway.client, "invalidate", None)
+                if callable(invalidate):
+                    invalidate()
+                    self.store.audit("token_invalidated_by_broker", {}, at)
+            if detail["error"] in {"KisPaperTransportError", "KisPaperGatewayRejected"}:
                 failures = min(6, self.store.get("broker_read_failures", 0) + 1)
                 self.store.put("broker_read_failures", failures)
                 self.store.put("broker_retry_after", (at + timedelta(seconds=min(60, 2 ** failures))).isoformat())

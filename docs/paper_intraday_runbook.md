@@ -28,8 +28,13 @@ python -m quantpilot.paper --json pause
 python -m quantpilot.paper --json resume
 python -m quantpilot.paper --json flatten
 python -m quantpilot.paper --json report
+python -m quantpilot.paper --json review-drawdown --reason "<10자 이상>"
+python -m quantpilot.paper --json recancel --order <주문 id>
+python -m quantpilot.paper --json resolve-unknown --order <주문 id> --reason "<10자 이상>"
 python -m quantpilot.paper --runtime-dir <원장 디렉터리> dashboard --port 8770
 ```
+
+`start`·`worker`·`reporter`는 `--once`로 한 주기만 실행할 수 있다. 존재하지 않는 `--runtime-dir`를 주면 새 원장이 만들어지므로 경로 오타에 주의한다.
 
 `dashboard`는 읽기 전용 현황 페이지다. 원장을 `mode=ro`로만 열고 127.0.0.1에만 바인딩하며 trader·worker·reporter 잠금을 잡지 않는다. 첫 화면에는 주의 경고(incident·손실 한도·오래된 미종결 주문·보호 대기·격리), 자산·손익 타일, 평가자산 곡선, 보유·미종결 주문, 전략별 요약만 둔다. 왕복 거래·주문 타임라인·운영 상태 상세·후보 종목 상태·감사 기록은 접힌 섹션이며 펼침 상태는 브라우저에만 저장된다. 5초마다 다시 읽는다. 평가자산 곡선은 이 프로세스가 `dashboard.sqlite3`에 직접 표본을 저장하므로 서버가 꺼진 시간은 비어 있다. 제어 명령은 제공하지 않으며 `powershell -NoProfile -File scripts/paper-runtime.ps1 -Action Dashboard -RuntimeDirectory <원장 디렉터리>`로 숨김 창에서 시작할 수 있다. 기본 포트 8770이 사용 중이면 실행 중인 프로세스를 종료하지 말고 `--port`로 다른 포트를 지정한다.
 
@@ -43,6 +48,30 @@ python -m quantpilot.paper --json config --expected-version 1 --set '{"data_mode
 
 `pause`는 신규 진입을 막고 다음 실행 주기에서 진입 미체결을 취소한다. 손절·마감 처리는 계속한다. `flatten`은 전량 청산 요청이며 원장과 주문이 모두 비면 `paused`로 바뀐다. 시장 폐장·미체결·응답 불명 상태에서는 완료를 보고하지 않는다. 재시작해도 pause 상태를 유지한다.
 
+장 마감 처리가 끝나면 살아 있는 trader는 스스로 `paused`로 바꾼다(`auto_pause_after_close`, 기본 true, 감사 `auto_paused_after_close`). 다음 거래일 진입은 반드시 `resume`으로 명시해야 한다. 마감 시각에 trader가 죽어 있었다면 자동 pause가 기록되지 않으므로, 재시작 전에 `status`로 `control`을 확인하고 필요하면 `pause`한다.
+
+일손실 1%·누적 낙폭 5% 한도는 전략 세대(`legacy`, `intraday_v2`)와 무관하게 신규 진입을 막고 거래당 위험 예산도 남은 손실 예산 안으로 제한한다. 상태는 `intraday_loss_state`로 `status`·대시보드에 나타나고 재시작·정책 변경을 넘어 유지된다. 이미 초기 자본 대비 5% 이상 잃은 기존 `legacy` 원장은 첫 기동에서 바로 누적 낙폭 halt가 된다. 해제는 `review-drawdown --reason <10자 이상>`뿐이며(원장이 비고 `paused`일 때만) 주문을 다시 켜지 않는다.
+
+## 응답 불명 상태의 운영자 해소
+
+브로커 응답이 끊긴 주문은 자동으로 재전송하거나 종결하지 않는다. `outcome_unknown`·`cancel_unknown` 상태가 5분(`manual_resolution_after_seconds`) 넘게 남으면 하루 한 번 `manual_resolution_required` DM을 보내고 신규 진입은 막힌 채 보호 매도만 계속한다. 두 명령 모두 `paused` 상태와 계좌 결합 일치를 요구하고, 전송은 토큰·잔고·일별 주문 조회만 허용된다.
+
+```powershell
+# 취소 POST가 응답 없이 끝난 주문: 원주문이 여전히 미체결이고 취소 자식 행이 없음을 일별 조회로 확인한 뒤 claim만 해제한다.
+# trader가 다음 주기에 취소를 한 번 더 보낸다. 취소 자식 행이 있거나 잔량이 0이면 거절한다. 당일 주문에만 적용되고
+# 전날 주문은 항상 거절된다(다음 거래일 조회로 종결 확인). trader 잠금은 잡지 않으므로 paused 상태의 trader가
+# 같은 순간 취소를 보내고 있었다면 브로커가 두 번째 취소를 업무 거절하고 대사가 종결을 확인한다(포지션 영향 없음).
+python -m quantpilot.paper --runtime-dir <원장> --json recancel --order <주문 id>
+
+# 주문 POST가 응답 없이 끝나고 브로커에 흔적이 없는 주문: trader를 멈춘 뒤(trader.lock 필요) 실행한다.
+# 10분 경과 + 최신 대사에서 일치 행 0건 + 같은 종목·방향·수량·가격의 주인 없는 당일 행이 없음 + 계좌 보유수량이
+# 원장과 일치할 때만 rejected로 종결하고 사유를 커널 이벤트(source=operator_resolution)와 감사에 남긴다.
+# 브로커가 주문을 보여주면 대신 accepted로 기록하고 거절한다.
+python -m quantpilot.paper --runtime-dir <원장> --json resolve-unknown --order <주문 id> --reason "<10자 이상>"
+```
+
+`recancel`·`resolve-unknown`이 주 1회 넘게 필요하면 시험운영 감사 건수(`cancel_failed`, `outcome_unknown`)를 근거로 조건부 자동 재시도 도입을 별도 검토한다.
+
 ## Windows 실행
 
 전용 Python 환경은 저장소 밖 `%USERPROFILE%\.quantpilot\runtime-venv`에 둔다. 설치·재현은 `powershell -NoProfile -File scripts/setup-paper.ps1`로 수행한다. 기존 Python 환경을 덮어쓰지 않는다. 이후 직접 Python 명령은 이 환경의 `Scripts\python.exe`를 사용한다.
@@ -53,9 +82,13 @@ python -m quantpilot.paper --json config --expected-version 1 --set '{"data_mode
 powershell -NoProfile -File scripts/paper-runtime.ps1 -Action Start
 ```
 
-실행기는 숨김 창으로 trader, AI worker, reporter를 각각 시작한다. 분봉 수집은 별도 스레드가 담당한다. 대화창과 독립적으로 실행되며 역할별 잠금과 계좌별 잠금으로 중복 운용을 거절한다. AI가 지연되어도 reporter는 별도 주기로 알림을 전달한다. PC 종료·절전 중에는 실행되지 않는다. 시작 실패는 `status`의 heartbeat와 incident로 확인한다. 실제 모의주문은 별도 수동 인수 절차에서 시작한다.
+실행기는 숨김 창으로 trader, AI worker, reporter를 각각 시작한다. 분봉 수집은 별도 스레드가 담당한다. 대화창과 독립적으로 실행되며 역할별 잠금과 계좌별 잠금으로 중복 운용을 거절한다. AI가 지연되어도 reporter는 별도 주기로 알림을 전달한다. PC 종료·절전 중에는 실행되지 않는다. 실제 모의주문은 별도 수동 인수 절차에서 시작한다.
 
-`exchange-calendars==4.13.2`가 필요한 선택 의존성이다 (`paper` extra). 설치되지 않으면 시장 시각을 추측하지 않고 시작을 거절한다. 거래일 정보는 설치된 달력 버전과 실제 거래소 공지를 수동 점검에서 대조해야 한다.
+각 역할의 stdout·stderr는 원장 디렉터리의 `logs\<역할>-<날짜>.out.log`·`.err.log`에 남는다. 시작이 거절되거나 크래시하면 그 파일과 감사 `process_failed`(Slack이 켜져 있으면 DM)로 확인한다. 장중(평일 08:50~15:40 KST) trader heartbeat가 3분 넘게 끊기면 reporter가 한 시간에 한 번 `liveness` DM을 보낸다. heartbeat는 주문 제출 플래그가 켜진 안전한 환경에서만 기록되므로, 프로세스가 살아 있어도 `KIS_PAPER_ORDER_SUBMISSION_ENABLED`가 꺼져 있으면 같은 DM이 온다. 자동 재시작은 없다.
+
+KIS 토큰은 1분에 1회만 발급되고 유효기간 안에서는 같은 토큰이 다시 내려온다. 여러 프로세스가 각자 발급해도 앞 토큰은 무효화되지 않지만, 1분 안에 두 번째 발급은 거절되므로 `Readiness`→`reconcile`→`Start`처럼 연달아 실행할 때는 1분 간격을 둔다. 이미 토큰을 가진 프로세스는 발급이 거절돼도 기존 토큰으로 계속 동작한다. 모의서버 조회 한도는 초당 약 2건이며 초과분은 HTTP 500 `EGW00201`로 거절되고 주문에 도달하지 않는다(확정 거부로 분류, 백오프 후 재시도).
+
+`exchange-calendars==4.13.2`·`websockets==15.0.1`이 필요한 선택 의존성이다 (`paper` extra, `setup-paper.ps1`이 설치). 달력이 없으면 시장 시각을 추측하지 않고 시작을 거절한다. KIS 휴장일 조회(`CTCA0903R`)는 모의서버가 지원하지 않으므로 거래일 정보는 설치된 달력 버전과 실제 거래소 공지를 수동 점검에서 대조해야 한다.
 
 ## 고정된 초기 전략·비용 가정
 

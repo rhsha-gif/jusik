@@ -28,6 +28,12 @@ class Policy(BaseModel):
     cycle_seconds: int = Field(default=10, ge=1, le=60)
     entry_cutoff_minutes: int = Field(default=30, ge=20, le=120)
     liquidation_minutes: int = Field(default=20, ge=10, le=60)
+    # After the session closes the trader pauses itself; the next session needs an
+    # explicit resume so an unattended process never re-enters on its own.
+    auto_pause_after_close: bool = True
+    # An outcome_unknown / cancel_unknown order older than this raises a non-blocking
+    # operator alert; ambiguous broker states are never resolved automatically.
+    manual_resolution_after_seconds: int = Field(default=300, ge=60, le=3600)
     primary_ai: Literal["claude", "codex"] = "claude"
     ai_enabled: bool = False
     research_enabled: bool = False

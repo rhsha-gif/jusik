@@ -203,6 +203,9 @@ _LOCAL_GUARD_REJECTION_CODES = {
     "paper_session_closed_after_claim",
     "local_configuration_error",
 }
+# The only code an operator may write: an outcome_unknown row closed as rejected after a
+# fresh query-only reconciliation found no broker row and the holding matched the ledger.
+_OPERATOR_RESOLUTION_CODE = "operator_resolved_no_broker_evidence"
 _LOCAL_PRE_DISPATCH_STATUS_BY_CODE = {
     "paper_kill_engaged": "expired_pre_dispatch",
     "risk_check_expired": "expired_pre_dispatch",
@@ -501,6 +504,34 @@ def _validate_dispatch_source(
             error="broker reconciliation delta is invalid",
         )
         return
+    if event.source == PAPER_MUTATION_ORIGIN_SOURCES["operator_resolution"]:
+        # A human closed a quarantined row. The only legal fact from this origin is
+        # the terminal rejection of an unknown row that carries no fill and no broker
+        # identifier: never a relabel of accepted evidence and never a retry.
+        if (
+            event.event_type != "OrderRejected"
+            or before.status != "outcome_unknown"
+            or before.attempt_count != 1
+            or before.cumulative_filled_quantity != 0
+            or before.fill_evidence
+            or before.broker_order_reference is not None
+            or after.last_error_code != _OPERATOR_RESOLUTION_CODE
+        ):
+            raise PaperEventStreamCorruption("operator resolution delta is invalid")
+        _require_exact_dispatch_copy(
+            before,
+            after,
+            updates={
+                "status": "rejected",
+                "reconciliation_status": "reconciled",
+                "last_error_code": after.last_error_code,
+                "updated_at": after.updated_at,
+                "reconciled_at": after.updated_at,
+                "revision": before.revision + 1,
+            },
+            error="operator resolution delta is invalid",
+        )
+        return
     raise PaperEventStreamCorruption("dispatch source is not allowed for this mutation")
 
 
@@ -529,6 +560,9 @@ def _validate_reservation_source(
             ("released_expired", "failed_pre_dispatch"),
             ("released_rejected", "rejected"),
         },
+        # An operator-closed unknown row releases its reservation exactly like any
+        # other definitive rejection; no other reservation fact may come from a human.
+        "operator_resolution": {("released_rejected", "rejected")},
     }
     if (after.status, after.release_reason) not in release_pairs_by_source.get(
         event.source,

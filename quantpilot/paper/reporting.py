@@ -262,6 +262,72 @@ def drain_outbox(store, sender):
             store.db.execute("UPDATE outbox SET state='sent' WHERE id=?", (row["id"],))
 
 
+LIVENESS_GRACE_SECONDS = 180
+
+
+def _queued(store, key, text, now):
+    if store.db.execute("SELECT 1 FROM outbox WHERE id=?", (key,)).fetchone():
+        return False
+    store.enqueue(key, text, now)
+    return True
+
+
+def record_process_failure(store, role, result, now=None):
+    """A hidden process that fails to start must leave evidence in the ledger."""
+    now = now or datetime.now(timezone.utc)
+    reason = result.get("reason", "unknown")
+    store.audit("process_failed", {"role": role, "reason": reason}, now)
+    if store.policy.slack_enabled:
+        from quantpilot.paper.calendar import KST
+
+        key = f"process_failed:{role}:{now.astimezone(KST).date().isoformat()}:{reason}"
+        _queued(
+            store,
+            key,
+            f"QuantPilot 모의운용 알림: {role} 프로세스 시작 실패 ({reason})\n"
+            "원장 디렉터리의 logs 파일과 status를 확인하세요.",
+            now,
+        )
+
+
+def check_trader_liveness(store, now):
+    """One DM per hour while an armed trader stops heartbeating during KRX hours.
+
+    The reporter has no exchange calendar, so weekday session hours are approximated;
+    a holiday can produce a few extra reminders, a dead trader never produces none.
+    """
+    if store.get("control") == "stopped" or not store.policy.slack_enabled:
+        return False
+    from quantpilot.paper.calendar import KST
+
+    local = now.astimezone(KST)
+    if local.weekday() >= 5 or not (
+        (8, 50) <= (local.hour, local.minute) <= (15, 40)
+    ):
+        return False
+    heartbeat = store.get("heartbeat")
+    try:
+        age = (now - datetime.fromisoformat(heartbeat)).total_seconds()
+    except (TypeError, ValueError):
+        age = None
+    if age is not None and 0 <= age <= LIVENESS_GRACE_SECONDS:
+        return False
+    key = f"liveness:{local.date().isoformat()}:{local.hour:02d}"
+    queued = _queued(
+        store,
+        key,
+        "QuantPilot 모의운용 알림: trader heartbeat 없음"
+        f" (마지막 {heartbeat or '없음'})\n"
+        "보유 포지션 보호가 멈췄을 수 있습니다. 프로세스와 logs를 확인하세요.",
+        now,
+    )
+    if queued:
+        store.audit(
+            "trader_liveness_alert", {"heartbeat": heartbeat, "age_seconds": age}, now
+        )
+    return queued
+
+
 def enqueue_recovery_report(store, now):
     """Supersede unsent history atomically; never requeue ambiguous deliveries."""
     key = "recovery:" + str(store.get("valuation_invalidated_before", now.isoformat()))

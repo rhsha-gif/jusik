@@ -115,6 +115,11 @@ def parser():
     conf.add_argument("--expected-version", type=int)
     review = sub.add_parser("review-drawdown")
     review.add_argument("--reason", required=True)
+    recancel = sub.add_parser("recancel")
+    recancel.add_argument("--order", required=True)
+    resolve = sub.add_parser("resolve-unknown")
+    resolve.add_argument("--order", required=True)
+    resolve.add_argument("--reason", required=True)
     dashboard = sub.add_parser("dashboard")
     dashboard.add_argument("--port", type=int, default=8770)
     dashboard.add_argument("--sample-seconds", type=float, default=10)
@@ -203,8 +208,36 @@ def main(argv=None):
         elif args.command in {"pause", "resume", "flatten"}:
             store.control(args.command)
             result = {"control": store.get("control"), "completion": "requested"}
+        elif args.command in {"recancel", "resolve-unknown"}:
+            from quantpilot.paper.operator import (
+                release_cancel_claim,
+                resolve_unknown_dispatch,
+            )
+            from quantpilot.paper.recovery import build_client
+
+            clock = lambda: datetime.now(timezone.utc)
+            # Query-only transport: token, balance and daily orders. No order POST.
+            client = build_client(os.environ, clock)
+            if args.command == "recancel":
+                result = release_cancel_claim(store, client, args.order, clock())
+            else:
+                try:
+                    lock = process_lock(directory / "trader.lock")
+                    lock.__enter__()
+                except OSError:
+                    raise ValueError("trader_running") from None
+                try:
+                    result = resolve_unknown_dispatch(
+                        store, client, args.order, args.reason, clock()
+                    )
+                finally:
+                    lock.__exit__(None, None, None)
         elif args.command == "reporter":
-            from quantpilot.paper.reporting import SlackDM, drain_outbox
+            from quantpilot.paper.reporting import (
+                SlackDM,
+                check_trader_liveness,
+                drain_outbox,
+            )
 
             with process_lock(directory / "reporter.lock"):
                 store.db.execute(
@@ -212,6 +245,7 @@ def main(argv=None):
                 )
                 while True:
                     store.put("reporter_heartbeat", datetime.now(timezone.utc).isoformat())
+                    check_trader_liveness(store, datetime.now(timezone.utc))
                     if store.policy.slack_enabled:
                         drain_outbox(store, SlackDM(os.environ))
                     result = {"status": "reporter_ready"}
@@ -275,7 +309,17 @@ def main(argv=None):
         )
         return 130
     except Exception as exc:
-        print(json.dumps(blocked_result(exc)))
+        result = blocked_result(exc)
+        if args.command in {"start", "worker", "reporter"}:
+            # Hidden processes have no console; the ledger is the only place a
+            # refused start or a crash can be seen.
+            try:
+                from quantpilot.paper.reporting import record_process_failure
+
+                record_process_failure(store, args.command, result)
+            except Exception:
+                pass
+        print(json.dumps(result))
         return 2
     finally:
         store.close()

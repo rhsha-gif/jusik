@@ -12,7 +12,7 @@ import urllib.request
 from collections.abc import Mapping
 from calendar import monthrange
 from dataclasses import dataclass, field, replace
-from datetime import date, datetime
+from datetime import date, datetime, timedelta, timezone
 from decimal import Decimal, InvalidOperation
 from types import MappingProxyType
 from typing import Any, Literal, Protocol, runtime_checkable
@@ -62,6 +62,17 @@ _ALLOWED_ENDPOINTS = frozenset(
 _SAFE_CODE = re.compile(r"[A-Za-z0-9_.-]{1,32}\Z")
 _SYMBOL = re.compile(r"[A-Z0-9]{6}\Z")
 _MAX_RESPONSE_BYTES = 1_000_000
+# Gateway refusals observed on the paper server (2026-09-12 read-only probe). They arrive as
+# HTTP 4xx/5xx with a JSON body and mean the request was never forwarded to the order system,
+# so they are definitive rejections rather than unknown outcomes. Any other non-2xx status
+# stays a transport error and, for an order POST, an unknown outcome.
+_GATEWAY_REJECTION_CODES = frozenset({
+    "EGW00201",  # per-second request limit exceeded
+    "EGW00123",  # access token expired
+    "EGW00133",  # token issuance allowed once per minute
+    "EGW02006",  # API not supported on the paper server
+})
+_KST = timezone(timedelta(hours=9))
 _MAX_PAGES = 100
 
 
@@ -98,6 +109,14 @@ class KisPaperProtocolError(KisPaperError):
 
 class KisPaperBusinessError(KisPaperError):
     """KIS explicitly rejected a valid request."""
+
+
+class KisPaperGatewayRejected(KisPaperBusinessError):
+    """The KIS gateway refused the request before forwarding it; the outcome is definitive."""
+
+    def __init__(self, message: str, *, code: str) -> None:
+        super().__init__(message)
+        self.code = code
 
 
 class KisPaperOrderOutcomeUnknown(KisPaperError):
@@ -212,7 +231,7 @@ class StrictUrllibKisPaperTransport:
                 status_code = int(response.getcode())
                 response_headers = {"tr_cont": response.headers.get("tr_cont", "")}
         except urllib.error.HTTPError as exc:
-            raise KisPaperTransportError(f"KIS paper HTTP status {exc.code}") from None
+            raise _classify_http_error(exc) from None
         except (
             urllib.error.URLError,
             http.client.HTTPException,
@@ -313,6 +332,9 @@ class KisPaperAccessToken:
     access_token: str = field(repr=False)
     token_type: str
     expires_in_seconds: int
+    # Absolute expiry reported by KIS (converted to UTC). Re-issuing inside the token's
+    # life returns the same token with the original expiry, so this is the reliable anchor.
+    expires_at: datetime | None = None
 
 
 @dataclass(frozen=True)
@@ -513,6 +535,9 @@ class KisPaperClient:
             access_token=token,
             token_type=token_type,
             expires_in_seconds=expires_in,
+            expires_at=_parse_token_expiry(
+                response.payload.get("access_token_token_expired")
+            ),
         )
 
     def get_current_price(self, symbol: str, *, exchange: str = "KRX") -> KisCurrentPrice:
@@ -1135,6 +1160,39 @@ def _validate_market_request(symbol: str, exchange: str) -> str:
     if not _SYMBOL.fullmatch(normalized):
         raise KisPaperConfigurationError("KIS paper symbol must be six alphanumeric characters")
     return normalized
+
+
+def _classify_http_error(exc: urllib.error.HTTPError) -> KisPaperError:
+    """Keep only the safe response code from a non-2xx body; never provider text."""
+    code = "unavailable"
+    try:
+        raw = exc.read(_MAX_RESPONSE_BYTES + 1)
+        if raw and len(raw) <= _MAX_RESPONSE_BYTES:
+            decoded = json.loads(raw.decode("utf-8"))
+            if isinstance(decoded, dict):
+                code = _safe_response_code(
+                    decoded.get("msg_cd") or decoded.get("error_code")
+                )
+    except Exception:
+        code = "unavailable"
+    status = int(exc.code)
+    if code in _GATEWAY_REJECTION_CODES:
+        return KisPaperGatewayRejected(
+            f"KIS paper gateway refused the request with HTTP status {status} (code={code})",
+            code=code,
+        )
+    suffix = f" (code={code})" if code != "unavailable" else ""
+    return KisPaperTransportError(f"KIS paper HTTP status {status}{suffix}")
+
+
+def _parse_token_expiry(value: Any) -> datetime | None:
+    if not isinstance(value, str) or not value.strip():
+        return None
+    try:
+        naive = datetime.strptime(value.strip(), "%Y-%m-%d %H:%M:%S")
+    except ValueError:
+        return None
+    return naive.replace(tzinfo=_KST).astimezone(timezone.utc)
 
 
 def _ensure_http_success(response: KisHttpResponse, operation: str) -> None:

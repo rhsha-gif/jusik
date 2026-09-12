@@ -121,6 +121,7 @@ class KisGateway:
             self.store.audit("reconciliation_diagnostics", {"orders": diagnostics}, now)
         self.store.put("reconciliation_diagnostics", diagnostics)
         self.balance = result.broker_balance
+        before_positions = {p["symbol"]: p["quantity"] for p in self.store.positions()}
         for order in self.store.orders(True):
             dispatch = self.kernel.load_paper_order_dispatch(order["id"])
             if dispatch is None:
@@ -144,7 +145,11 @@ class KisGateway:
             )
         local = {p["symbol"]: p["quantity"] for p in self.store.positions()}
         self.store.verify_cash()
-        self.balance = self.client.get_balance()
+        # The reconciler's balance predates its daily-order query. When that query
+        # just applied a fill, the holding may have moved after the balance snapshot,
+        # so refresh it; otherwise reuse the snapshot and save the request budget.
+        if local != before_positions:
+            self.balance = self.client.get_balance()
         remote = {
             p.symbol: p.holding_quantity
             for p in self.balance.positions
@@ -360,6 +365,7 @@ class KisGateway:
                 ),
             )
         reserve = max(0.0, snapshot.cash - notional * (1 + policy.fee_bps / 10000))
+        power = None
         if order["side"] == "buy":
             power = self.client.get_buying_power(
                 order["symbol"], Decimal(str(order["price"])), exchange="KRX"
@@ -400,6 +406,7 @@ class KisGateway:
             quote_max_age_seconds=policy.quote_ttl_seconds,
             snapshot_max_age_seconds=policy.quote_ttl_seconds,
             minimum_cash_reserve=reserve,
+            buying_power=power,
         )
         self.store.update_order(order["id"], "submitted", 0, 0, now)
         self.coordinator.submit_prepared_order(plan)

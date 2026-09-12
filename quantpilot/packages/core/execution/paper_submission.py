@@ -3,6 +3,7 @@ from __future__ import annotations
 import hashlib
 import http.client
 import json
+import re
 from collections.abc import Callable
 from datetime import datetime, timedelta
 from decimal import Decimal, ROUND_CEILING, ROUND_FLOOR
@@ -352,6 +353,7 @@ class DurablePaperSubmissionCoordinator:
         quote_max_age_seconds: int,
         snapshot_max_age_seconds: int,
         minimum_cash_reserve: float,
+        buying_power: KisBuyingPower | None = None,
     ) -> PaperOrderDispatch:
         if self._store.paper_kill_blocks_submission():
             raise RuntimeError("paper_kill_blocks_submission")
@@ -444,18 +446,28 @@ class DurablePaperSubmissionCoordinator:
             and quantity > orderable_quantity
         ):
             raise ValueError("paper sell exceeds snapshot orderable quantity")
-        buying_power: KisBuyingPower | None = None
         if order_plan.intent.side == "buy":
-            try:
-                buying_power = self._client.get_buying_power(
-                    symbol,
-                    Decimal(str(int(limit_price))),
-                    exchange="KRX",
-                )
-            except Exception as exc:
-                raise RuntimeError(
-                    "KIS paper buying-power evidence is unavailable"
-                ) from None
+            if buying_power is not None:
+                # A caller may pass the buying-power inquiry it just made for this
+                # exact symbol and limit price; the paper server budget is about one
+                # request per second, so the evidence is reused rather than re-queried.
+                if buying_power.symbol != symbol or buying_power.limit_price != Decimal(
+                    str(int(limit_price))
+                ):
+                    raise ValueError(
+                        "paper buying-power evidence does not match the order"
+                    )
+            else:
+                try:
+                    buying_power = self._client.get_buying_power(
+                        symbol,
+                        Decimal(str(int(limit_price))),
+                        exchange="KRX",
+                    )
+                except Exception as exc:
+                    raise RuntimeError(
+                        "KIS paper buying-power evidence is unavailable"
+                    ) from None
             raw_broker_cash = min(
                 buying_power.orderable_cash,
                 buying_power.no_receivable_buy_amount,
@@ -472,6 +484,7 @@ class DurablePaperSubmissionCoordinator:
                 raise ValueError("paper buy exceeds no-receivable broker cash")
             broker_cash: float | None = float(broker_cash_krw)
         else:
+            buying_power = None
             broker_cash_krw = None
             broker_cash = None
             broker_quantity = None
@@ -815,15 +828,19 @@ class DurablePaperSubmissionCoordinator:
                 rejected,
                 "paper order was rejected before a usable broker request",
             ) from None
-        except KisPaperBusinessError:
+        except KisPaperBusinessError as exc:
             rejected = self._definitive_rejection(
                 claimed,
                 error_code="broker_business_rejected",
                 mutation_origin="broker_post_result",
             )
+            # Keep only the safe broker code so audits can count gateway refusals
+            # (per-second limit, token) separately from business rejections.
+            code = getattr(exc, "code", None) or _safe_code_from_message(str(exc))
             raise PaperSubmissionRejected(
                 rejected,
-                "KIS paper explicitly rejected the order",
+                "KIS paper explicitly rejected the order"
+                + (f" (code={code})" if code else ""),
             ) from None
         except KisPaperOrderOutcomeUnknown:
             unknown = self._outcome_unknown(claimed, "broker_response_ambiguous")
@@ -1151,6 +1168,12 @@ def _durable_order_expiry(payload: object) -> datetime:
     if expiry.tzinfo is None or expiry.utcoffset() is None:
         raise ValueError("durable paper order expiry must include a UTC offset")
     return expiry
+
+
+def _safe_code_from_message(message: str) -> str | None:
+    """Extract only a `(code=...)` marker; provider text never travels further."""
+    found = re.search(r"\(code=([A-Za-z0-9_.-]{1,32})\)", message)
+    return found.group(1) if found else None
 
 
 def _effective_submission_deadline(dispatch: PaperOrderDispatch) -> datetime:

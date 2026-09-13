@@ -1,5 +1,24 @@
 # QuantPilot 현재 상태 (living document)
 
+## 최근 완료 (2026-09-12, 모의투자 단타 점검·무인 안전망)
+
+fable 독립 에이전트 4개(내부 감사 2, KIS 오픈소스 대조 2)로 CLI 모의운용 하네스를 점검하고
+읽기 전용 KIS 모의서버 프로브로 사실을 확정했다: 조회 한도 초당 약 2건 초과는 HTTP 500 `EGW00201`,
+토큰은 유효기간 안 재발급 시 동일 토큰(1분 내 재요청만 403), 휴장일 조회 `CTCA0903R`은 모의 미지원,
+미체결 만료 행 표현은 여전히 미관측. 확인된 high 5건(취소 미상 영구 봉쇄, 미상 종결 경로 부재,
+`legacy` 세대 손실 한도 미적용, 장후 자동 재개, 크래시 무흔적)과 커넥터 갭 3건을 구현했다
+(`c8057bb`, `e9ad4d2`): 게이트웨이 거부 코드는 확정 거부로 분류·백오프, 토큰 절대 만료 기준 갱신·
+발급 거절 시 보유 토큰 유지, 대사 요청 중복 제거, 손실 한도의 세대 무관 적용, 마감 후 자동 `paused`,
+역할별 로그·시작 실패 감사·장중 heartbeat 단절 DM, 운영자 명령 `recancel`·`resolve-unknown`
+(커널 출처 `operator_resolution`, query-only 전송). **자동 재-POST는 넣지 않았고 at-most-once는 그대로다**;
+수동 개입이 주 1회를 넘기면 조건부 자동 재시도를 재검토한다.
+검증 pytest **1,678 passed·2 skipped** (junit), smoke OK (broker mock, live 비활성, operator blocked),
+`tach check` 통과, 독립 리뷰 PASS(필수 수정 5건 반영), `/ship` 보안 게이트 pass(gitleaks·semgrep 0).
+9월 14일 07:39 KST 시험운영 프로세스 4개를 새 코드로 재시작했고(`paused`, 보유 1종목 2주, heartbeat 정상)
+runtime-venv에 `websockets` 설치를 확인했다. 비차단 한계(라이브 준비 주장 아님): 주문 POST 경로의
+EGW 5xx가 OMS 전달 전 거부인지는 미관측, 취소 자식 행 표현 미관측, `VTTC0084R`·휴장일 API는 모의 미지원.
+상세: [점검 통합 보고서](plans/paper-audit-20260912.md)와 원본 4건, [운용 문서](paper_intraday_runbook.md).
+
 ## 최근 완료 (2026-09-11, 모의투자 체결 원장 복구)
 
 KIS 원주문 번호의 다중 0 값을 인식하지 못해 체결을 놓치던 대사 조건을 수정했다.
@@ -49,7 +68,7 @@ Slack 수정 후 최종 검증 **1,489 passed·2 skipped**, smoke·tach 통과.
 
 > 이 문서는 시점별 보고서가 아니라 **갱신형 현황판**입니다.
 > 스테이지가 끝날 때마다 이 파일을 덮어쓰고, 상세 근거는 기존 `docs/*_report.md`에 남깁니다.
-> 마지막 갱신: **2026-09-11**
+> 마지막 갱신: **2026-09-14**
 
 ## 목적 (한 줄)
 
@@ -59,7 +78,7 @@ Slack 수정 후 최종 검증 **1,489 passed·2 skipped**, smoke·tach 통과.
 
 | 영역 | 상태 | 비고 |
 |---|---|---|
-| CLI 모의운용 하네스 | 🟡 구현·복구 인수 완료, 실제 청산 대기 | `quantpilot.paper`; 실제 모의 체결 대사·원장 복구·Slack API 접수 확인, 다음 세션 청산·Docker 인수는 미완료 |
+| CLI 모의운용 하네스 | 🟡 점검·안전망 반영, 실제 청산 대기 | `quantpilot.paper`; 2026-09-12 감사 high 5건 수정·운영자 해소 명령·세대 무관 손실 한도·자동 pause·로그/liveness 반영, 9/14 새 코드로 재시작(`paused`). 다음 세션 청산·Docker 인수는 미완료 |
 | 모의운용 읽기 전용 대시보드 | ✅ 완료 (2026-09-11) | `quantpilot.paper dashboard`, loopback 전용, 원장 `mode=ro`, 제어 없음 |
 | 구형 웹 클라이언트 | 제거 완료 | 2026-09-10 승인 목록 59개 삭제; 아래 Level·UI 관련 항목은 구형 구현의 역사적 상태 |
 | Level 1-2 신호→제안/모의체결 | ✅ 완료 | `/run` 제안 전용, `/mock-execute` MockBroker 체결 + 타이밍 판단 요약 |
@@ -72,7 +91,7 @@ Slack 수정 후 최종 검증 **1,489 passed·2 skipped**, smoke·tach 통과.
 | 데이터: fixture | ✅ 기본값 | |
 | 데이터: local_historical (CSV) | ✅ 완료 + **실데이터 검증됨** | `fetch_krx_local_data` 잡으로 pykrx→CSV, 실 KRX 일봉으로 스모크 통과 |
 | 데이터: external_historical (KIS) | 🟡 코드 완성, 실서버 미검증 | 가짜 transport로 단위 테스트됨; 실 키 확보 시 `RUN_KIS_MANUAL_INTEGRATION=1` 수동 테스트 준비됨 |
-| KIS 토큰 발급 (`/oauth2/tokenP`) | ✅ 헬퍼 구현 (실서버 미검증) | `request_access_token(_from_env)` — 앱키/시크릿으로 발급; fake transport 단위 테스트 완료, 실 키 확보 시 수동 검증 |
+| KIS 토큰 발급 (`/oauth2/tokenP`) | ✅ 실서버 실측 (2026-09-12) | 발급 200·`access_token_token_expired` 절대 만료·유효기간 안 재발급은 동일 토큰·1분 내 재요청은 HTTP 403. `RefreshingClient`가 절대 만료 기준 갱신, 발급 거절 시 보유 토큰 유지, `EGW00123` 수신 시 재발급 |
 | 뉴스 브리핑 (구상 ①) | 🟡 골격 완료 (fixture) | 읽기 전용 격리 경계 + `GET /api/briefing/daily`; 프론트 페이지 완료, 실제 수집기는 후속 |
 | 리서치 에이전트 (시황 3·투자 4·보안 게이트 1) | 🟡 구현 완료, 실전 1주 미측정 (2026-09-04) | `services/research_agents` 격리 패키지(`tach.toml`), 네이버 파이낸스 공개 엔드포인트 + 네이버 뉴스 API, `claude -p --agent` 헤드리스, 산출물은 `~/investment-decisions/market|candidates`. `docs/research_agents.md` |
 | 실시간 일반 provider | ❌ 미구현, fail closed | 일반 provider factory는 realtime/paper 요청을 fixture로 fallback하지 않음 |
@@ -337,15 +356,24 @@ Slack 수정 후 최종 검증 **1,489 passed·2 skipped**, smoke·tach 통과.
 2. durable outbox + account single-writer
 3. authoritative execution/position/cash/NAV ledger + reconciliation break workflow
 4. continuous OMS/risk/reconciliation runtime과 운영 health/metric
-5. Gate P: 명시적 사용자 권한 아래 실제 KIS paper 수동 검증
-6. 제품 backlog: 승인 기준 확정, `conflict_rule`/상관 예산, capital_epoch 원장,
+5. Gate P: 명시적 사용자 권한 아래 실제 KIS paper 수동 검증 — 2026-09-12 읽기 전용 프로브로
+   토큰·조회 한도·휴장일 API 사실은 확정, 남은 것은 주문 POST 경로의 EGW 5xx 의미·미체결 만료 행·
+   취소 자식 행 표현·동시호가 호가 갱신(9/14 이후 시험운영에서 관측)
+6. 시험운영 감사 집계: `cycle_failed`의 `broker_code=EGW*`, `manual_resolution_required`,
+   `recancel`/`resolve-unknown` 사용 빈도가 주 1회를 넘기면 조건부 자동 재시도 설계 재검토
+7. 감사 후순위 발견(F9 forwarding ID 지연 인시던트, F10 대사 예외 격리, F11 휴장일 대안,
+   F13 CLI 오류 메시지·빈 원장 생성, F14 취소 루프 상한)과 게이트 권고 SG-02(`KisBuyingPower` 시각)
+8. 제품 backlog: 승인 기준 확정, `conflict_rule`/상관 예산, capital_epoch 원장,
    권위 있는 KRX 캘린더, 동일 타임스탬프 체결 ordering
 
 ## 사람 입력 대기
 
-- [ ] KIS 오픈API 앱키/시크릿 (계좌 개설 필요; 모의투자 도메인 `openapivts.koreainvestment.com:29443`)
-- [ ] Gate P 명시적 수동 권한: `VTTC0084R`, real buying-power field mapping,
-  session-calendar 경계, 소량 paper round trip과 cancel 결과 확인
+- [x] ~~KIS 오픈API 앱키/시크릿 (계좌 개설 필요; 모의투자 도메인 `openapivts.koreainvestment.com:29443`)~~
+  → 모의 전용 키로 2026-09-10 읽기 프로브 통과, 2026-09-11 실제 모의 체결 대사, 2026-09-12 토큰·한도 프로브 완료
+  (키는 사용자 환경변수에만 있고 저장소에 없다)
+- [ ] Gate P 명시적 수동 권한: ~~`VTTC0084R`~~(모의 미지원 확인, 일별 조회 경로로 대체) real buying-power
+  field mapping, session-calendar 경계, 소량 paper round trip과 cancel 결과 확인 — 남은 관측 항목은
+  "다음 단계 후보" 5번
 - [x] ~~Stage 03 거래비용·세금 가정치~~ → 확정: 한투 실거래 API·일반 개인 기준
   (`backtest/costs.py`; 뱅키스 온라인이 아닌 영업점 계좌면 `--fee-bps 14.7` 오버라이드)
 - [ ] 슬리피지(현 5bps)·체결버퍼 가정치 — 연구용 가정 유지 중, 브로커 확인 전
@@ -367,9 +395,10 @@ Slack 수정 후 최종 검증 **1,489 passed·2 skipped**, smoke·tach 통과.
 ## 검증 명령
 
 ```powershell
-python -m pytest quantpilot/tests -p no:cacheprovider --basetemp=.pytest_tmp `
-  --junitxml=.pytest_tmp/results.xml
-python -m quantpilot.jobs.run_smoke
-python -m quantpilot.jobs.run_kis_paper_kill engage
-# CLI 모의운용: python scripts/verify-paper.py / tach check (웹 제거 완료)
+# 인터프리터는 프로젝트 .venv (pytest·fastapi·pydantic 설치됨). basetemp는 실행마다 고유해야 한다.
+.venv\Scripts\python.exe scripts\verify-paper.py          # 자격증명 제거 후 pytest 전체 + run_smoke
+.venv\Scripts\python.exe -m pytest quantpilot/tests -p no:cacheprovider `
+  --basetemp ".pytest_tmp/$PID" --junitxml ".pytest_tmp/$PID/results.xml"   # 수치는 junit에서 읽는다
+& "$env:USERPROFILE/.local/share/aorch-tools/.venv/Scripts/tach.exe" check     # 프로젝트 .venv에는 tach 없음
+# 구형 킬 잡(run_kis_paper_kill)은 CLI 하네스의 유일한 durable 킬 펜스로 유지 중이며 검증 필수 명령은 아니다
 ```

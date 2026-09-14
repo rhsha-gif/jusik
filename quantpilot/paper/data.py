@@ -13,8 +13,12 @@ import urllib.parse
 from quantpilot.paper.http import open_request
 
 from quantpilot.paper.calendar import KST
-from quantpilot.paper.config import aware
+from quantpilot.paper.config import BAR_FINALITY_GRACE_SECONDS, aware
 from quantpilot.packages.core.kis_paper import KisPaperClient, _assert_business_success
+
+# The paper server allows about two requests per second; one process keeps well
+# under half of that so a second read (collector thread) never trips the limit.
+LIMITER_INTERVAL = 1.05
 
 
 class DataUnavailable(RuntimeError):
@@ -22,7 +26,7 @@ class DataUnavailable(RuntimeError):
 
 
 class RateLimiter:
-    def __init__(self, interval=1.05, clock=time.monotonic, sleep=time.sleep):
+    def __init__(self, interval=LIMITER_INTERVAL, clock=time.monotonic, sleep=time.sleep):
         self.interval = interval
         self.clock = clock
         self.sleep = sleep
@@ -53,10 +57,11 @@ def symbol_code(value):
     return value
 
 
-def parse_minutes(symbol, rows, now):
+def parse_minutes(symbol, rows, now, grace_seconds=BAR_FINALITY_GRACE_SECONDS):
     from quantpilot.paper.strategy import Bar
 
     day = aware(now).astimezone(KST).date()
+    finality = timedelta(minutes=1, seconds=grace_seconds)
     result = []
     seen = set()
     if not isinstance(rows, list) or len(rows) > 1000:
@@ -69,8 +74,8 @@ def parse_minutes(symbol, rows, now):
             at = datetime.strptime(stamp, "%Y%m%d%H%M%S").replace(tzinfo=KST)
             if at.date() != day or at.second != 0 or at > now:
                 raise ValueError()
-            if at + timedelta(minutes=1) > now:
-                continue  # forming candle, not a closed-bar input
+            if at + finality > now:
+                continue  # forming, or closed too recently to be final
             if at in seen:
                 raise ValueError()
             seen.add(at)
@@ -95,7 +100,7 @@ class PaperMarket:
         self.quote_provider = quote_provider
         self.public_fetch = public_fetch or self._public_fetch
 
-    def minutes(self, symbol, now):
+    def minutes(self, symbol, now, grace_seconds=BAR_FINALITY_GRACE_SECONDS):
         response = self.client._authenticated_get(
             "/uapi/domestic-stock/v1/quotations/inquire-time-itemchartprice",
             "FHKST03010200",
@@ -108,7 +113,7 @@ class PaperMarket:
             },
         )
         _assert_business_success(response, "paper_minutes")
-        return parse_minutes(symbol, response.payload.get("output2"), now)
+        return parse_minutes(symbol, response.payload.get("output2"), now, grace_seconds)
 
     def quotes(self, symbols):
         snap = self.quote_provider.get_quotes(symbols)

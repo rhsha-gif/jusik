@@ -8,6 +8,13 @@ from pydantic import BaseModel, ConfigDict, Field, model_validator
 
 STRATEGIES = ("opening_range_breakout", "trend_pullback", "range_reversion")
 
+# A minute bar is treated as final only this many seconds after it closed. The KIS
+# paper server still revises a just-closed bar for a few seconds (revisions were
+# observed up to ~10 s after the boundary on 2026-09-14); an early read would be
+# stored as completed and later quarantined as "completed_bar_revised". This is a
+# data-correctness constant, not operator policy, so it is not a Policy field.
+BAR_FINALITY_GRACE_SECONDS = 15
+
 
 class Policy(BaseModel):
     model_config = ConfigDict(extra="forbid", frozen=True, allow_inf_nan=False)

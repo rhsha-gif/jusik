@@ -35,6 +35,22 @@ def encode(value: Any) -> str:
     )
 
 
+class CompletedBarRevised(ValueError):
+    """A bar already stored as completed came back with a different body.
+
+    The message stays ``completed_bar_revised`` so existing ``str(exc)`` checks keep
+    working; the attributes let the collector audit exactly which bar changed.
+    """
+
+    def __init__(self, symbol: str, start: str, stored: dict, revised: dict):
+        super().__init__("completed_bar_revised")
+        self.symbol = symbol
+        self.start = start
+        self.stored = stored
+        self.revised = revised
+        self.changed = [k for k in revised if stored.get(k) != revised.get(k)]
+
+
 class Store:
     def __init__(self, path: str | Path):
         self.path = Path(path)
@@ -424,7 +440,9 @@ class Store:
                     (b.symbol, b.start.isoformat()),
                 ).fetchone()
                 if old and old[0] != body:
-                    raise ValueError("completed_bar_revised")
+                    raise CompletedBarRevised(
+                        b.symbol, b.start.isoformat(), json.loads(old[0]), json.loads(body)
+                    )
                 self.db.execute(
                     "INSERT OR IGNORE INTO bars VALUES(?,?,?)",
                     (b.symbol, b.start.isoformat(), body),

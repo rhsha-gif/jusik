@@ -15,9 +15,9 @@ Deep specialist in applied RL for trading. Designs the full RL contract for Leve
 ## Allowed Tools and Capabilities
 
 - Web search for RL and RL-in-finance research (read-only)
-- File read/write within `docs/quant_recipes/`
+- File read/write within `quantpilot/docs/strategy_specs/`
 - Invoke `rl-contract-designer` skill
-- Read `CLAUDE.md` for RL contract schema
+- Read `.agents/aorch/skills/rl-contract-designer/SKILL.md` for the RL contract schema
 
 ## Responsibilities
 

@@ -23,12 +23,12 @@ Invokes three specialist agents in sequence to produce a complete recipe review:
 When this command is invoked:
 
 1. If no recipe ID or path is provided, ask: "Which recipe should I review? (provide ID or path)"
-2. Read the recipe from `docs/quant_recipes/<recipe-id>.yaml`
+2. Read the recipe from `quantpilot/docs/strategy_specs/<strategy_id>.yaml`
 3. Invoke `backtest-forensics-agent` first — if it returns `reject`, report to user and stop.
 4. Invoke `risk-gatekeeper-agent` — if it returns `rejected`, report to user and stop.
 5. Invoke `source-curator-agent` to validate citations.
 6. Produce overall review summary with: approve / revise / reject verdict, list of all findings, and remediation steps.
-7. Write review report to `docs/quant_recipes/<recipe-id>-review.yaml`.
+7. Write review report to `quantpilot/docs/strategy_specs/<strategy_id>-review.yaml`.
 
 ## Safety
 
@@ -39,5 +39,5 @@ When this command is invoked:
 
 ## Output
 
-File: `docs/quant_recipes/<recipe-id>-review.yaml`
+File: `quantpilot/docs/strategy_specs/<strategy_id>-review.yaml`
 Verdict: approve | revise | reject

@@ -33,7 +33,7 @@ Produce a structured, cite-backed YAML recipe for a quantitative trading strateg
 4. **Risk matrix** — invoke `risk-matrix-designer` skill to set drawdown limits, correlation budget, stop-loss.
 5. **Backtest protocol** — define in-sample / out-of-sample splits, walk-forward windows, transaction costs.
 6. **RL contract** (Level 4 only) — invoke `rl-contract-designer` skill.
-7. **YAML assembly** — output compliant with schema defined in CLAUDE.md.
+7. **YAML assembly** — output compliant with `StrategyRecipe` contract in `quantpilot/packages/core/schemas.py` (validated by `load_strategy_recipe`).
 8. **Codex handoff stub** — include minimal handoff block for downstream `codex-handoff-writer`.
 
 ## Output Format

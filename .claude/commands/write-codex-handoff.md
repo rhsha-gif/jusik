@@ -17,14 +17,14 @@ Invokes the `codex-handoff-writer` skill to convert a finalized and reviewed rec
 
 ## Prerequisites
 
-The recipe must have passed `/review-quant-recipe` before handoff is written. If no review file exists at `docs/quant_recipes/<recipe-id>-review.yaml`, run the review first.
+The recipe must have passed `/review-quant-recipe` before handoff is written. If no review file exists at `quantpilot/docs/strategy_specs/<strategy_id>-review.yaml`, run the review first.
 
 ## Invocation Instructions
 
 When this command is invoked:
 
 1. If no recipe ID is provided, ask: "Which recipe should I write a Codex handoff for?"
-2. Check that `docs/quant_recipes/<recipe-id>-review.yaml` exists and has `decision: approved`.
+2. Check that `quantpilot/docs/strategy_specs/<strategy_id>-review.yaml` exists and has `decision: approved`.
 3. If review is missing or not approved, report to user and suggest running `/review-quant-recipe` first.
 4. Read the recipe YAML.
 5. Confirm the active mission workboard routes implementation to Codex, then invoke `codex-handoff-writer`.
@@ -34,7 +34,7 @@ When this command is invoked:
    - Acceptance criteria (GIVEN/WHEN/THEN format)
    - Test stubs (function signatures only)
    - Out-of-scope list (must include: live trading, order execution, secret reading)
-7. Write handoff to `docs/quant_recipes/<recipe-id>-codex-handoff.yaml`.
+7. Write handoff to `quantpilot/docs/strategy_specs/<strategy_id>-codex-handoff.yaml`.
 8. Report: task ID, complexity estimate, and top 3 acceptance criteria.
 
 ## Safety
@@ -47,4 +47,4 @@ When this command is invoked:
 
 ## Output
 
-File: `docs/quant_recipes/<recipe-id>-codex-handoff.yaml`
+File: `quantpilot/docs/strategy_specs/<strategy_id>-codex-handoff.yaml`

@@ -2,19 +2,6 @@
   "version": 1,
   "agents": [
     {
-      "id": "backtest-forensics-agent",
-      "description": "Specialist agent that audits QuantPilot backtest designs and results for look-ahead bias, data snooping, overfitting, survivorship bias, and microstructure unrealism. Outputs a severity-rated forensics report.",
-      "instructions": "agents/backtest-forensics-agent.md",
-      "providers": {
-        "anthropic": {
-          "model": "fable"
-        },
-        "openai": {
-          "sandbox_mode": "workspace-write"
-        }
-      }
-    },
-    {
       "id": "operator-runbook-reviewer",
       "description": "Review operational documentation against disabled trading defaults and explicit blocked-state behavior.",
       "instructions": "agents/operator-runbook-reviewer.md",
@@ -26,6 +13,54 @@
           "sandbox_mode": "read-only"
         }
       }
+    },
+    {
+      "id": "qp-design-backtest-forensics",
+      "description": "Adversarial audit of a code-run backtest report (metrics, purged walk-forward, PSR/DSR/MinTRL) against the backtest-forensics checklist; quotes the statistics, never computes them, and always records the engine's fixed limits; judges only (absorbs backtest-forensics-agent).",
+      "instructions": "agents/qp-design-backtest-forensics.md",
+      "providers": {
+        "anthropic": {
+          "disallowedTools": "Write, Edit, NotebookEdit, Agent, Bash, PowerShell",
+          "maxTurns": 40
+        }
+      },
+      "compatibility": "Claude tool deny list prohibits shell use; this installation has no verified equivalent Codex binding. Route to Claude."
+    },
+    {
+      "id": "qp-design-market-structure",
+      "description": "Reads the code-computed market-structure evidence (breadth, volatility regime, correlation, sector momentum, investor flows, per-symbol structure) and narrates the market as a system with up to three testable hypothesis candidates; numbers quoted verbatim, no forecasts.",
+      "instructions": "agents/qp-design-market-structure.md",
+      "providers": {
+        "anthropic": {
+          "disallowedTools": "Write, Edit, NotebookEdit, Agent, Bash, PowerShell",
+          "maxTurns": 30
+        }
+      },
+      "compatibility": "Claude tool deny list prohibits shell use; this installation has no verified equivalent Codex binding. Route to Claude."
+    },
+    {
+      "id": "qp-design-risk-gate",
+      "description": "Applies the risk-matrix-designer gates (fractional Kelly, drawdown vs position size, circuit breakers, safety-invariant phrases) to a recipe and returns pass/block with per-check evidence; judges only (absorbs risk-gatekeeper-agent).",
+      "instructions": "agents/qp-design-risk-gate.md",
+      "providers": {
+        "anthropic": {
+          "disallowedTools": "Write, Edit, NotebookEdit, Agent, Bash, PowerShell",
+          "maxTurns": 30
+        }
+      },
+      "compatibility": "Claude tool deny list prohibits shell use; this installation has no verified equivalent Codex binding. Route to Claude."
+    },
+    {
+      "id": "qp-design-strategy-designer",
+      "description": "Turns a hypothesis plus the market-structure analysis into a StrategyRecipe draft as JSON written strictly in the rule grammar the code can evaluate, with graded sources (absorbs quant-recipe-architect and source-curator-agent); never runs a backtest and never sets promotion state.",
+      "instructions": "agents/qp-design-strategy-designer.md",
+      "providers": {
+        "anthropic": {
+          "disallowedTools": "Write, Edit, NotebookEdit, Agent, Bash, PowerShell",
+          "maxTurns": 60
+        }
+      },
+      "compatibility": "Claude tool deny list prohibits shell use; this installation has no verified equivalent Codex binding. Route to Claude."
     },
     {
       "id": "qp-invest-portfolio-direction",
@@ -131,24 +166,73 @@
             ".mcp.json",
             ".claude/**",
             "tach.toml",
-            "pyproject.toml"
+            "pyproject.toml",
+            "quantpilot/services/strategy_design/**",
+            "quantpilot/docs/strategy_specs/**"
           ]
         }
       },
       "compatibility": "Claude ship_triggers security gate must retain its native metadata and invocation. Route to Claude."
     },
     {
-      "id": "quant-recipe-architect",
-      "description": "Primary architect agent for QuantPilot. Orchestrates the full recipe design pipeline from hypothesis to finalized YAML recipe. Delegates to specialist skills (source synthesis, risk matrix, RL contract, Codex handoff) and ensures recipe quality gates are met before handoff.",
-      "instructions": "agents/quant-recipe-architect.md",
+      "id": "qp-strat-editor",
+      "description": "Merges the strategist analyses, the scenario JSON and the refutation into a 12-line Slack outlook and a ledger research note that lines every scenario up against the refutations; edits and formats only.",
+      "instructions": "agents/qp-strat-editor.md",
       "providers": {
         "anthropic": {
-          "model": "fable"
-        },
-        "openai": {
-          "sandbox_mode": "workspace-write"
+          "disallowedTools": "Write, Edit, NotebookEdit, Agent, Bash, PowerShell",
+          "maxTurns": 20
         }
-      }
+      },
+      "compatibility": "Claude tool deny list prohibits shell use; this installation has no verified equivalent Codex binding. Route to Claude."
+    },
+    {
+      "id": "qp-strat-geopolitics",
+      "description": "Reads the GPR index summary and the collected headlines, groups geopolitical issues that have a named transmission path into Korean assets, grades sources and never invents one; observations only.",
+      "instructions": "agents/qp-strat-geopolitics.md",
+      "providers": {
+        "anthropic": {
+          "disallowedTools": "Write, Edit, NotebookEdit, Agent, Bash, PowerShell",
+          "maxTurns": 30
+        }
+      },
+      "compatibility": "Claude tool deny list prohibits shell use; this installation has no verified equivalent Codex binding. Route to Claude."
+    },
+    {
+      "id": "qp-strat-macro-regime",
+      "description": "Reads the code-computed macro evidence (ECOS, FRED, growth×inflation quadrant) and narrates the current regime, rates, FX and liquidity with every number quoted verbatim; observations only, no forecasts.",
+      "instructions": "agents/qp-strat-macro-regime.md",
+      "providers": {
+        "anthropic": {
+          "disallowedTools": "Write, Edit, NotebookEdit, Agent, Bash, PowerShell",
+          "maxTurns": 30
+        }
+      },
+      "compatibility": "Claude tool deny list prohibits shell use; this installation has no verified equivalent Codex binding. Route to Claude."
+    },
+    {
+      "id": "qp-strat-refuter",
+      "description": "Independent refuter for the strategist team: receives only the two analysts' texts, never the scenarios, and returns the arguments that break, the rejected refutations, blind spots and base-rate objections through three lenses; judges only.",
+      "instructions": "agents/qp-strat-refuter.md",
+      "providers": {
+        "anthropic": {
+          "disallowedTools": "Write, Edit, NotebookEdit, Agent, Bash, PowerShell",
+          "maxTurns": 50
+        }
+      },
+      "compatibility": "Claude tool deny list prohibits shell use; this installation has no verified equivalent Codex binding. Route to Claude."
+    },
+    {
+      "id": "qp-strat-scenario-writer",
+      "description": "Turns the two strategist analyses into two to four resolvable scenarios (probability, precedents, one observable change factor, a dated question with a resolution source, an invalidation condition) as JSON; adds no new facts.",
+      "instructions": "agents/qp-strat-scenario-writer.md",
+      "providers": {
+        "anthropic": {
+          "disallowedTools": "Write, Edit, NotebookEdit, Agent, Bash, PowerShell",
+          "maxTurns": 40
+        }
+      },
+      "compatibility": "Claude tool deny list prohibits shell use; this installation has no verified equivalent Codex binding. Route to Claude."
     },
     {
       "id": "risk-gate-auditor",
@@ -164,35 +248,9 @@
       }
     },
     {
-      "id": "risk-gatekeeper-agent",
-      "description": "Guardian agent that enforces QuantPilot risk matrix constraints across all recipes. Reviews position sizing, drawdown limits, and circuit breakers for consistency and adequacy. Blocks recipes where risk parameters are insufficient.",
-      "instructions": "agents/risk-gatekeeper-agent.md",
-      "providers": {
-        "anthropic": {
-          "model": "fable"
-        },
-        "openai": {
-          "sandbox_mode": "workspace-write"
-        }
-      }
-    },
-    {
       "id": "rl-research-contract-agent",
       "description": "Specialist agent for designing Level 4 Guarded Autopilot reinforcement learning contracts. Researches RL algorithm selection, designs observation/action spaces, writes reward functions with safety overrides, and specifies training protocols.",
       "instructions": "agents/rl-research-contract-agent.md",
-      "providers": {
-        "anthropic": {
-          "model": "fable"
-        },
-        "openai": {
-          "sandbox_mode": "workspace-write"
-        }
-      }
-    },
-    {
-      "id": "source-curator-agent",
-      "description": "Research agent that builds and maintains the QuantPilot source library. Discovers, evaluates, and ranks academic papers and practitioner research relevant to quant strategy design. Outputs curated source lists for use in recipe authoring.",
-      "instructions": "agents/source-curator-agent.md",
       "providers": {
         "anthropic": {
           "model": "fable"
@@ -276,6 +334,24 @@
         "anthropic",
         "openai"
       ]
+    },
+    {
+      "id": "qp-designer",
+      "description": "설계자팀(시장구조 분석가·전략 설계자·백테스트 포렌식·리스크 게이트) 실행 런북. 사용자가 \"전략 설계해줘\", \"이 가설 백테스트\", \"설계자팀 돌려\", \"레시피 만들어\", \"시장을 시스템으로 보면\", \"퀀트 전략 검증\"이라고 하면 사용한다. 기존 레시피의 백테스트만 다시 돌릴 때는 local-backtest, 기존 결과의 편향 감사만 할 때는 backtest-forensics 스킬을 쓴다. 산출물은 draft 레시피와 연구 노트이며 승격·거래 입력이 아니다.",
+      "source": "skills/qp-designer",
+      "providers": [
+        "anthropic"
+      ],
+      "compatibility": "Runbook drives Claude-only qp-* agents and the aorch dispatch path; no Codex binding is verified. Route to Claude."
+    },
+    {
+      "id": "qp-strategist",
+      "description": "전략가팀(매크로 레짐·지정학·시나리오 작성자·독립 반증자·편집자) 실행 런북. 사용자가 \"매크로 전망\", \"시나리오 짜줘\", \"전략가팀 돌려\", \"레짐 판정\", \"지정학 리스크 정리\", \"무효화 조건 뽑아줘\"라고 하면 사용한다. 일간 시황 브리핑(qp-market)이나 종목 후보(qp-invest)에는 쓰지 않는다. 산출물은 원장 research/ 노트이며 거래 입력이 아니다.",
+      "source": "skills/qp-strategist",
+      "providers": [
+        "anthropic"
+      ],
+      "compatibility": "Runbook drives Claude-only qp-* agents and the aorch dispatch path; no Codex binding is verified. Route to Claude."
     },
     {
       "id": "quant-source-synthesis",

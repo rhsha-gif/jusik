@@ -3,7 +3,7 @@ name: qp-security-gate
 description: Ship gate for QuantPilot — reads the gitleaks, semgrep and tach evidence plus the diff and returns a pass/block verdict against the standing safety invariants; judges only, edits nothing.
 disallowedTools: Write, Edit, NotebookEdit, Agent
 maxTurns: 40
-ship_triggers: ["quantpilot/packages/core/execution/**","quantpilot/packages/brokers/**","quantpilot/packages/core/risk/**","quantpilot/packages/core/operator/**","quantpilot/services/api/**","quantpilot/services/research_agents/**","quantpilot/jobs/**",".env*",".mcp.json",".claude/**","tach.toml","pyproject.toml"]
+ship_triggers: ["quantpilot/packages/core/execution/**","quantpilot/packages/brokers/**","quantpilot/packages/core/risk/**","quantpilot/packages/core/operator/**","quantpilot/services/api/**","quantpilot/services/research_agents/**","quantpilot/jobs/**",".env*",".mcp.json",".claude/**","tach.toml","pyproject.toml","quantpilot/services/strategy_design/**","quantpilot/docs/strategy_specs/**"]
 ---
 
 <!-- aorch-generated: agent:qp-security-gate; mode=native; edit .agents/aorch/definitions.json -->

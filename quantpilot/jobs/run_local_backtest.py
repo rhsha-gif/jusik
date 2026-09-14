@@ -28,6 +28,7 @@ from quantpilot.packages.core.backtest.costs import (
     cost_basis_label,
 )
 from quantpilot.packages.core.backtest.engine import run_backtest
+from quantpilot.packages.core.backtest.metrics import daily_returns
 from quantpilot.packages.core.backtest.replay import replay_signals
 from quantpilot.packages.core.backtest.schemas import (
     AcceptanceThresholds,
@@ -35,6 +36,12 @@ from quantpilot.packages.core.backtest.schemas import (
     BacktestRequest,
     BacktestResult,
     BacktestSignal,
+)
+from quantpilot.packages.core.backtest.statistics import (
+    deflated_sharpe,
+    min_track_record_length,
+    sharpe_moments,
+    trial_sharpe_variance,
 )
 from quantpilot.packages.core.backtest.validation import (
     build_walk_forward_windows,
@@ -44,6 +51,22 @@ from quantpilot.packages.core.backtest.validation import (
 from quantpilot.packages.core.data.providers import build_providers
 from quantpilot.packages.core.schemas import DataMode
 from quantpilot.packages.core.strategies.loader import load_default_strategy
+
+
+def _parse_sharpe_list(value: str) -> list[float]:
+    try:
+        return [float(item) for item in value.split(",") if item.strip()]
+    except ValueError as error:
+        raise argparse.ArgumentTypeError(
+            f"--trial-sharpes must be comma-separated numbers, got {value!r}"
+        ) from error
+
+
+def _non_negative_int(value: str) -> int:
+    parsed = int(value)
+    if parsed < 0:
+        raise argparse.ArgumentTypeError(f"expected a non-negative integer, got {value!r}")
+    return parsed
 
 
 def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
@@ -84,6 +107,33 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
     )
     parser.add_argument("--train-size", type=int, default=60, help="walk-forward train days")
     parser.add_argument("--test-size", type=int, default=20, help="walk-forward test days")
+    parser.add_argument(
+        "--purge-bars",
+        type=_non_negative_int,
+        default=0,
+        help="drop this many bars from the end of each walk-forward train span",
+    )
+    parser.add_argument(
+        "--embargo-bars",
+        type=_non_negative_int,
+        default=0,
+        help="gap of this many bars between each train end and test start",
+    )
+    parser.add_argument(
+        "--trials-so-far",
+        type=_non_negative_int,
+        default=0,
+        help="number of prior strategy variants already tested on this data "
+        "(n_trials for the deflated Sharpe ratio = trials_so_far + 1)",
+    )
+    parser.add_argument(
+        "--trial-sharpes",
+        type=_parse_sharpe_list,
+        default=None,
+        help="comma-separated per-period Sharpe ratios of the prior trials; "
+        "when absent, the trial variance falls back to the spread of this run's "
+        "walk-forward window Sharpes (an approximation)",
+    )
     parser.add_argument("--min-total-return", type=float, default=None)
     parser.add_argument("--max-drawdown", type=float, default=None)
     parser.add_argument("--min-simplified-sharpe", type=float, default=None)
@@ -94,6 +144,67 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
 
 def _metrics_summary(result: BacktestResult) -> dict[str, Any]:
     return result.metrics.model_dump(mode="json")
+
+
+def _round_or_none(value: float | None) -> float | None:
+    return None if value is None else round(float(value), 6)
+
+
+def _per_period_sharpe(result: BacktestResult) -> float | None:
+    return sharpe_moments(daily_returns([point.equity for point in result.equity_curve])).sharpe
+
+
+def _statistics_summary(
+    result: BacktestResult,
+    *,
+    trials_so_far: int,
+    trial_sharpes: list[float] | None,
+    window_sharpes: list[float],
+) -> dict[str, Any]:
+    """PSR/DSR/MinTRL of the full-period equity curve (per-period, not annualized).
+
+    ``n_trials`` counts this run as one more trial on top of ``trials_so_far``.
+    The trial-Sharpe variance comes from ``--trial-sharpes`` when supplied;
+    otherwise the spread of this run's walk-forward window Sharpes stands in
+    for it, which is only an approximation of the true cross-trial variance.
+    """
+    moments = sharpe_moments(daily_returns([point.equity for point in result.equity_curve]))
+    n_trials = trials_so_far + 1
+    if trial_sharpes is not None:
+        variance_source = "trial_sharpes"
+        trials_sr_variance = trial_sharpe_variance(trial_sharpes)
+    else:
+        variance_source = "walk_forward_windows"
+        trials_sr_variance = trial_sharpe_variance(window_sharpes)
+
+    psr = dsr = expected_max_sr = min_trl = None
+    if moments.sharpe is not None and moments.skew is not None and moments.kurtosis is not None:
+        deflated = deflated_sharpe(
+            moments.sharpe,
+            n=moments.n,
+            skew=moments.skew,
+            kurtosis=moments.kurtosis,
+            n_trials=n_trials,
+            trials_sr_variance=trials_sr_variance,
+        )
+        psr, dsr, expected_max_sr = deflated.psr, deflated.dsr, deflated.expected_max_sr
+        min_trl = min_track_record_length(
+            moments.sharpe, skew=moments.skew, kurtosis=moments.kurtosis, confidence=0.95
+        )
+
+    return {
+        "sharpe_per_period": _round_or_none(moments.sharpe),
+        "n": moments.n,
+        "skew": _round_or_none(moments.skew),
+        "kurtosis": _round_or_none(moments.kurtosis),
+        "psr": _round_or_none(psr),
+        "dsr": _round_or_none(dsr),
+        "expected_max_sr": _round_or_none(expected_max_sr),
+        "n_trials": n_trials,
+        "trials_sr_variance": _round_or_none(trials_sr_variance),
+        "min_trl_95": _round_or_none(min_trl),
+        "variance_source": variance_source,
+    }
 
 
 def run_local_backtest(args: argparse.Namespace) -> dict[str, Any]:
@@ -130,9 +241,14 @@ def run_local_backtest(args: argparse.Namespace) -> dict[str, Any]:
     # so walk-forward windows here measure out-of-sample consistency of the
     # fixed rules across successive test spans.
     windows = build_walk_forward_windows(
-        trading_dates, train_size=args.train_size, test_size=args.test_size
+        trading_dates,
+        train_size=args.train_size,
+        test_size=args.test_size,
+        purge_bars=args.purge_bars,
+        embargo_bars=args.embargo_bars,
     )
     window_results: list[dict[str, Any]] = []
+    window_sharpes: list[float] = []
     for window in windows:
         window_signals: list[BacktestSignal] = [
             signal
@@ -149,6 +265,9 @@ def run_local_backtest(args: argparse.Namespace) -> dict[str, Any]:
             end_date=window.test_end,
         )
         window_result = run_backtest(window_request, market_data_provider)
+        window_sharpe = _per_period_sharpe(window_result)
+        if window_sharpe is not None:
+            window_sharpes.append(window_sharpe)
         window_results.append(
             {
                 "window_id": window.window_id,
@@ -200,8 +319,16 @@ def run_local_backtest(args: argparse.Namespace) -> dict[str, Any]:
         "walk_forward": {
             "train_size": args.train_size,
             "test_size": args.test_size,
+            "purge_bars": args.purge_bars,
+            "embargo_bars": args.embargo_bars,
             "windows": window_results,
         },
+        "statistics": _statistics_summary(
+            full_result,
+            trials_so_far=args.trials_so_far,
+            trial_sharpes=args.trial_sharpes,
+            window_sharpes=window_sharpes,
+        ),
         "acceptance": acceptance,
         "research_only": full_result.research_only,
         "live_trading_approval": full_result.live_trading_approval,

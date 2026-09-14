@@ -19,6 +19,17 @@ from quantpilot.packages.core.backtest.schemas import (
     BacktestTrade,
     BacktestWindow,
 )
+from quantpilot.packages.core.backtest.statistics import (
+    DeflatedSharpe,
+    SharpeMoments,
+    deflated_sharpe,
+    deflated_sharpe_from_trials,
+    expected_max_sharpe,
+    min_track_record_length,
+    probabilistic_sharpe,
+    sharpe_moments,
+    trial_sharpe_variance,
+)
 from quantpilot.packages.core.backtest.validation import (
     build_train_test_window,
     build_walk_forward_windows,
@@ -38,6 +49,8 @@ __all__ = [
     "BacktestSignal",
     "BacktestTrade",
     "BacktestWindow",
+    "DeflatedSharpe",
+    "SharpeMoments",
     "build_train_test_window",
     "build_walk_forward_windows",
     "calculate_annualized_return",
@@ -45,7 +58,14 @@ __all__ = [
     "calculate_simplified_sharpe",
     "calculate_total_return",
     "calculate_volatility",
+    "deflated_sharpe",
+    "deflated_sharpe_from_trials",
     "evaluate_acceptance",
+    "expected_max_sharpe",
+    "min_track_record_length",
+    "probabilistic_sharpe",
     "run_backtest",
+    "sharpe_moments",
     "trading_dates_from_price_history",
+    "trial_sharpe_variance",
 ]

@@ -45,19 +45,37 @@ def build_walk_forward_windows(
     train_size: int,
     test_size: int,
     step_size: int | None = None,
+    purge_bars: int = 0,
+    embargo_bars: int = 0,
 ) -> list[BacktestWindow]:
+    """Build rolling train/test windows over sorted trading dates.
+
+    ``purge_bars`` drops the last ``purge_bars`` dates from each train slice so
+    labels that span the train/test boundary cannot leak into the test span.
+    ``embargo_bars`` leaves a gap of that many dates between the (unpurged)
+    train end and the test start. Both default to 0, which reproduces the
+    plain rolling windows exactly; the step still advances from the window's
+    nominal train start, so purge/embargo never shift later windows.
+    """
     if train_size <= 0 or test_size <= 0:
         raise ValueError("train_size and test_size must be positive")
     step = step_size or test_size
     if step <= 0:
         raise ValueError("step_size must be positive")
+    if isinstance(purge_bars, bool) or not isinstance(purge_bars, int) or purge_bars < 0:
+        raise ValueError("purge_bars must be a non-negative integer")
+    if isinstance(embargo_bars, bool) or not isinstance(embargo_bars, int) or embargo_bars < 0:
+        raise ValueError("embargo_bars must be a non-negative integer")
+    if purge_bars >= train_size:
+        raise ValueError("purge_bars must be smaller than train_size")
 
     dates = sorted({_parse_date(value) for value in trading_dates})
     windows: list[BacktestWindow] = []
     start = 0
-    while start + train_size + test_size <= len(dates):
-        train = dates[start : start + train_size]
-        test = dates[start + train_size : start + train_size + test_size]
+    while start + train_size + embargo_bars + test_size <= len(dates):
+        train = dates[start : start + train_size - purge_bars]
+        test_begin = start + train_size + embargo_bars
+        test = dates[test_begin : test_begin + test_size]
         windows.append(
             BacktestWindow(
                 window_id=f"wf_{len(windows) + 1:03d}",

@@ -96,6 +96,8 @@ def snapshot(store, now=None):
         "heartbeat": store.get("heartbeat"),
         "collector_heartbeat": store.get("collector_heartbeat"),
         "collector_error": store.get("collector_error"),
+        "collector_error_counts": store.get("collector_error_counts", {}),
+        "collector_last_error": store.get("collector_last_error"),
         "reconciliation_complete": reconciled,
         "reconciliation_reason": store.get("reconciliation_reason"),
         "last_reconciled_at": store.get("last_reconciled_at"),

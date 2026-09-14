@@ -18,7 +18,7 @@ from quantpilot.services.research_agents.collectors.ecos import EcosClient, Macr
 from quantpilot.services.research_agents.collectors.fred import FredClient
 from quantpilot.services.research_agents.collectors.gpr import load_gpr, parse_gpr_csv
 from quantpilot.services.research_agents.collectors.macro import collect_macro, load_macro_config
-from quantpilot.services.research_agents.models import MacroEvidence, MacroPoint, MacroSeries
+from quantpilot.services.research_agents.models import GdeltArticle, MacroEvidence, MacroPoint, MacroSeries, PredictionMarket
 from quantpilot.services.research_agents.runner import agent_environment
 
 KEY = "FAKE-SAMPLEKEY-1234567890"
@@ -166,9 +166,27 @@ class _FakeEcos:
         assert key == KEY
 
     def series(self, stat_code: str, cycle: str, start: str, end: str, item_code: str) -> list[MacroPoint]:
-        if stat_code == "403Y001":
-            raise MacroCollectionError("ecos 403Y001/*AA: ERROR-101")
+        if stat_code == "901Y118":
+            raise MacroCollectionError("ecos 901Y118/T002: ERROR-101")
         return _monthly(84) if cycle == "M" else [MacroPoint(time=f"2026-01-{i + 1:02d}", value=3.0 + i / 100) for i in range(20)]
+
+
+class _FakeGdelt:
+    def __init__(self, *, fail: bool = False) -> None:
+        self._fail = fail
+
+    def attention(self, query: str, *, timespan: str = "30d"):
+        if self._fail:
+            raise ValueError("gdelt: non-JSON answer")
+        return 0.4, 0.2, 30
+
+    def articles(self, query: str, *, timespan: str = "7d", max_records: int = 5):
+        return [GdeltArticle(id="gdelt:abc1234567", title="t", url="https://example.org/a", domain="example.org", source_country="South Korea", language="Korean", seen_at="2026-09-10T00:00:00Z")]
+
+
+class _FakeManifold:
+    def search(self, term: str, *, limit: int = 5):
+        return [PredictionMarket(id="manifold:m1", question=f"Will {term}?", probability=0.62, close_date="2026-12-31", url="https://manifold.markets/x", term=term)]
 
 
 class _FakeFred:
@@ -180,8 +198,9 @@ class _FakeFred:
 
 
 def test_collect_macro_skips_missing_keys_and_names_them(tmp_path: Path) -> None:
-    ev = collect_macro(as_of=date(2026, 9, 14), repo_root=tmp_path, environ={}, gpr_loader=lambda **kw: (None, "gpr: download failed (URLError)"))
+    ev = collect_macro(as_of=date(2026, 9, 14), repo_root=tmp_path, environ={}, gpr_loader=lambda **kw: (None, "gpr: download failed (URLError)"), gdelt_factory=lambda: _FakeGdelt(fail=True), manifold_factory=_FakeManifold)
     assert ev.series == [] and ev.regime is not None and ev.regime.quadrant == "undetermined"
+    assert ev.gdelt and ev.gdelt[0].attention_ratio is None and any(s.startswith("gdelt:") for s in ev.skipped)
     assert any("ECOS_API_KEY" in s for s in ev.skipped) and any("FRED_API_KEY" in s for s in ev.skipped) and any(s.startswith("gpr") for s in ev.skipped)
     assert ev.signal_input is False
     with pytest.raises(Exception):
@@ -199,13 +218,17 @@ def test_collect_macro_with_fakes_builds_series_regime_and_gpr(tmp_path: Path) -
         ecos_factory=_FakeEcos,  # type: ignore[arg-type]
         fred_factory=_FakeFred,  # type: ignore[arg-type]
         gpr_loader=lambda **kw: (rows, "gpr: downloaded xls"),
+        gdelt_factory=_FakeGdelt,
+        manifold_factory=_FakeManifold,
     )
     ids = {s.id for s in ev.series}
     assert "kr_cpi" in ids and "us_cpi" in ids and "kr_exports" not in ids
     assert any("kr_exports" in s for s in ev.skipped)
     assert ev.regime is not None and ev.regime.quadrant != "undetermined"
     assert ev.gpr is not None and ev.gpr.as_of_month == "2021-07" and ev.gpr.gpr == 119.0 and ev.gpr.gpr_change_3m == 3.0
-    assert {s.id for s in ev.sources} == {"bok_ecos", "fred", "gpr_index"}
+    assert {s.id for s in ev.sources} == {"bok_ecos", "fred", "gpr_index", "gdelt_doc", "manifold"}
+    assert ev.gdelt and ev.gdelt[0].attention_ratio == 2.0 and ev.gdelt[0].articles[0].id.startswith("gdelt:")
+    assert ev.markets and ev.markets[0].probability == 0.62 and len({m.id for m in ev.markets}) == len(ev.markets)
     dumped = json.dumps(ev.model_dump(), ensure_ascii=False)
     assert KEY not in dumped
 

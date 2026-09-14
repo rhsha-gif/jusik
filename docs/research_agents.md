@@ -81,9 +81,15 @@ Strategist and designer jobs (same venv, same credential loader):
 Runbooks: `.agents/aorch/skills/qp-strategist/SKILL.md`, `.agents/aorch/skills/qp-designer/SKILL.md`
 (both also show the aorch `agentId` plan shape for re-running one role). The macro outlook is
 scheduled for Sunday 20:00 by `scripts/register-macro-outlook-task.ps1`; the design job is manual.
-Macro series codes live in `services/research_agents/config/macro_series.json` (`verified: false`
-until checked with `--list-items`). GPR is an `.xls`: the optional `xlrd` extra parses it, otherwise
-a hand-dropped `local_data/gpr.csv` is used, otherwise the source is skipped and named in the note.
+Macro series codes live in `services/research_agents/config/macro_series.json`; every ECOS code was
+verified against `StatisticItemList` on 2026-09-15 (`--list-items`). GPR is an `.xls`: the `research`
+extra (`xlrd`, BSD) parses it, otherwise a hand-dropped `local_data/gpr.csv` is used, otherwise the
+source is skipped and named in the note. GDELT DOC (no key; one request per 8 s client-side, one
+25 s back-off on HTTP 429, else the theme is noted as unavailable) supplies per-theme attention
+ratios and a few C-grade articles; Manifold (no key for reads, non-commercial personal use) supplies
+open binary-market probabilities that the scenario writer treats as a calibration reference only.
+Install the extra with `uv pip install --python .venv/Scripts/python.exe -e ".[research]"` or
+`uv pip install --python .venv/Scripts/python.exe xlrd==2.0.2`.
 
 Exit codes: 0 ok (or a closed day), 2 collection failed, 3 an agent produced
 nothing (or, for the design job, the recipe failed code validation twice), 4 publishing failed. Evidence and logs land in
@@ -110,8 +116,8 @@ through the sources list above.
 | `QUANTPILOT_RESEARCH_JUDGE_MODEL` | refuters, backtest forensics, risk gate, security gate | `fable` |
 | `KRX_HOLIDAYS` | comma-separated closed days (shared with the data providers) | empty |
 | `QUANTPILOT_RESEARCH_PARALLEL` | headless agents a pipeline stage may run at once (each boots its own MCP servers; set 1 on a memory-starved machine) | `2` |
-| `ECOS_API_KEY` | Bank of Korea ECOS StatisticSearch (strategist macro series) | optional; source skipped when absent |
-| `FRED_API_KEY` | FRED series/observations (strategist macro series) | optional; source skipped when absent |
+| `ECOS_API_KEY` | Bank of Korea ECOS StatisticSearch (strategist macro series) | optional; source skipped when absent. Lives in `%USERPROFILE%\.quantpilot-macro.env`, routed by the sources list |
+| `FRED_API_KEY` | FRED series/observations (strategist macro series; the classic `api.stlouisfed.org/fred` endpoint) | optional; source skipped when absent. Same env file |
 
 ## Notes in the ledger
 
@@ -137,6 +143,8 @@ started as a candidate note.
 
 Month 1 (strategist team, from the first Sunday run): at least 3 of 4 outlooks read, and at least one scenario invalidation condition recorded through `invest-resolve`. Month 1 (designer team): at least one draft recipe that survives forensics at `medium` or better, with the trials ledger filling; no strategy with a negative DSR is ever proposed for promotion.
 
+First keyed macro collection: 2026-09-15 (7 ECOS + 9 FRED series, GPR through 2026-08, 18 Manifold markets; regime computed for the first time).
+
 First real brief: 2026-09-04 22:26 (207 s, 60 headlines, Slack DM via the bot token). Week 1 starts on the next trading day.
 
 ## Deferred
@@ -145,5 +153,5 @@ First real brief: 2026-09-04 22:26 (207 s, 60 headlines, Slack DM via the bot to
 - Security modes 2 and 3: pre-flight (trufflehog + pip-audit, manual, before the first real paper-server connection) and ops watch (JSON logs, heartbeat, drawdown alerts) once a paper server emits logs.
 - Opaque-handle citation validator — once hallucinated citations are actually observed for two weeks.
 - Investor-persona debate — only if a single refuter proves insufficient (the strategist team also uses one independent refuter, never a debate).
-- Strategist data phase 2 — GDELT DOC API aggregates and Manifold priors for scenario-probability calibration, after the first outlook has been read. ACLED is excluded (its terms forbid AI/ML use).
+- ACLED is excluded (its terms forbid AI/ML use). GDELT and Manifold went live on 2026-09-15; GDELT rate limiting is the one source that can still drop out of a run.
 - KRX ±30% price limits, tick size and VI in the backtest fill model — the forensics agent records their absence as an `info` finding on every recipe until then.

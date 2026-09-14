@@ -156,12 +156,46 @@ class GprSummary(BaseModel):
     note: str = ""
 
 
+class GdeltArticle(BaseModel):
+    id: str  # "gdelt:<sha256(url)[:10]>" — the only citation handle for GDELT articles
+    title: str
+    url: str
+    domain: str = ""
+    source_country: str = ""
+    language: str = ""
+    seen_at: str = ""
+
+
+class GdeltTheme(BaseModel):
+    id: str
+    label: str
+    query: str
+    volume_recent_7d: float | None = Field(default=None, description="mean share of global coverage over the last 7 days, percent")
+    volume_prior: float | None = Field(default=None, description="mean share over the earlier part of the 30-day window")
+    attention_ratio: float | None = Field(default=None, description="recent_7d / prior; >1 means rising attention")
+    days: int = 0
+    articles: list[GdeltArticle] = Field(default_factory=list)
+    note: str = ""
+
+
+class PredictionMarket(BaseModel):
+    id: str  # "manifold:<market id>"
+    question: str
+    probability: float
+    close_date: str | None = None
+    url: str = ""
+    term: str = ""
+    volume: float = 0.0
+
+
 class MacroEvidence(BaseModel):
     as_of: str
     collected_at: str
     series: list[MacroSeries] = Field(default_factory=list)
     regime: RegimeCall | None = None
     gpr: GprSummary | None = None
+    gdelt: list[GdeltTheme] = Field(default_factory=list)
+    markets: list[PredictionMarket] = Field(default_factory=list, description="play-money prediction-market priors; calibration reference, not a source")
     skipped: list[str] = Field(default_factory=list, description="sources not collected and why (no key, download failed)")
     sources: list[EvidenceSource] = Field(default_factory=list)
     signal_input: Literal[False] = False

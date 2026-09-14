@@ -87,21 +87,31 @@ def macro_regime_prompt(bundle: MacroEvidenceBundle) -> str:
 
 def geopolitics_prompt(bundle: MacroEvidenceBundle) -> str:
     gpr = bundle.macro.gpr.model_dump() if bundle.macro.gpr else None
+    gdelt = [t.model_dump() for t in bundle.macro.gdelt]
+    gdelt_note = "" if gdelt else "이번 실행은 GDELT 주제 집계를 수집하지 못했다. `## 글로벌 보도 강도`는 \"GDELT 미수집\" 한 줄로 답한다.\n"
     gpr_note = "" if gpr else "이번 실행은 GPR 지수를 수집하지 못했다(`skipped` 참조). `## GPR 판독`은 \"GPR 미수집\" 한 줄로 답한다.\n"
     news_note = "" if bundle.news else "이번 실행은 뉴스 수집을 건너뛰어 헤드라인이 없다. 이슈 묶음은 \"헤드라인 없음(수집 생략)\"으로 답하고 아무 출처도 만들지 않는다.\n"
     return (
         f"세션 날짜: {bundle.date}\n\n"
         + gpr_note
+        + gdelt_note
         + news_note
-        + "아래 `gpr`와 `news` JSON만 근거로 에이전트 정의의 출력 절 4개를 작성하라. `id`와 `link` 외의 출처를 만들지 않는다.\n\n"
-        + "```json\n" + _json({"gpr": gpr, "skipped": bundle.macro.skipped, "news": [n.model_dump() for n in bundle.news]}) + "\n```\n"
+        + "아래 `gpr`·`gdelt`·`news` JSON만 근거로 에이전트 정의의 출력 절 5개를 작성하라. 뉴스는 `id`와 `link`, GDELT 기사는 `id`와 `url` 외의 출처를 만들지 않는다.\n\n"
+        + "```json\n" + _json({"gpr": gpr, "gdelt": gdelt, "skipped": bundle.macro.skipped, "news": [n.model_dump() for n in bundle.news]}) + "\n```\n"
     )
 
 
 def scenario_prompt(bundle: MacroEvidenceBundle, macro_text: str, geo_text: str) -> str:
+    markets = [m.model_dump() for m in bundle.macro.markets]
+    market_block = (
+        "외부 예측시장 사전확률(Manifold, 플레이머니 — 출처가 아니라 캘리브레이션 참고. 시나리오 확률이 크게 다르면 `probability_note`가 아닌 `thesis` 끝에 한 문장으로 차이를 밝힌다):\n```json\n" + _json(markets) + "\n```\n\n"
+        if markets
+        else ""
+    )
     return (
         f"세션 날짜: {bundle.date}\n"
         f"열린 결정 레코드 id: {', '.join(bundle.open_decisions) or '없음'}\n\n"
+        + market_block +
         "아래 두 분석가 출력만으로 시나리오 2~4개를 요청된 JSON 스키마로 만든다. 시한(`deadline`)은 세션 날짜로부터 1~6개월 안의 YYYY-MM-DD.\n\n"
         "===== 매크로 레짐 분석가 =====\n" + macro_text.strip() + "\n\n"
         "===== 지정학 분석가 =====\n" + geo_text.strip() + "\n"

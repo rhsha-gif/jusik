@@ -19,7 +19,9 @@ from typing import Any, Callable
 from quantpilot.services.research_agents.analytics.macro_regime import classify_regime, enrich_series, percentile_rank
 from quantpilot.services.research_agents.collectors.ecos import ECOS_KEY_ENV, EcosClient, MacroCollectionError
 from quantpilot.services.research_agents.collectors.fred import FRED_KEY_ENV, FredClient
+from quantpilot.services.research_agents.collectors.gdelt import GDELT_CITATION, GdeltClient, collect_gdelt_themes
 from quantpilot.services.research_agents.collectors.gpr import load_gpr
+from quantpilot.services.research_agents.collectors.manifold import MANIFOLD_CITATION, ManifoldClient, collect_markets
 from quantpilot.services.research_agents.models import (
     EvidenceSource,
     GprSummary,
@@ -37,6 +39,8 @@ _DAILY_YEARS = 6
 EcosFactory = Callable[[str], EcosClient]
 FredFactory = Callable[[str], FredClient]
 GprLoader = Callable[..., tuple[list[dict[str, Any]] | None, str]]
+GdeltFactory = Callable[[], GdeltClient]
+ManifoldFactory = Callable[[], ManifoldClient]
 
 
 def load_macro_config(path: Path | None = None) -> dict[str, Any]:
@@ -155,6 +159,8 @@ def collect_macro(
     ecos_factory: EcosFactory = EcosClient,
     fred_factory: FredFactory = FredClient,
     gpr_loader: GprLoader = load_gpr,
+    gdelt_factory: GdeltFactory = GdeltClient,
+    manifold_factory: ManifoldFactory = ManifoldClient,
     collected_at: str | None = None,
 ) -> MacroEvidence:
     cfg = config or load_macro_config()
@@ -199,7 +205,37 @@ def collect_macro(
             gpr = _gpr_summary(rows, str(gpr_cfg.get("citation", "")))
             sources.append(EvidenceSource(id="gpr_index", fetched_at=stamp, detail=note))
 
+    gdelt_cfg = cfg.get("gdelt", {})
+    gdelt_themes = []
+    if gdelt_cfg.get("themes"):
+        try:
+            gdelt_themes = collect_gdelt_themes(
+                gdelt_factory(),
+                list(gdelt_cfg["themes"]),
+                timespan_volume=str(gdelt_cfg.get("timespan_volume", "30d")),
+                timespan_articles=str(gdelt_cfg.get("timespan_articles", "7d")),
+                max_records=int(gdelt_cfg.get("max_records", 5)),
+            )
+            if gdelt_themes:
+                sources.append(EvidenceSource(id="gdelt_doc", fetched_at=stamp, detail=f"{GDELT_CITATION}; {len(gdelt_themes)} themes"))
+            for theme in gdelt_themes:
+                if theme.note:
+                    skipped.append(f"gdelt:{theme.id}: {theme.note}")
+        except Exception as exc:  # the client already narrows per theme; this guards the factory itself
+            skipped.append(f"gdelt: {type(exc).__name__}")
+
+    manifold_cfg = cfg.get("manifold", {})
+    markets = []
+    if manifold_cfg.get("terms"):
+        try:
+            markets, notes = collect_markets(manifold_factory(), list(manifold_cfg["terms"]), limit=int(manifold_cfg.get("limit", 5)))
+            skipped.extend(notes)
+            if markets:
+                sources.append(EvidenceSource(id="manifold", fetched_at=stamp, detail=f"{MANIFOLD_CITATION}; {len(markets)} open binary markets"))
+        except Exception as exc:
+            skipped.append(f"manifold: {type(exc).__name__}")
+
     regime = classify_regime({s.id: s for s in series}, cfg.get("regime", {}))
     for item in skipped:
         log.warning("macro skipped: %s", item)
-    return MacroEvidence(as_of=as_of.isoformat(), collected_at=stamp, series=series, regime=regime, gpr=gpr, skipped=skipped, sources=sources)
+    return MacroEvidence(as_of=as_of.isoformat(), collected_at=stamp, series=series, regime=regime, gpr=gpr, gdelt=gdelt_themes, markets=markets, skipped=skipped, sources=sources)

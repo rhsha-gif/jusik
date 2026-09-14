@@ -1,36 +1,215 @@
 {
-  "_comment": "Macro series the strategist team's regime analytics read. Codes marked verified=false were taken from public wrappers' examples and must be checked once with `python -m quantpilot.jobs.run_macro_outlook --list-items <STAT_CODE>` after the key is issued. Only the item codes here are fetched; the agents never see this file.",
+  "_comment": "Macro series the strategist team's regime analytics read. ECOS codes were verified against StatisticItemList on 2026-09-15 (`python -m quantpilot.jobs.run_macro_outlook --list-items <STAT_CODE>`); re-verify after any ECOS catalogue change. Only the item codes here are fetched; the agents never see this file.",
   "ecos": [
-    {"id": "kr_base_rate", "label": "한국은행 기준금리", "stat_code": "722Y001", "item_code": "0101000", "cycle": "M", "unit": "%", "role": "policy", "verified": false},
-    {"id": "kr_ktb_3y", "label": "국고채 3년", "stat_code": "817Y002", "item_code": "010200000", "cycle": "D", "unit": "%", "role": "rates", "verified": false},
-    {"id": "kr_ktb_10y", "label": "국고채 10년", "stat_code": "817Y002", "item_code": "010210000", "cycle": "D", "unit": "%", "role": "rates", "verified": false},
-    {"id": "usdkrw", "label": "원/달러 매매기준율", "stat_code": "731Y001", "item_code": "0000001", "cycle": "D", "unit": "KRW", "role": "fx", "verified": false},
-    {"id": "kr_cpi", "label": "소비자물가지수(총지수)", "stat_code": "901Y009", "item_code": "0", "cycle": "M", "unit": "2020=100", "role": "inflation", "verified": false},
-    {"id": "kr_m2", "label": "M2(평잔, 원계열)", "stat_code": "101Y004", "item_code": "BBHA00", "cycle": "M", "unit": "십억원", "role": "liquidity", "verified": false},
-    {"id": "kr_exports", "label": "수출(통관기준)", "stat_code": "403Y001", "item_code": "*AA", "cycle": "M", "unit": "천달러", "role": "growth", "verified": false}
+    {
+      "id": "kr_base_rate",
+      "label": "한국은행 기준금리",
+      "stat_code": "722Y001",
+      "item_code": "0101000",
+      "cycle": "M",
+      "unit": "%",
+      "role": "policy",
+      "verified": true
+    },
+    {
+      "id": "kr_ktb_3y",
+      "label": "국고채 3년",
+      "stat_code": "817Y002",
+      "item_code": "010200000",
+      "cycle": "D",
+      "unit": "%",
+      "role": "rates",
+      "verified": true
+    },
+    {
+      "id": "kr_ktb_10y",
+      "label": "국고채 10년",
+      "stat_code": "817Y002",
+      "item_code": "010210000",
+      "cycle": "D",
+      "unit": "%",
+      "role": "rates",
+      "verified": true
+    },
+    {
+      "id": "usdkrw",
+      "label": "원/달러 매매기준율",
+      "stat_code": "731Y001",
+      "item_code": "0000001",
+      "cycle": "D",
+      "unit": "KRW",
+      "role": "fx",
+      "verified": true
+    },
+    {
+      "id": "kr_cpi",
+      "label": "소비자물가지수(총지수)",
+      "stat_code": "901Y009",
+      "item_code": "0",
+      "cycle": "M",
+      "unit": "2020=100",
+      "role": "inflation",
+      "verified": true
+    },
+    {
+      "id": "kr_m2",
+      "label": "M2(평잔, 원계열, 신지표)",
+      "stat_code": "161Y006",
+      "item_code": "BBHA00",
+      "cycle": "M",
+      "unit": "십억원",
+      "role": "liquidity",
+      "verified": true
+    },
+    {
+      "id": "kr_exports",
+      "label": "수출금액(통관기준)",
+      "stat_code": "901Y118",
+      "item_code": "T002",
+      "cycle": "M",
+      "unit": "천달러",
+      "role": "growth",
+      "verified": true
+    }
   ],
   "fred": [
-    {"id": "us_fed_funds", "label": "Effective Fed Funds Rate", "series_id": "FEDFUNDS", "unit": "%", "role": "policy"},
-    {"id": "us_dgs2", "label": "US Treasury 2Y", "series_id": "DGS2", "unit": "%", "role": "rates"},
-    {"id": "us_dgs10", "label": "US Treasury 10Y", "series_id": "DGS10", "unit": "%", "role": "rates"},
-    {"id": "us_cpi", "label": "US CPI (all items, SA)", "series_id": "CPIAUCSL", "unit": "index", "role": "inflation"},
-    {"id": "us_unrate", "label": "US Unemployment Rate", "series_id": "UNRATE", "unit": "%", "role": "growth"},
-    {"id": "us_indpro", "label": "US Industrial Production", "series_id": "INDPRO", "unit": "index", "role": "growth"},
-    {"id": "usd_broad", "label": "Trade-weighted USD (broad)", "series_id": "DTWEXBGS", "unit": "index", "role": "fx"},
-    {"id": "vix", "label": "CBOE VIX", "series_id": "VIXCLS", "unit": "index", "role": "risk"},
-    {"id": "us_hy_oas", "label": "US High Yield OAS", "series_id": "BAMLH0A0HYM2", "unit": "%", "role": "credit"}
+    {
+      "id": "us_fed_funds",
+      "label": "Effective Fed Funds Rate",
+      "series_id": "FEDFUNDS",
+      "unit": "%",
+      "role": "policy"
+    },
+    {
+      "id": "us_dgs2",
+      "label": "US Treasury 2Y",
+      "series_id": "DGS2",
+      "unit": "%",
+      "role": "rates"
+    },
+    {
+      "id": "us_dgs10",
+      "label": "US Treasury 10Y",
+      "series_id": "DGS10",
+      "unit": "%",
+      "role": "rates"
+    },
+    {
+      "id": "us_cpi",
+      "label": "US CPI (all items, SA)",
+      "series_id": "CPIAUCSL",
+      "unit": "index",
+      "role": "inflation"
+    },
+    {
+      "id": "us_unrate",
+      "label": "US Unemployment Rate",
+      "series_id": "UNRATE",
+      "unit": "%",
+      "role": "growth"
+    },
+    {
+      "id": "us_indpro",
+      "label": "US Industrial Production",
+      "series_id": "INDPRO",
+      "unit": "index",
+      "role": "growth"
+    },
+    {
+      "id": "usd_broad",
+      "label": "Trade-weighted USD (broad)",
+      "series_id": "DTWEXBGS",
+      "unit": "index",
+      "role": "fx"
+    },
+    {
+      "id": "vix",
+      "label": "CBOE VIX",
+      "series_id": "VIXCLS",
+      "unit": "index",
+      "role": "risk"
+    },
+    {
+      "id": "us_hy_oas",
+      "label": "US High Yield OAS",
+      "series_id": "BAMLH0A0HYM2",
+      "unit": "%",
+      "role": "credit"
+    }
   ],
   "gpr": {
     "url": "https://www.matteoiacoviello.com/gpr_files/data_gpr_export.xls",
     "csv_fallback": "local_data/gpr.csv",
-    "columns": {"month": "month", "gpr": "GPR", "gpr_threats": "GPRT", "gpr_acts": "GPRA", "gpr_korea": "GPRC_KOR"},
+    "columns": {
+      "month": "month",
+      "gpr": "GPR",
+      "gpr_threats": "GPRT",
+      "gpr_acts": "GPRA",
+      "gpr_korea": "GPRC_KOR"
+    },
     "citation": "Caldara, Dario and Matteo Iacoviello (2022), Measuring Geopolitical Risk, American Economic Review. CC BY 4.0."
   },
   "regime": {
-    "growth_ids": ["kr_exports", "us_indpro"],
-    "inflation_ids": ["kr_cpi", "us_cpi"],
+    "growth_ids": [
+      "kr_exports",
+      "us_indpro"
+    ],
+    "inflation_ids": [
+      "kr_cpi",
+      "us_cpi"
+    ],
     "zscore_short_months": 24,
     "zscore_long_months": 60,
     "short_weight": 0.6
+  },
+  "gdelt": {
+    "_terms": "GDELT: unlimited use with citation; one request per 5 s (client enforces). Coverage share is global, so ratios matter more than levels.",
+    "timespan_volume": "30d",
+    "timespan_articles": "7d",
+    "max_records": 5,
+    "themes": [
+      {
+        "id": "north_korea",
+        "label": "북한·남북",
+        "query": "\"North Korea\""
+      },
+      {
+        "id": "us_china_chips",
+        "label": "미중 반도체·수출통제",
+        "query": "(\"export controls\" OR tariff) (China) (semiconductor OR chips)"
+      },
+      {
+        "id": "korea_exports",
+        "label": "한국 수출·관세",
+        "query": "\"South Korea\" (tariff OR exports)"
+      },
+      {
+        "id": "middle_east_oil",
+        "label": "중동·원유",
+        "query": "(Iran OR \"Strait of Hormuz\" OR \"Red Sea\") oil"
+      },
+      {
+        "id": "taiwan_strait",
+        "label": "대만해협",
+        "query": "\"Taiwan Strait\""
+      },
+      {
+        "id": "fed_policy",
+        "label": "연준 통화정책",
+        "query": "\"Federal Reserve\" (rate OR inflation)"
+      }
+    ]
+  },
+  "manifold": {
+    "_terms": "Manifold: reads need no key; non-commercial personal use only; play-money odds are a calibration reference, never a source.",
+    "limit": 4,
+    "terms": [
+      "North Korea",
+      "Federal Reserve rate cut",
+      "China Taiwan",
+      "oil price",
+      "tariffs",
+      "Korea"
+    ]
   }
 }

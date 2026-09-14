@@ -1,0 +1,1 @@
+{"ts": "2026-09-14T22:40:18+09:00", "strategy_id": "kospi_large_pullback_volume_v1", "version": "0.1", "hypothesis": "코스피 대형주에서 120일 추세 위 20일 눌림목을 거래량 확인으로 매수하고 추세 이탈에 청산", "sharpe_per_period": 0.070883, "dsr": 0.932048, "filled_trades": 45}

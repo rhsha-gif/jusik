@@ -42,8 +42,10 @@ def build_client(env, clock):
     from quantpilot.paper.auth import RefreshingClient
     from quantpilot.paper.data import LimitedTransport
 
-    transport = LimitedTransport(RecoveryTransport())
-    return RefreshingClient(connection_config(env),
+    from quantpilot.paper.transport import shared_transport
+    config = connection_config(env)
+    transport = shared_transport(config, RecoveryTransport())
+    return RefreshingClient(config,
                             lambda cfg: KisPaperClient(cfg, transport=transport), clock)
 
 
@@ -199,6 +201,14 @@ def apply_recovery(directory, client, calendar, now):
                 with store.transaction():
                     store.put("incident", None)
                     if result["changed_orders"] or store.get("recovery_pending_since"):
+                        from quantpilot.paper.valuation import invalidate_close
+                        changed_days = [datetime.fromisoformat(o["at"]).astimezone(KST).date().isoformat()
+                                        for o in store.orders() if before.get(o["id"]) != (o["state"], o["filled"], o["amount"])]
+                        earliest = min(changed_days) if changed_days else ""
+                        for row in store.db.execute("SELECT key FROM settings WHERE key LIKE 'close:%'").fetchall():
+                            affected_day = row[0].split(":", 1)[1]
+                            if affected_day >= earliest:
+                                invalidate_close(store, affected_day, now, "ledger_recovery")
                         store.put("valuation_invalidated_before", now.isoformat())
                         store.put("last_report_superseded", True)
                         from quantpilot.paper.reporting import snapshot

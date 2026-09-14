@@ -57,6 +57,20 @@ class Store:
         self.path.parent.mkdir(parents=True, exist_ok=True)
         self.db = sqlite3.connect(self.path, timeout=15, isolation_level=None)
         self.db.row_factory = sqlite3.Row
+        existing_tables = {r[0] for r in self.db.execute("SELECT name FROM sqlite_master WHERE type='table'")}
+        if "settings" in existing_tables and "bar_finalizations" not in existing_tables:
+            # Back up an old ledger before the first additive schema write, even when
+            # an operator bypasses the explicit profile migration command.
+            from uuid import uuid4
+            backup_dir = self.path.parent / "backups"
+            backup_dir.mkdir(exist_ok=True)
+            backup = sqlite3.connect(backup_dir / (self.path.stem + ".pre-stabilization-" + uuid4().hex + ".sqlite3"))
+            try:
+                self.db.backup(backup)
+                if backup.execute("PRAGMA integrity_check").fetchone()[0] != "ok":
+                    raise ValueError("migration_backup_invalid")
+            finally:
+                backup.close()
         self.db.execute("PRAGMA journal_mode=WAL")
         self.db.execute("PRAGMA synchronous=FULL")
         self.db.executescript(
@@ -80,6 +94,15 @@ class Store:
         CREATE TABLE IF NOT EXISTS outbox(id TEXT PRIMARY KEY, text TEXT NOT NULL, state TEXT NOT NULL,
           at TEXT NOT NULL, error TEXT);
         CREATE TABLE IF NOT EXISTS lab(id TEXT PRIMARY KEY, body TEXT NOT NULL);
+        CREATE TABLE IF NOT EXISTS provisional_bars(symbol TEXT NOT NULL, start TEXT NOT NULL,
+          body TEXT NOT NULL, observed_at TEXT NOT NULL, PRIMARY KEY(symbol,start));
+        CREATE TABLE IF NOT EXISTS close_observations(id TEXT PRIMARY KEY, day TEXT NOT NULL,
+          observed_at TEXT NOT NULL, valid INTEGER NOT NULL, body TEXT NOT NULL);
+        CREATE TABLE IF NOT EXISTS job_attempts(job_id TEXT NOT NULL, attempt INTEGER NOT NULL,
+          at TEXT NOT NULL, state TEXT NOT NULL, result TEXT, error TEXT,
+          PRIMARY KEY(job_id,attempt));
+        CREATE TABLE IF NOT EXISTS bar_finalizations(symbol TEXT NOT NULL, start TEXT NOT NULL,
+          observed_at TEXT NOT NULL, PRIMARY KEY(symbol,start));
         """
         )
         if "entry_atr14" not in {
@@ -201,7 +224,9 @@ class Store:
             state.update(drawdown_halted=False, peak=state["equity"])
             self.put("intraday_loss_state", state)
 
-    def control(self, action):
+    def control(self, action, now=None, *, origin="operator"):
+        from quantpilot.paper.calendar import KST
+        now = now or datetime.now(timezone.utc)
         states = {
             "start": "running",
             "resume": "running",
@@ -217,7 +242,14 @@ class Store:
             if action in {"start", "resume"} and self.get("control") == "flattening":
                 raise ValueError("flatten_in_progress")
             self.put("control", states[action])
-            self.audit("control", {"action": action})
+            routine_daily_resume = action == "resume" and self.get("resume_authorized_day") != now.astimezone(KST).date().isoformat()
+            if origin == "operator" and self.get("incidents", {}) and action in {"resume", "pause", "flatten"} and not routine_daily_resume:
+                self.audit("operator_incident_intervention", {"action": action}, now)
+            if action in {"start", "resume"}:
+                self.put("resume_authorized_day", now.astimezone(KST).date().isoformat())
+            elif action == "pause":
+                self.put("recovery_restore_running", False)
+            self.audit("control", {"action": action}, now)
 
     def orders(self, open_only=False):
         rows = [dict(r) for r in self.db.execute("SELECT * FROM orders ORDER BY at,id")]
@@ -447,6 +479,33 @@ class Store:
                     "INSERT OR IGNORE INTO bars VALUES(?,?,?)",
                     (b.symbol, b.start.isoformat(), body),
                 )
+
+    def observe_bars(self, bars, now, grace_seconds=None):
+        """Only finalized bars enter decision history; provisional rows may change."""
+        from dataclasses import asdict
+        from datetime import timedelta
+        from quantpilot.paper.config import BAR_FINALITY_GRACE_SECONDS
+        grace = BAR_FINALITY_GRACE_SECONDS if grace_seconds is None else grace_seconds
+        if grace < BAR_FINALITY_GRACE_SECONDS:
+            raise ValueError("bar_finality_grace_too_short")
+        aware(now)
+        final = []
+        with self.transaction():
+            for bar in bars:
+                if bar.start > now:
+                    raise ValueError("future_bar")
+                if bar.start + timedelta(minutes=1, seconds=grace) <= now:
+                    self.save_bars([bar])
+                    self.db.execute("INSERT OR IGNORE INTO bar_finalizations VALUES(?,?,?)",
+                                    (bar.symbol, bar.start.isoformat(), now.isoformat()))
+                    self.db.execute("DELETE FROM provisional_bars WHERE symbol=? AND start=?",
+                                    (bar.symbol, bar.start.isoformat()))
+                    final.append(bar)
+                else:
+                    self.db.execute("INSERT INTO provisional_bars VALUES(?,?,?,?) "
+                                    "ON CONFLICT(symbol,start) DO UPDATE SET body=excluded.body,observed_at=excluded.observed_at",
+                                    (bar.symbol, bar.start.isoformat(), encode(asdict(bar)), now.isoformat()))
+        return final
 
     def load_bars(self, symbol, limit=1000):
         from quantpilot.paper.strategy import Bar

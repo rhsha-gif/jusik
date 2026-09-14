@@ -29,9 +29,11 @@ KST = ZoneInfo("Asia/Seoul")
 
 
 class PaperReconciliationUnavailable(RuntimeError):
-    def __init__(self, message, detail=None):
+    def __init__(self, message, detail=None, *, broker_balance=None, balance_observed_at=None):
         super().__init__(message)
         self.detail = detail
+        self.broker_balance = broker_balance
+        self.balance_observed_at = balance_observed_at
 
 
 class PaperReconciliationStore(Protocol):
@@ -56,6 +58,8 @@ class PaperReconciliationResult:
     broker_balance: KisBalanceResult
     reconciled_at: datetime
     diagnostics: tuple[dict, ...] = ()
+    daily_query: KisDailyOrdersResult | None = None
+    balance_observed_at: datetime | None = None
 
 
 class PaperBrokerReconciler:
@@ -110,8 +114,11 @@ class PaperBrokerReconciler:
         ]
         queryable = [item for item in unresolved if item not in history_expired]
         stage = "balance"
+        balance = None
+        balance_observed_at = None
         try:
             balance = self._client.get_balance(exchange="KRX")
+            balance_observed_at = self._now()
             if queryable:
                 stage = "daily_orders"
                 start_date = min(_dispatch_business_date(item) for item in queryable)
@@ -125,7 +132,8 @@ class PaperBrokerReconciler:
                 query = KisDailyOrdersResult(rows=(), pages_fetched=0)
         except Exception as exc:
             raise PaperReconciliationUnavailable(
-                "KIS paper reconciliation query is unavailable", safe_failure(exc, stage)
+                "KIS paper reconciliation query is unavailable", safe_failure(exc, stage),
+                broker_balance=balance, balance_observed_at=balance_observed_at,
             ) from None
 
         expired_ids = {item.order_plan_id for item in history_expired}
@@ -156,6 +164,8 @@ class PaperBrokerReconciler:
             broker_balance=balance,
             reconciled_at=now,
             diagnostics=tuple(self.diagnose_match(item, query.rows) for item in queryable),
+            daily_query=query if queryable else None,
+            balance_observed_at=balance_observed_at,
         )
 
     def reconcile_dispatch(

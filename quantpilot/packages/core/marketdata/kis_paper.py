@@ -215,11 +215,15 @@ class KisPaperMarketDataProvider:
         top = levels[0]
         bid = _positive_float(top.bid_price)
         ask = _positive_float(top.ask_price)
+        raw_at = datetime.combine(session_date, time(int(book.accepted_at_hhmmss[:2]),
+                                  int(book.accepted_at_hhmmss[2:4]), int(book.accepted_at_hhmmss[4:6])), tzinfo=KST)
         return Quote(
             symbol=symbol,
             last=(bid + ask) / 2,
             bid=bid,
             ask=ask,
+            occurred_at=raw_at,
+            received_at=observed_at,
             as_of=self._snapshot_time(
                 book,
                 observed_at=observed_at,
@@ -277,7 +281,9 @@ class KisPaperMarketDataProvider:
             raise KisPaperSnapshotUnavailable("kis_paper_snapshot_from_future")
         if age_seconds > self._max_age_seconds:
             raise KisPaperSnapshotUnavailable("kis_paper_snapshot_stale")
-        return accepted_at
+        # The provider boundary owns the documented one-second clock tolerance.
+        # Downstream risk and kernel checks can keep rejecting future evidence.
+        return min(accepted_at, observed_at)
 
     def _unavailable_quotes(
         self,

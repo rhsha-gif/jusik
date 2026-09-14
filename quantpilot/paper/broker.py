@@ -3,6 +3,7 @@
 from __future__ import annotations
 from datetime import datetime, timedelta
 from decimal import Decimal
+from contextlib import nullcontext
 
 from quantpilot.paper.store import OPEN, TERMINAL
 from quantpilot.paper.risk import fresh_quote, authorize_order
@@ -20,10 +21,15 @@ from quantpilot.packages.core.execution.paper_submission import (
     DurablePaperSubmissionCoordinator,
 )
 from quantpilot.packages.core.execution.paper_reconciliation import (
-    PaperBrokerReconciler,
+    PaperBrokerReconciler, PaperReconciliationUnavailable,
 )
 from quantpilot.packages.db.sqlite_repositories import PaperStateStore
 from quantpilot.packages.db.audit import AuditRecorder
+
+
+def environment_is_safe(gateway):
+    from quantpilot.paper.config import environment_safe
+    return environment_safe(getattr(gateway, "environment", {}))
 
 
 class LedgerAudit:
@@ -59,6 +65,8 @@ class KisGateway:
         self.balance = None
         self.verified_symbols = set()
         self.entry_reconciled = False
+        self.budget = None
+        self.verified_at = None
 
     def begin(self):
         from quantpilot.paper.auth import RefreshingClient
@@ -115,7 +123,21 @@ class KisGateway:
         self.entry_reconciled = False
         self.store.put("reconciliation_complete", False)
         self.store.put("reconciliation_attempt_at", now.isoformat())
-        result = self.reconciler.reconcile_unresolved()
+        try:
+            result = self.reconciler.reconcile_unresolved()
+        except PaperReconciliationUnavailable as exc:
+            # A successful balance followed by a failed daily-order query proves
+            # only unaffected, attributed holdings. It cannot authorize entries.
+            if exc.broker_balance is not None and exc.balance_observed_at is not None:
+                self.store.verify_cash()
+                local = {p["symbol"]: p["quantity"] for p in self.store.positions()}
+                remote = {p.symbol: p.holding_quantity for p in exc.broker_balance.positions}
+                pending = {o["symbol"] for o in self.store.orders(True)}
+                self.balance = exc.broker_balance
+                self.verified_symbols = {s for s, q in local.items() if remote.get(s) == q and s not in pending}
+                self.verified_at = exc.balance_observed_at
+                self.store.put("unverified_symbols", sorted(set(local) - self.verified_symbols))
+            raise
         diagnostics = list(result.diagnostics)
         if diagnostics != self.store.get("reconciliation_diagnostics"):
             self.store.audit("reconciliation_diagnostics", {"orders": diagnostics}, now)
@@ -150,6 +172,9 @@ class KisGateway:
         # so refresh it; otherwise reuse the snapshot and save the request budget.
         if local != before_positions:
             self.balance = self.client.get_balance()
+            self.verified_at = self.clock()
+        else:
+            self.verified_at = result.balance_observed_at or result.reconciled_at
         remote = {
             p.symbol: p.holding_quantity
             for p in self.balance.positions
@@ -164,9 +189,11 @@ class KisGateway:
         from quantpilot.paper.calendar import KST
 
         business_date = now.astimezone(KST).date()
-        rows = self.client.get_daily_orders_and_fills(
-            business_date, business_date, exchange="KRX", as_of_date=business_date,
-        ).rows
+        cached_query = getattr(result, "daily_query", None)
+        rows = (tuple(r for r in cached_query.rows if r.order_date == business_date.strftime("%Y%m%d"))
+                if cached_query is not None else self.client.get_daily_orders_and_fills(
+                    business_date, business_date, exchange="KRX", as_of_date=business_date,
+                ).rows)
         dispatches = self.kernel.list_paper_order_dispatches()
         # Terminal, conserved rows need no working-order attribution. Invalid or
         # ambiguous daily evidence blocks entries rather than disappearing as zero.
@@ -223,7 +250,7 @@ class KisGateway:
         self.store.put("reconciliation_complete", self.entry_reconciled)
         if self.entry_reconciled:
             self.store.put("reconciliation_reason", None)
-            self.store.put("last_reconciled_at", now.isoformat())
+            self.store.put("last_reconciled_at", self.clock().isoformat())
         # Balance marks are valuation observations, never executable quotes.
         marks = self.store.get("marks", {})
         times = self.store.get("marks_at", {})
@@ -239,7 +266,8 @@ class KisGateway:
         return self.entry_reconciled
 
     def protection_allowed(self, symbol):
-        return symbol in self.verified_symbols
+        return (symbol in self.verified_symbols and self.verified_at is not None
+                and 0 <= (self.clock() - self.verified_at).total_seconds() < self.store.policy.quote_ttl_seconds)
 
     def submit(self, order, quote, now):
         if self.coordinator is None:
@@ -290,7 +318,7 @@ class KisGateway:
                 )
                 for p in self.store.positions()
             ],
-            captured_at=now,
+            captured_at=self.verified_at or now,
             source=(
                 "paper_experiment_marked"
                 if all(p["symbol"] in marks for p in self.store.positions())
@@ -409,7 +437,36 @@ class KisGateway:
             buying_power=power,
         )
         self.store.update_order(order["id"], "submitted", 0, 0, now)
-        self.coordinator.submit_prepared_order(plan)
+        def before_send():
+            from quantpilot.packages.core.kis_paper import KisPaperConfigurationError
+            try:
+                at = self.clock()
+                if not environment_is_safe(self) or at >= plan.risk_check_expires_at or at >= plan.expires_at:
+                    raise ValueError("submission_evidence_expired")
+                if self.store.policy.data_mode == "paper_trading" and getattr(self, "environment", {}).get("KIS_PAPER_ORDER_SUBMISSION_ENABLED", "false").lower() != "true":
+                    raise ValueError("paper_submission_disabled")
+                self.kernel.require_active_paper_execution_session(self.session, checked_at=at)
+                if self.kernel.paper_kill_blocks_submission():
+                    raise ValueError("paper_kill_engaged")
+                if order["side"] == "sell" and not self.protection_allowed(order["symbol"]):
+                    raise ValueError("position_reconciliation_required")
+                if order["side"] == "buy" and not self.entry_reconciled:
+                    raise ValueError("entry_reconciliation_required")
+                feed = getattr(self, "feed", None)
+                if order["side"] == "buy" and feed is not None:
+                    required = {p["symbol"] for p in self.store.positions()} | set(self.store.get("universe", [])[:5]) | {order["symbol"]}
+                    if not feed.healthy(at, required):
+                        raise ValueError("feed_unavailable")
+                authorize_order(self.store, order, quote, at, self.calendar.session(at))
+            except Exception as exc:
+                from quantpilot.paper.diagnostics import failure
+                self.store.audit("queued_order_rejected", {"order_id": order["id"], **failure(exc, "pre_transport")}, self.clock())
+                # No bytes have been sent. The durable kernel terminalizes this local refusal.
+                raise KisPaperConfigurationError("queued_submission_guard_failed") from None
+        with (self.budget.context(priority="sell" if order["side"] == "sell" else "entry",
+                                  before_send=before_send) if self.budget else nullcontext()):
+            self.coordinator.submit_prepared_order(plan)
+        self.store.put("reconcile_wakeup", self.clock().isoformat())
 
     def cancel(self, order, now):
         if self.store.get("cancel_claim:" + order["id"]):
@@ -425,6 +482,7 @@ class KisGateway:
         rows = self.client.get_daily_orders_and_fills(
             business_date, business_date, exchange="KRX", as_of_date=business_date,
         ).rows
+        evidence_at = self.clock()
         matches = [
             r
             for r in rows
@@ -447,10 +505,30 @@ class KisGateway:
                 order["id"], "cancel_unknown", order["filled"], order["amount"], now
             )
         # A crash/timeout after the claim is query-only, never an automatic re-POST.
-        acknowledgement = self.client.cancel_paper_remaining_order(
-            forwarding_org_number=dispatch.broker_forwarding_order_org_number,
-            original_order_number=dispatch.broker_order_reference,
-        )
+        def before_cancel():
+            at = self.clock()
+            session = self.calendar.session(at)
+            if (not environment_is_safe(self) or not session or not session.trading(at)
+                    or not 0 <= (at - evidence_at).total_seconds() < self.store.policy.quote_ttl_seconds):
+                raise ValueError("cancel_evidence_expired")
+            self.kernel.require_active_paper_execution_session(self.session, checked_at=at)
+        from quantpilot.paper.api_budget import BudgetNotSent
+        try:
+            with (self.budget.context(priority="cancel", before_send=before_cancel) if self.budget else nullcontext()):
+                acknowledgement = self.client.cancel_paper_remaining_order(
+                    forwarding_org_number=dispatch.broker_forwarding_order_org_number,
+                    original_order_number=dispatch.broker_order_reference,
+                )
+        except BudgetNotSent:
+            # Only the transport boundary can prove that zero bytes were sent.
+            # Any timeout or failure after entering the wire keeps the durable claim.
+            with self.store.transaction():
+                self.store.put("cancel_claim:" + order["id"], False)
+                current = next(o for o in self.store.orders() if o["id"] == order["id"])
+                if current["state"] == "cancel_unknown":
+                    self.store.update_order(order["id"], order["state"], current["filled"], current["amount"], self.clock())
+                self.store.audit("cancel_not_sent", {"order_id": order["id"]}, self.clock())
+            return
         self.store.audit("cancel_acknowledged", {
             "order_id": order["id"], "message_code": acknowledgement.message_code,
             "final_state_confirmed": False,

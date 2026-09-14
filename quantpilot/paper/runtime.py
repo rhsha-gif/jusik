@@ -4,6 +4,8 @@ from __future__ import annotations
 from datetime import datetime, timedelta, timezone
 from hashlib import sha256
 from dataclasses import asdict
+from contextlib import nullcontext
+from quantpilot.paper.diagnostics import failure, subsystem, open_incident, recover_incident, publish_gates
 from types import SimpleNamespace
 import math
 
@@ -33,15 +35,20 @@ class Runtime:
         self.clock = clock or (lambda: datetime.now(timezone.utc))
         self.environment = environment or {}
         self.background_data = background_data
+        self.budget = None
+        self.feed = None
+        self._reconciled_at = None
+        self._reconcile_ok = False
+        self._reconcile_wakeup = None
 
-    def alert(self, code, now, block=True):
+    def alert(self, code, now, block=True, symbol=None):
         key = "alert:" + now.astimezone(KST).date().isoformat() + ":" + code
         symbols = self.store.get("unverified_symbols", [])
         protection = "\n보호 대기: " + ", ".join(symbols) if symbols else ""
         if symbols:
             key += ":" + ",".join(symbols)
         if block:
-            self.store.put("incident", code)
+            open_incident(self.store, subsystem(code, symbol), code, now)
         if not self.store.get(key):
             self.store.put(key, True)
             self.store.audit("incident", {"code": code}, now)
@@ -51,7 +58,65 @@ class Runtime:
                 now,
             )
 
+    def io(self, priority):
+        return self.budget.context(priority={0: "query", 1: "reconcile", 2: "entry", 3: "minute"}[priority]) if self.budget else nullcontext()
+
     def cycle(self):
+        if self.store.get("incident") and not self.store.get("incidents"):
+            open_incident(self.store, "reconciliation", self.store.get("incident"), self.clock())
+        held = {p["symbol"] for p in self.store.positions()}
+        for scope in tuple(self.store.get("incidents", {})):
+            if scope.startswith("protection:") and scope.split(":", 1)[1] not in held:
+                recover_incident(self.store, scope, self.clock())
+        result = self._cycle()
+        now = self.clock()
+        reasons = []
+        state = result.get("status")
+        if state in {"closed", "postclose", "preopen", "stopped"}:
+            reasons.append("stopped" if state == "stopped" else "session_closed")
+        else:
+            if self.store.get("control") != "running":
+                reasons.append("manual_pause")
+            if self.store.policy.data_mode == "paper_trading" and (not self.store.get("day_base_valid", False) or self.store.get("month_base_valid") is False):
+                reasons.append("invalid_baseline")
+            if self.store.policy.supervisor_enabled and self.store.get("recovery_required"):
+                reasons.append("recovery_required")
+            if self.store.policy.hybrid_feed_enabled and not self.store.get("feed_entry_ready", False):
+                reasons.append("stale_feed")
+            if self.store.get("incidents", {}).get("reconciliation") or self.store.get("reconciliation_complete") is False:
+                reasons.append("reconciliation_required")
+            loss = self.store.get("intraday_loss_state", {})
+            if loss.get("daily_halted") or loss.get("drawdown_halted"):
+                reasons.append("loss_limit")
+            if result.get("reason"):
+                reasons.append(result["reason"])
+            if not reasons and state in {"running", "waiting"} and not result.get("signals"):
+                statuses = [self.store.get("candidate_status:" + symbol, "warming") for symbol in self.store.get("universe", [])]
+                reasons.append("warming" if not statuses or any(v.startswith("warming") or v == "no_fresh_bars" for v in statuses) else "no_signal")
+            if self.store.get("entry_cutoff_active"):
+                reasons.append("entry_cutoff")
+        publish_gates(self.store, reasons, now)
+        return result
+
+    def reconcile(self, force=False):
+        now = self.clock()
+        interval = 10 if self.store.positions() or self.store.orders(True) else 60
+        wake = self.store.get("reconcile_wakeup")
+        if (self.store.policy.shared_api_budget_enabled and not force and self._reconciled_at
+                and 0 <= (now - self._reconciled_at).total_seconds() < interval
+                and wake == self._reconcile_wakeup):
+            return self._reconcile_ok
+        with self.io(1):
+            ok = self.gateway.reconcile(now)
+        self._reconciled_at, self._reconcile_ok = self.clock(), ok
+        self._reconcile_wakeup = wake
+        if ok:
+            recover_incident(self.store, "reconciliation", self.clock())
+            if self.feed:
+                self.feed.set_reconciled(now)
+        return ok
+
+    def _cycle(self):
         from quantpilot.paper.strategy import (
             evaluate_strategies,
             allocate_weights,
@@ -75,13 +140,16 @@ class Runtime:
             return {"status": "stopped"}
         self.store.put("heartbeat", now.isoformat())
         retry_after = self.store.get("broker_retry_after")
-        if retry_after and now < datetime.fromisoformat(retry_after):
+        if retry_after and now < datetime.fromisoformat(retry_after) and not self.store.positions():
             return {"status": "blocked", "reason": "broker_read_backoff"}
         session = self.calendar.session(now)
         if session is None:
             return {"status": "closed"}
         day = now.astimezone(KST).date().isoformat()
         self.store.put("session_closes", session.closes.isoformat())
+        self.store.put("entry_cutoff_active", now >= session.closes - timedelta(minutes=policy.entry_cutoff_minutes))
+        if policy.supervisor_enabled and self.store.get("control") == "running" and self.store.get("resume_authorized_day") != day:
+            self.store.control("pause", now=now, origin="runtime")
         self.store.put("heartbeat", now.isoformat())
         if now < session.opens:
             self.store.put(
@@ -106,22 +174,43 @@ class Runtime:
             self.store.put(
                 "ai_due", {"kind": "hourly", "key": f"{day}:hourly:{hourly}"}
             )
+        if now >= session.closes and not self.store.positions() and not self.store.orders(True):
+            from quantpilot.paper.valuation import close_for_day
+            close = close_for_day(self.store, day)
+            if close and close.get("valid") and close.get("positions", 0) == 0 and close.get("open_orders", 0) == 0:
+                if policy.auto_pause_after_close and self.store.get("control") == "running":
+                    self.store.control("pause", now=now, origin="runtime")
+                self.store.put("ai_due", {"kind": "postclose", "key": day + ":postclose"})
+                return {"status": "postclose", "quarantined": 0}
         begun = False
         cycle_failed = False
         try:
             self.gateway.begin()
             begun = True
-            reconciled = self.gateway.reconcile(self.clock())
+            try:
+                if retry_after and self.clock() < datetime.fromisoformat(retry_after):
+                    reconciled = False
+                else:
+                    reconciled = self.reconcile()
+            except Exception as exc:
+                if not self.store.positions():
+                    raise
+                # An unavailable discovery/reconciliation query cannot skip protection.
+                # Gateway ownership, quantity, evidence age and kernel gates still apply.
+                reconciled = False
+                self._reconcile_ok = False
+                self.store.put("reconciliation_complete", False)
+                self.store.audit("reconciliation_failed", failure(exc, "reconciliation"), self.clock())
             if not reconciled:
-                self.alert(
-                    self.store.get(
-                        "reconciliation_reason", "broker_order_outcome_unknown"
-                    ),
-                    now,
-                )
-            elif self.store.get("incident"):
-                self.store.audit("recovered", {"code": self.store.get("incident")}, now)
-                self.store.put("incident", None)
+                self.alert(self.store.get("reconciliation_reason") or "broker_order_outcome_unknown", now)
+            if self.feed:
+                protected = {p["symbol"] for p in self.store.positions()} | {o["symbol"] for o in self.store.orders(True)}
+                ready = self.feed.healthy(self.clock(), protected | set(self.store.get("universe", [])[:5]))
+                self.store.put("feed_entry_ready", ready)
+                if ready:
+                    recover_incident(self.store, "feed", self.clock())
+                else:
+                    self.alert("feed_unavailable", self.clock())
             positions = self.store.positions()
             roll_baselines(self.store, self.calendar, now)
             if now >= session.closes:
@@ -149,13 +238,13 @@ class Runtime:
                 ):
                     # The next session must be resumed on purpose, never by an
                     # unattended process that simply kept running overnight.
-                    self.store.control("pause")
+                    self.store.control("pause", now=self.clock(), origin="runtime")
                     self.store.audit("auto_paused_after_close", {"day": day}, now)
                 return {"status": "postclose", "quarantined": len(positions)}
             liquidation = now >= session.closes - timedelta(
                 minutes=policy.liquidation_minutes
             )
-            no_entries = self.store.get(
+            no_entries = not reconciled or self.store.get(
                 "control"
             ) != "running" or now >= session.closes - timedelta(
                 minutes=policy.entry_cutoff_minutes
@@ -173,12 +262,19 @@ class Runtime:
                 from quantpilot.paper.intraday.controls import feed_fresh
 
                 no_entries = no_entries or not feed_fresh(self.store, now)
+            if policy.hybrid_feed_enabled and not self.store.get("feed_entry_ready", False):
+                no_entries = True
+            cancelled = False
             # Cancel stale entry/exit limits once, then let reconciliation prove final status.
             for order in self.store.orders(True):
                 age = (now - datetime.fromisoformat(order["at"])).total_seconds()
                 if (order["side"] == "buy" and no_entries) or age >= 60:
                     try:
-                        self.gateway.cancel(order, self.clock())
+                        before_cancel = [(o["id"], o["state"]) for o in self.store.orders(True)]
+                        prior_claim = self.store.get("cancel_claim:" + order["id"])
+                        with self.io(0):
+                            self.gateway.cancel(order, self.clock())
+                        cancelled = cancelled or prior_claim != self.store.get("cancel_claim:" + order["id"]) or before_cancel != [(o["id"], o["state"]) for o in self.store.orders(True)]
                     except Exception as exc:
                         self.alert("cancel_reconciliation_required", self.clock())
                         self.store.audit(
@@ -186,13 +282,16 @@ class Runtime:
                             {"order_id": order["id"], **safe_failure(exc, "cancel")},
                             self.clock(),
                         )
-            if not self.gateway.reconcile(self.clock()):
-                self.alert(
-                    self.store.get(
-                        "reconciliation_reason", "broker_order_outcome_unknown"
-                    ),
-                    self.clock(),
-                )
+            if cancelled:
+                try:
+                    reconciled = self.reconcile(force=True)
+                except Exception as exc:
+                    reconciled = False
+                    self.store.put("reconciliation_complete", False)
+                    self.store.audit("reconciliation_failed", failure(exc, "after_cancel"), self.clock())
+                if not reconciled:
+                    no_entries = True
+                    self.alert("cancel_reconciliation_required", self.clock())
             # Ambiguous rows never resolve themselves; call the operator once they persist.
             if any(
                 o["state"] in {"outcome_unknown", "cancel_unknown"}
@@ -211,7 +310,8 @@ class Runtime:
                     )
                     continue
                 try:
-                    quote = self.market.quotes([p["symbol"]])[p["symbol"]]
+                    with self.io(0):
+                        quote = self.market.quotes([p["symbol"]])[p["symbol"]]
                     at = self.clock()
                     fresh_quote(quote, at, policy.quote_ttl_seconds)
                     marks = self.store.get("marks", {})
@@ -220,6 +320,7 @@ class Runtime:
                     mark_times = self.store.get("marks_at", {})
                     mark_times[p["symbol"]] = at.isoformat()
                     self.store.put("marks_at", mark_times)
+                    recover_incident(self.store, "protection:" + p["symbol"], at)
                     extra_exit = None
                     if policy.strategy_generation == "intraday_v2" and p[
                         "version"
@@ -310,10 +411,11 @@ class Runtime:
                         "position_protection_unavailable",
                         self.clock(),
                         block=not bool(p["quarantined"]),
+                        symbol=p["symbol"],
                     )
                     self.store.audit(
                         "protection_error",
-                        {"symbol": p["symbol"], "error": type(exc).__name__},
+                        {"symbol": p["symbol"], **failure(exc, "position_protection")},
                     )
             if (
                 self.store.get("control") == "flattening"
@@ -326,6 +428,17 @@ class Runtime:
 
             budget = loss_budget(self.store, self.clock())
             no_entries = no_entries or not budget["available"]
+            if policy.supervisor_enabled and self.store.get("recovery_required"):
+                data_ready = (self.store.get("feed_entry_ready") is True if policy.hybrid_feed_enabled
+                              else all((self.store.get("data:" + symbol) or {}).get("quality") == "completed_bars_validated"
+                                       and (self.store.get("data:" + symbol) or {}).get("last_bar")
+                                       and 0 <= (self.clock() - datetime.fromisoformat(self.store.get("data:" + symbol)["last_bar"])).total_seconds() <= 150
+                                       for symbol in self.store.get("universe", [])) and bool(self.store.get("universe")))
+                if reconciled and self.store.get("day_base_valid") and budget["available"] and data_ready:
+                    self.store.put("recovery_required", False)
+                    self.store.audit("restart_reconciled", {"day": day}, self.clock())
+                else:
+                    no_entries = True
             if policy.strategy_generation == "intraday_v2":
                 from quantpilot.paper.intraday.controls import feed_fresh
 
@@ -358,8 +471,12 @@ class Runtime:
                         continue
                     fetched_at = self.clock()
                     if not self.background_data:
-                        bars = self.market.minutes(symbol, fetched_at)
-                        self.store.save_bars(bars)
+                        observations = getattr(self.market, "minute_observations", None)
+                        if observations:
+                            bars = self.store.observe_bars(observations(symbol, fetched_at), fetched_at)
+                        else:
+                            bars = self.market.minutes(symbol, fetched_at)
+                            self.store.save_bars(bars)
                         self.store.put(
                             "data:" + symbol,
                             {
@@ -414,6 +531,11 @@ class Runtime:
                         "ready" if len(today) >= 110 else "warming",
                     )
                 except Exception as exc:
+                    from quantpilot.paper.store import CompletedBarRevised
+                    if isinstance(exc, CompletedBarRevised):
+                        from quantpilot.paper.collector import quarantine_revision
+                        quarantine_revision(self.store, symbol, exc, self.clock())
+                        continue
                     self.store.put("candidate_status:" + symbol, type(exc).__name__)
                     self.store.audit(
                         "candidate_unavailable",
@@ -486,7 +608,11 @@ class Runtime:
                     break
                 if signal.strategy_id not in weights:
                     continue
-                quote = self.market.quotes([signal.symbol])[signal.symbol]
+                if policy.shared_api_budget_enabled and not self.reconcile(force=True):
+                    self.alert("entry_reconciliation_required", self.clock())
+                    break
+                with self.io(2):
+                    quote = self.market.quotes([signal.symbol])[signal.symbol]
                 at = self.clock()
                 qty = entry_size(
                     self.store, signal, quote, weights.get(signal.strategy_id, 0), at
@@ -560,6 +686,7 @@ class Runtime:
             if begun:
                 try:
                     self.gateway.end()
+                    recover_incident(self.store, "runtime", self.clock())
                 except Exception:
                     self.alert("execution_lease_close_failed", self.clock())
 
@@ -602,9 +729,11 @@ class Runtime:
                     self.store, order, quote, now, self.calendar.session(now)
                 )
         if reserved:
-            self.gateway.submit(
-                next(o for o in self.store.orders() if o["id"] == order_id), quote, now
-            )
+            with self.io(0 if side == "sell" else 2):
+                self.gateway.submit(
+                    next(o for o in self.store.orders() if o["id"] == order_id), quote, now
+                )
+            self.store.put("reconcile_wakeup", self.clock().isoformat())
 
     def assessment(self, now):
         raw = self.store.get("assessment")

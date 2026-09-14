@@ -68,7 +68,8 @@ def collect_paper(
     path = external_path(path)
     end = min(session.closes, clock() + timedelta(seconds=seconds))
     stop = threading.Event()
-    transport = LimitedTransport(ReadinessTransport())
+    from quantpilot.paper.transport import shared_transport
+    transport = shared_transport(config, ReadinessTransport())
     client = RefreshingClient(
         config, lambda cfg: KisPaperClient(cfg, transport=transport), clock
     )
@@ -153,7 +154,7 @@ def collect_paper(
             -1
         ]["symbols"][:20]
         subscribed[:] = symbols
-        approval = request_approval(config, LimitedTransport(PaperApprovalTransport()))
+        approval = request_approval(config, shared_transport(config, PaperApprovalTransport()))
         if runtime_path:
             from quantpilot.paper.store import Store
 

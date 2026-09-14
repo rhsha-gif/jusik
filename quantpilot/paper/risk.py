@@ -82,6 +82,15 @@ def entry_size(store, signal, quote, weight, now, *, trial=False, ignore_order_i
     pending = [o for o in store.orders(True) if o["id"] != ignore_order_id]
     if store.get("control") != "running":
         return 0
+    if policy.data_mode == "paper_trading" and (store.get("day_base_valid") is not True or store.get("month_base_valid") is False):
+        return 0
+    if policy.supervisor_enabled and (
+        store.get("resume_authorized_day") != now.astimezone(KST).date().isoformat()
+        or store.get("recovery_required")
+    ):
+        return 0
+    if policy.hybrid_feed_enabled and store.get("feed_entry_ready") is not True:
+        return 0
     occupied = {p["symbol"] for p in positions} | {
         o["symbol"] for o in pending if o["side"] == "buy"
     }

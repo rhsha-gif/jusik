@@ -136,9 +136,11 @@ def test_book_stamped_inside_future_tolerance_is_usable_with_zero_age() -> None:
 
     assert snapshot.data_quality.usable is True
     assert snapshot.provider_status.observed_age_seconds == 0
-    assert snapshot.quotes["005930"].as_of == datetime(
-        2026, 7, 10, 10, 0, 11, tzinfo=snapshot.quotes["005930"].as_of.tzinfo
-    )
+    quote = snapshot.quotes["005930"]
+    assert quote.as_of == quote.received_at
+    assert (quote.occurred_at - quote.received_at).total_seconds() == 1
+    from quantpilot.paper.risk import fresh_quote
+    assert fresh_quote(quote, quote.received_at, 15) is quote
 
 
 @pytest.mark.parametrize(

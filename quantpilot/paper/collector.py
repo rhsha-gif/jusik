@@ -167,11 +167,16 @@ class Collector:
 
     def fetch(self, store, symbol, observed, key, floor=None):
         self.attempts[(symbol, key)] = self.attempts.get((symbol, key), 0) + 1
-        bars = self.market.minutes(symbol, observed, self.grace_seconds)
+        observations = getattr(self.market, "minute_observations", None)
+        bars = (observations(symbol, observed) if observations else
+                self.market.minutes(symbol, observed, self.grace_seconds))
         if floor is not None:
             # The disputed bar and everything before it stay as stored; never re-judged.
             bars = [b for b in bars if b.start > floor]
-        store.save_bars(bars)
+        if observations:
+            bars = store.observe_bars(bars, observed, self.grace_seconds)
+        else:
+            store.save_bars(bars)
         if bars:
             self.observations[symbol] = {
                 "observed_at": observed.isoformat(),
@@ -202,31 +207,8 @@ class Collector:
         self.fetched[symbol] = key
 
     def quarantine(self, store, symbol, exc, observed):
-        day = observed.astimezone(KST).date().isoformat()
         self.fetched[symbol] = self.bucket(observed).isoformat()
-        existing = store.get("data_quarantine:" + symbol) or {}
-        previous = store.get("data:" + symbol) or {}
-        closed = datetime.fromisoformat(exc.start) + timedelta(minutes=1)
-        with store.transaction():
-            store.put("data_quarantine:" + symbol, {
-                "day": day,
-                "reason": "completed_bar_revised",
-                "start": exc.start,
-                "detected_at": observed.isoformat(),
-            })
-            store.put("candidate_status:" + symbol, "completed_bar_revised_quarantined")
-            if existing.get("day") != day or existing.get("start") != exc.start:
-                store.audit("market_data_quarantined", {
-                    "symbol": symbol,
-                    "reason": "completed_bar_revised",
-                    "start": exc.start,
-                    "stored": exc.stored,
-                    "revised": exc.revised,
-                    "changed": exc.changed,
-                    "observed_at": observed.isoformat(),
-                    "previous_observed_at": previous.get("observed_at"),
-                    "seconds_after_close": (observed - closed).total_seconds(),
-                }, observed)
+        quarantine_revision(store, symbol, exc, observed)
 
     def record_failure(self, store, symbol, exc, observed):
         """Count transient read failures without touching a symbol's candidate status."""
@@ -262,3 +244,30 @@ class Collector:
                 self.stopping.wait(self.poll_seconds)
         finally:
             store.close()
+
+
+def quarantine_revision(store, symbol, exc, observed):
+    day = observed.astimezone(KST).date().isoformat()
+    existing = store.get("data_quarantine:" + symbol) or {}
+    previous = store.get("data:" + symbol) or {}
+    closed = datetime.fromisoformat(exc.start) + timedelta(minutes=1)
+    with store.transaction():
+        store.put("data_quarantine:" + symbol, {
+            "day": day,
+            "reason": "completed_bar_revised",
+            "start": exc.start,
+            "detected_at": observed.isoformat(),
+        })
+        store.put("candidate_status:" + symbol, "completed_bar_revised_quarantined")
+        if existing.get("day") != day or existing.get("start") != exc.start:
+            store.audit("market_data_quarantined", {
+                "symbol": symbol,
+                "reason": "completed_bar_revised",
+                "start": exc.start,
+                "stored": exc.stored,
+                "revised": exc.revised,
+                "changed": exc.changed,
+                "observed_at": observed.isoformat(),
+                "previous_observed_at": previous.get("observed_at"),
+                "seconds_after_close": (observed - closed).total_seconds(),
+            }, observed)

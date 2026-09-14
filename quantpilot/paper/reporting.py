@@ -72,6 +72,7 @@ def snapshot(store, now=None):
         "control": store.get("control"),
         "policy_version": store.policy.version,
         "strategy_generation": store.policy.strategy_generation,
+        "supervisor_enabled": store.policy.supervisor_enabled,
         "intraday_loss_state": store.get("intraday_loss_state"),
         "intraday_qualified_versions": {
             s: r.get("version") for s, r in store.get("intraday_admission", {}).items()
@@ -122,6 +123,7 @@ def snapshot(store, now=None):
         "valuation_incomplete": incomplete,
         "cost_basis": "modeled_fee_tax; slippage_separate",
         "live_trading_enabled": False,
+        **operational_diagnostics(store, now),
     }
 
 
@@ -156,6 +158,24 @@ def render(report, review=""):
             "표시된 보유수량은 원장 기준입니다. 대사 미완료 시 브로커 잔고를 별도로 확인하세요."
         )
     loss = report.get("intraday_loss_state")
+    gates = report.get("entry_gates", {}).get("reasons", [])
+    labels = {"manual_pause": "수동 일시정지", "no_signal": "신호 없음", "warming": "데이터 준비",
+              "stale_feed": "시세 확인 필요", "reconciliation_required": "대사 필요",
+              "invalid_baseline": "손익 기준 미확인", "loss_limit": "손실 한도", "entry_cutoff": "진입 시간 종료",
+              "recovery_required": "재시작 검증 중", "session_closed": "장 외 시간"}
+    if gates:
+        lines.append("진입 제한: " + ", ".join(labels.get(gate, gate) for gate in gates))
+    if report.get("feed", {}).get("state") != "disabled":
+        feed = report.get("feed", {})
+        lines.append(f"시세 수신: {feed.get('state', 'unknown')} · 구독 {feed.get('acked_subscriptions', 0)}/40")
+    if report.get("data_quarantine"):
+        lines.append("분봉 변경 격리: " + ", ".join(report["data_quarantine"]))
+    session_trades = report.get("session_trades")
+    if session_trades:
+        lines.append(f"당일 청산 체결 {session_trades['closed_fill_events']}건 · 이월분 손익 {session_trades['carry_net_pnl']:+,.0f}원")
+    api = report.get("api_budget", {})
+    if api.get("state") == "enabled":
+        lines.append(f"API 대기 {api.get('queue_depth', 0)}건 · 한도 거부 {api.get('violations', 0)}건")
     if loss:
         lines.append(
             f"신규 진입 잔여 손실 예산 {loss['available']:,.0f}원 · 예약 {loss['reserved']:,.0f}원"
@@ -292,7 +312,7 @@ def record_process_failure(store, role, result, now=None):
         )
 
 
-def check_trader_liveness(store, now):
+def check_trader_liveness(store, now, calendar=None):
     """One DM per hour while an armed trader stops heartbeating during KRX hours.
 
     The reporter has no exchange calendar, so weekday session hours are approximated;
@@ -303,6 +323,11 @@ def check_trader_liveness(store, now):
     from quantpilot.paper.calendar import KST
 
     local = now.astimezone(KST)
+    if calendar is not None:
+        from datetime import timedelta
+        session = calendar.session(now)
+        if not session or not session.opens - timedelta(minutes=10) <= now <= session.closes + timedelta(minutes=10):
+            return False
     if local.weekday() >= 5 or not (
         (8, 50) <= (local.hour, local.minute) <= (15, 40)
     ):
@@ -328,6 +353,122 @@ def check_trader_liveness(store, now):
             "trader_liveness_alert", {"heartbeat": heartbeat, "age_seconds": age}, now
         )
     return queued
+
+
+def operational_diagnostics(store, now):
+    from quantpilot.paper.calendar import KST
+    from quantpilot.paper.diagnostics import gate_seconds
+    from quantpilot.paper.valuation import close_for_day
+    from quantpilot.paper.supervisor import _status_from_store
+    day = now.astimezone(KST).date().isoformat()
+    quarantine = {}
+    for row in store.db.execute("SELECT key,value FROM settings WHERE key LIKE 'data_quarantine:%'"):
+        value = json.loads(row[1])
+        if value and value.get("day") == day:
+            quarantine[row[0].split(":", 1)[1]] = value
+    attempts = ([dict(row) for row in store.db.execute(
+        "SELECT job_id,attempt,at,state,error FROM job_attempts ORDER BY at DESC LIMIT 12")]
+        if store.db.execute("SELECT 1 FROM sqlite_master WHERE type='table' AND name='job_attempts'").fetchone() else [])
+    return {
+        "entry_gates": store.get("entry_gates", {}),
+        "entry_block_seconds": gate_seconds(store, now),
+        "incidents": store.get("incidents", {}),
+        "feed": store.get("feed_status", {"state": "disabled"}),
+        "api_budget": api_budget_diagnostics(store, now),
+        "supervisor": _status_from_store(store, now) if store.policy.supervisor_enabled else {"state": "disabled"},
+        "recovery_required": store.get("recovery_required", False),
+        "resume_authorized_day": store.get("resume_authorized_day"),
+        "close_evidence": close_for_day(store, day),
+        "data_quarantine": quarantine,
+        "ai_runners": store.get("ai_runners", {}),
+        "ai_job_attempts": attempts,
+        "last_review": store.get("last_review"),
+    }
+
+
+def api_budget_diagnostics(store, now):
+    location = store.get("api_budget_location")
+    if not location:
+        return store.get("api_budget_status", {"state": "disabled"})
+    import sqlite3
+    from pathlib import Path
+    from quantpilot.paper.calendar import KST
+    try:
+        db = sqlite3.connect(Path(location["path"]).resolve().as_uri() + "?mode=ro", uri=True, timeout=2)
+        try:
+            row = db.execute("SELECT requests,queue_seconds,processing_seconds,retries,rate_violations FROM api_budget_daily WHERE scope=? AND day=?",
+                             (location["scope"], now.astimezone(KST).date().isoformat())).fetchone()
+            depth = db.execute("SELECT COUNT(*) FROM api_budget_waiters WHERE scope=? AND expires_at>?",
+                               (location["scope"], now.timestamp())).fetchone()[0]
+        finally:
+            db.close()
+        return dict(zip(("requests", "queue_seconds", "processing_seconds", "retries", "violations"), row or (0, 0, 0, 0, 0)),
+                    state="enabled", queue_depth=depth, observed_at=now.isoformat())
+    except (KeyError, TypeError, ValueError, sqlite3.Error):
+        return {"state": "unavailable", "violations": None}
+
+
+def operation_report_once(store, calendar, now):
+    """Independent close numbers. Never wait for trader or AI, never resend unknown delivery."""
+    if not store.policy.independent_reports_enabled:
+        return {"status": "disabled"}
+    from quantpilot.paper.calendar import KST
+    from quantpilot.paper.valuation import close_for_day
+    session = calendar.session(now)
+    if not session or now < session.closes:
+        return {"status": "waiting"}
+    day = now.astimezone(KST).date().isoformat()
+    close = close_for_day(store, day)
+    confirmed = bool(close and close.get("valid"))
+    previous = store.get("operation_report:" + day)
+    correction = previous is not None and not previous.get("close_confirmed") and confirmed
+    if previous and not correction:
+        return {"status": "already_reported"}
+    report = snapshot(store, now=now)
+    report.update(report_day=day, report_at=now.isoformat(), close_confirmed=confirmed,
+                  close_report_delay_seconds=max(0, (now - session.closes).total_seconds()),
+                  report_kind="correction" if correction else "operation")
+    if confirmed:
+        base = close.get("day_base", store.get("day_base", store.get("initial_capital")))
+        report["equity"] = round(close["equity"], 2)
+        report["cash"] = round(close.get("cash", report["cash"]), 2)
+        report["positions"] = close.get("position_snapshot", report["positions"])
+        report["open_orders"] = close.get("open_orders", report["open_orders"])
+        report["daily_pnl"] = round(close["equity"] - base, 2)
+        report["daily_return"] = close["equity"] / base - 1
+        report["day_base_source"] = close.get("day_base_source", report["day_base_source"])
+        report["cumulative_pnl"] = round(close["equity"] - store.get("initial_capital"), 2)
+        report["cumulative_return"] = close["equity"] / store.get("initial_capital") - 1
+        report["valuation_incomplete"] = False
+        report["daily_pnl_incomplete"] = not close.get("day_base_valid", store.get("day_base_valid", False))
+    else:
+        report["valuation_incomplete"] = True
+        report["daily_pnl_incomplete"] = True
+    trades = [dict(r) for r in store.db.execute("SELECT * FROM trades")
+              if datetime.fromisoformat(r["at"]).astimezone(KST).date().isoformat() == day]
+    orders = {o["id"]: o for o in store.orders()}
+    carry = []
+    for trade in trades:
+        order = orders.get(trade["id"].rsplit(":", 1)[0], {})
+        earlier_buys = [o for o in orders.values() if o["side"] == "buy" and o["symbol"] == trade["symbol"] and o["at"] <= order.get("at", "")]
+        if earlier_buys and datetime.fromisoformat(max(earlier_buys, key=lambda o: o["at"])["at"]).astimezone(KST).date().isoformat() < day:
+            carry.append(trade)
+    report["session_trades"] = {"closed_fill_events": len(trades), "net_pnl": sum(t["pnl"] for t in trades),
+                                "carry_net_pnl": sum(t["pnl"] for t in carry),
+                                "modeled_cost": sum((t["gross_pnl"] or 0) - t["pnl"] for t in trades),
+                                "slippage_adjusted_pnl": sum(t["adjusted_pnl"] for t in trades)}
+    key = ("correction:" if correction else "operation:") + day
+    with store.transaction():
+        if previous is None:
+            store.put("operation_initial:" + day, report)
+        store.put("operation_report:" + day, report)
+        store.put("last_report", report)
+        store.enqueue(key, ("종가 확인 정정\n" if correction else "운영 숫자 보고\n") + render(report)
+                      + ("\n종가 대사 확인" if confirmed else "\n종가 미확인 — 확인 후 정정 보고")
+                      + "\nAI 복기는 별도 보고합니다.", now)
+        store.put("ai_due", {"kind": "postclose", "key": day + ":postclose"})
+        store.audit("operation_report_queued", {"id": key, "close_confirmed": confirmed}, now)
+    return {"status": "queued", "id": key, "close_confirmed": confirmed}
 
 
 def enqueue_recovery_report(store, now):

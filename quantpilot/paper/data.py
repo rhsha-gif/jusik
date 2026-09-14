@@ -99,8 +99,14 @@ class PaperMarket:
         self.client = client
         self.quote_provider = quote_provider
         self.public_fetch = public_fetch or self._public_fetch
+        self.feed = None
+        self.clock = lambda: datetime.now().astimezone()
 
     def minutes(self, symbol, now, grace_seconds=BAR_FINALITY_GRACE_SECONDS):
+        return [bar for bar in self.minute_observations(symbol, now)
+                if bar.start + timedelta(minutes=1, seconds=grace_seconds) <= now]
+
+    def minute_observations(self, symbol, now):
         response = self.client._authenticated_get(
             "/uapi/domestic-stock/v1/quotations/inquire-time-itemchartprice",
             "FHKST03010200",
@@ -113,13 +119,18 @@ class PaperMarket:
             },
         )
         _assert_business_success(response, "paper_minutes")
-        return parse_minutes(symbol, response.payload.get("output2"), now, grace_seconds)
+        # The store decides finality. Pending rows remain observable and revisable.
+        return parse_minutes(symbol, response.payload.get("output2"), now, -60)
 
     def quotes(self, symbols):
-        snap = self.quote_provider.get_quotes(symbols)
-        if not snap.data_quality.usable:
-            raise DataUnavailable("paper_quotes_unavailable")
-        return snap.quotes
+        cached = self.feed.quotes(symbols, self.clock(), 15) if self.feed else {}
+        missing = [symbol for symbol in symbols if symbol not in cached]
+        if missing:
+            snap = self.quote_provider.get_quotes(missing)
+            if not snap.data_quality.usable:
+                raise DataUnavailable("paper_quotes_unavailable")
+            cached.update(snap.quotes)
+        return cached
 
     @staticmethod
     def _public_fetch(market):

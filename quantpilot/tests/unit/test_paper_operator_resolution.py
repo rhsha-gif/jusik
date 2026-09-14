@@ -28,6 +28,7 @@ def trial(tmp_path):
     store = Store(tmp_path / "experiment.sqlite3")
     store.configure({"data_mode": "paper_trading"}, 1)
     store.control("start")
+    store.put("day_base_valid", True)  # This fixture models a validated first-session baseline.
     store.put("weights", {"trend_pullback": 0.6})
     client = Client()
     client.order_outcome = replace(
@@ -178,6 +179,7 @@ def unknown(tmp_path):
     store = Store(tmp_path / "experiment.sqlite3")
     store.configure({"data_mode": "paper_trading"}, 1)
     store.control("start")
+    store.put("day_base_valid", True)  # This fixture models a validated first-session baseline.
     store.put("weights", {"trend_pullback": 0.6})
     client = Client()
     client.order_outcome = TimeoutError("fixture")
@@ -344,6 +346,7 @@ def test_gateway_refusal_on_order_post_is_a_counted_definitive_rejection(tmp_pat
     store = Store(tmp_path / "experiment.sqlite3")
     store.configure({"data_mode": "paper_trading"}, 1)
     store.control("start")
+    store.put("day_base_valid", True)  # This fixture models a validated first-session baseline.
     store.put("weights", {"trend_pullback": 0.6})
     client = Client()
     client.order_outcome = KisPaperGatewayRejected(

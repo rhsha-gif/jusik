@@ -19,9 +19,11 @@ PAPER_WS = "ws://ops.koreainvestment.com:31000"
 TICK_TR, QUOTE_TR = "H0STCNT0", "H0STASP0"
 
 
-def parse_frame(raw, received_at, symbols):
+def parse_frame(raw, received_at, symbols, *, future_tolerance_seconds=0):
     """Reject unrecognized/encrypted account frames before payload interpretation."""
     aware(received_at)
+    if future_tolerance_seconds not in (0, 1):
+        raise ValueError("market_time_tolerance_invalid")
     if not isinstance(raw, str) or len(raw) > 1_048_576:
         raise ValueError("invalid_market_frame")
     parts = raw.split("|", 3)
@@ -44,7 +46,7 @@ def parse_frame(raw, received_at, symbols):
         ).replace(tzinfo=KST)
         if parts[1] == TICK_TR and row[33] != day.strftime("%Y%m%d"):
             raise ValueError("tick_date_mismatch")
-        if not 0 <= (received_at - occurred).total_seconds() < 30:
+        if not -future_tolerance_seconds <= (received_at - occurred).total_seconds() < 30:
             raise ValueError("market_event_delayed")
         event = {
             "id": sha256(

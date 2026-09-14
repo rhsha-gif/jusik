@@ -58,7 +58,8 @@ def build_runtime(store, env):
 
     calendar = Calendar()
     config = connection_config(env)
-    transport = LimitedTransport(StrictUrllibKisPaperTransport())
+    from quantpilot.paper.transport import shared_transport
+    transport = shared_transport(config, StrictUrllibKisPaperTransport(), enabled=store.policy.shared_api_budget_enabled)
     clock = lambda: datetime.now(timezone.utc)
     from quantpilot.paper.auth import RefreshingClient
 
@@ -67,7 +68,7 @@ def build_runtime(store, env):
     )
     quotes = KisPaperMarketDataProvider(client, session_authority=calendar, clock=clock)
     gateway = KisGateway(store, client, calendar, clock)
-    return Runtime(
+    runtime = Runtime(
         store,
         PaperMarket(client, quotes),
         gateway,
@@ -76,6 +77,26 @@ def build_runtime(store, env):
         env,
         background_data=True,
     )
+    runtime.budget = getattr(transport, "budget", None)
+    if runtime.budget:
+        store.put("api_budget_location", {"path": str(runtime.budget.path), "scope": runtime.budget.scope})
+    gateway.budget = runtime.budget
+    gateway.environment = env
+    runtime.market.clock = clock
+    if store.policy.hybrid_feed_enabled:
+        from quantpilot.paper.feeds import FeedApproval, HybridFeed
+        from quantpilot.paper.intraday.stream import PaperApprovalTransport, request_approval
+        approval_transport = shared_transport(config, PaperApprovalTransport(), enabled=store.policy.shared_api_budget_enabled)
+        def approval():
+            notice_key = env.get("KIS_PAPER_HTS_ID", "").strip()
+            if not notice_key:
+                raise ValueError("paper_notice_key_missing")
+            return FeedApproval(request_approval(config, approval_transport), notice_key)
+        runtime.feed = HybridFeed(connect=None, approval_supplier=approval, clock=clock,
+                                  reconciliation_seconds=65)
+        runtime.market.feed = runtime.feed
+        gateway.feed = runtime.feed
+    return runtime
 
 
 @contextmanager
@@ -103,6 +124,7 @@ def parser():
         sub.add_parser(command)
     start = sub.add_parser("start")
     start.add_argument("--once", action="store_true")
+    start.add_argument("--supervised", action="store_true")
     worker = sub.add_parser("worker")
     worker.add_argument("--once", action="store_true")
     reporter = sub.add_parser("reporter")
@@ -123,6 +145,15 @@ def parser():
     dashboard = sub.add_parser("dashboard")
     dashboard.add_argument("--port", type=int, default=8770)
     dashboard.add_argument("--sample-seconds", type=float, default=10)
+    stable = sub.add_parser("stabilize")
+    stable.add_argument("--apply", action="store_true")
+    stable.add_argument("--expected-version", type=int)
+    accept = sub.add_parser("acceptance")
+    accept.add_argument("--start-day", required=True)
+    month = sub.add_parser("month-baseline")
+    month.add_argument("--apply", action="store_true")
+    month.add_argument("--expected-version", type=int)
+    month.add_argument("--reason")
     return p
 
 
@@ -149,6 +180,39 @@ def main(argv=None):
             )
         )
         return 2
+    if args.command in {"status", "report", "acceptance", "stabilize", "month-baseline"}:
+        # Inspection of old ledgers never triggers an additive migration.
+        from quantpilot.paper.dashboard import ledger
+        from quantpilot.paper.reporting import render
+        try:
+            if args.command == "month-baseline":
+                from quantpilot.paper.valuation import month_baseline_preview, apply_month_baseline
+                at = datetime.now(timezone.utc)
+                if args.apply:
+                    if args.expected_version is None:
+                        raise ValueError("expected_version_required")
+                    result = apply_month_baseline(directory, at, args.expected_version, args.reason)
+                else:
+                    with ledger(directory / "experiment.sqlite3") as view:
+                        result = month_baseline_preview(view, at)
+            elif args.command == "stabilize":
+                from quantpilot.paper.stabilization import preview, apply
+                if args.apply and args.expected_version is None:
+                    raise ValueError("expected_version_required")
+                result = apply(directory, os.environ, args.expected_version) if args.apply else preview(directory)
+            else:
+                with ledger(directory / "experiment.sqlite3") as view:
+                    if args.command == "acceptance":
+                        from quantpilot.paper.stabilization import acceptance
+                        from quantpilot.paper.calendar import Calendar
+                        result = acceptance(view, Calendar(), args.start_day, datetime.now(timezone.utc))
+                    else:
+                        result = snapshot(view)
+            print(json.dumps(result, ensure_ascii=False, allow_nan=False) if args.json or args.command not in {"status", "report"} else render(result))
+            return 0 if result.get("status") != "blocked" else 2
+        except Exception as exc:
+            print(json.dumps(blocked_result(exc)))
+            return 2
     if args.command == "reconcile":
         from quantpilot.paper.recovery import build_client, preview, apply_recovery
         from quantpilot.paper.calendar import Calendar
@@ -236,16 +300,25 @@ def main(argv=None):
             from quantpilot.paper.reporting import (
                 SlackDM,
                 check_trader_liveness,
-                drain_outbox,
+                drain_outbox, operation_report_once,
             )
 
+            from quantpilot.paper.calendar import Calendar
+            calendar = Calendar()
             with process_lock(directory / "reporter.lock"):
+                if not store.get("supervised:reporter"):
+                    store.put("role_stop:reporter", False)
                 store.db.execute(
                     "UPDATE outbox SET state='delivery_unknown',error='reporter_interrupted' WHERE state='sending'"
                 )
                 while True:
-                    store.put("reporter_heartbeat", datetime.now(timezone.utc).isoformat())
-                    check_trader_liveness(store, datetime.now(timezone.utc))
+                    if store.get("role_stop:reporter"):
+                        result = {"status": "reporter_stopped"}
+                        break
+                    at = datetime.now(timezone.utc)
+                    store.put("reporter_heartbeat", at.isoformat())
+                    operation_report_once(store, calendar, at)
+                    check_trader_liveness(store, at, calendar)
                     if store.policy.slack_enabled:
                         drain_outbox(store, SlackDM(os.environ))
                     result = {"status": "reporter_ready"}
@@ -256,15 +329,28 @@ def main(argv=None):
             from quantpilot.paper.jobs import work_once, recover_interrupted_jobs
 
             with process_lock(directory / "worker.lock"):
+                if not store.get("supervised:worker"):
+                    store.put("role_stop:worker", False)
+                from quantpilot.paper.intelligence import configure_runners
+                store.put("ai_runners", configure_runners())
+                def heartbeat_runner(provider, prompt, schema):
+                    from quantpilot.paper.intelligence import default_cli_runner
+                    store.put("worker_heartbeat", datetime.now(timezone.utc).isoformat())
+                    return default_cli_runner(provider, prompt, schema)
                 recover_interrupted_jobs(store)
                 while True:
+                    if store.get("role_stop:worker"):
+                        result = {"status": "worker_stopped"}
+                        break
                     store.put("worker_heartbeat", datetime.now(timezone.utc).isoformat())
-                    result = work_once(store)
+                    result = work_once(store, runner=heartbeat_runner)
                     if args.once:
                         break
                     time.sleep(10)
         else:
             with process_lock(directory / "trader.lock"):
+                if not store.get("supervised:trader"):
+                    store.put("role_stop:trader", False)
                 runtime = build_runtime(store, os.environ)
                 try:
                     with account_owner(runtime):
@@ -274,17 +360,46 @@ def main(argv=None):
                             store.path, runtime.market, runtime.calendar, runtime.clock
                         )
                         collector.start()
+                        feed_service = None
+                        if runtime.feed:
+                            from quantpilot.paper.feed_service import FeedService
+                            feed_service = FeedService(store.path, runtime.feed, runtime.clock)
+                            feed_service.start()
+                        if store.policy.supervisor_enabled:
+                            store.put("recovery_required", True)
                         # Starting an already-paused service never silently resumes new entries.
-                        if store.get("control") == "stopped":
+                        if store.get("control") == "stopped" and not store.policy.supervisor_enabled:
                             store.control("start")
                         try:
                             while True:
+                                if store.get("role_stop:trader"):
+                                    result = {"status": "trader_stopped"}
+                                    break
+                                from quantpilot.paper.calendar import KST
+                                at = runtime.clock()
+                                store.put("heartbeat", at.isoformat())
+                                day = at.astimezone(KST).date().isoformat()
+                                session = runtime.calendar.session(at)
+                                if session and store.get("session_coverage:" + day) is None:
+                                    store.put("session_coverage:" + day, {"started_before_open": at <= session.opens, "first_heartbeat": at.isoformat()})
                                 result = runtime.cycle()
+                                if runtime.budget:
+                                    budget_status = runtime.budget.snapshot()
+                                    today = budget_status.get("days", {}).get(day, {})
+                                    store.put("api_budget_status", dict(budget_status, state="enabled", violations=today.get("rate_violations", 0)))
                                 if args.once:
                                     break
-                                time.sleep(store.policy.cycle_seconds)
+                                # Notice hints and stop requests interrupt the ordinary cycle wait.
+                                wake = store.get("reconcile_wakeup")
+                                deadline = time.monotonic() + store.policy.cycle_seconds
+                                while time.monotonic() < deadline:
+                                    if store.get("role_stop:trader") or store.get("reconcile_wakeup") != wake:
+                                        break
+                                    time.sleep(min(0.25, max(0, deadline - time.monotonic())))
                         finally:
                             collector.close()
+                            if feed_service:
+                                feed_service.close()
                 finally:
                     runtime.gateway.close()
         if args.json:

@@ -126,7 +126,8 @@ def probe(client, market, calendar, clock):
 def main():
     try:
         config = connection_config(os.environ)
-        transport = LimitedTransport(ReadinessTransport())
+        from quantpilot.paper.transport import shared_transport
+        transport = shared_transport(config, ReadinessTransport())
         client = KisPaperClient(config, transport=transport)
         if not config.access_token:
             config = config.with_access_token(client.request_access_token().access_token)

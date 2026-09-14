@@ -24,6 +24,7 @@ import os
 from pathlib import Path
 import re
 import subprocess
+import shutil
 import tempfile
 from typing import Any, Callable, Literal, Mapping
 
@@ -66,6 +67,7 @@ class IntelligenceError(BaseModel):
 
     code: IntelligenceErrorCode
     attempted_providers: tuple[Provider, ...] = ()
+    provider_failures: dict[Provider, IntelligenceErrorCode] = Field(default_factory=dict)
 
 
 class _StrictModel(BaseModel):
@@ -90,6 +92,7 @@ class Assessment(_StrictModel):
     """Advisory scores stamped by trusted host code, never trading authority."""
 
     provider: Provider
+    provider_failures: dict[Provider, IntelligenceErrorCode] = Field(default_factory=dict)
     model: str
     observed_at: datetime
     expires_at: datetime
@@ -151,6 +154,7 @@ class Review(_StrictModel):
     """Prose-only observations; numeric report facts remain lead-owned."""
 
     provider: Provider
+    provider_failures: dict[Provider, IntelligenceErrorCode] = Field(default_factory=dict)
     model: str
     observed_at: datetime
     expires_at: datetime
@@ -338,6 +342,35 @@ def _parse_cli_json(stdout: str, output_file: Path | None = None) -> dict[str, A
     return raw
 
 
+def resolve_runner(provider):
+    """Resolve executable once at worker startup; never invoke shell wrappers."""
+    if provider not in {"claude", "codex"}:
+        return None
+    executable = shutil.which(provider + ".exe") if os.name == "nt" else shutil.which(provider)
+    if executable:
+        return str(Path(executable).resolve())
+    wrapper = shutil.which(provider)
+    if wrapper:
+        path = Path(wrapper)
+        if path.suffix.lower() not in {".cmd", ".bat", ".ps1"}:
+            return str(path.resolve())
+        if provider == "codex":
+            packages = path.parent / "node_modules" / "@openai"
+            candidates = sorted(packages.glob("codex*/vendor/*/codex/codex.exe"))
+            if len(candidates) == 1:
+                return str(candidates[0].resolve())
+    return None
+
+
+_RESOLVED_RUNNERS = None
+
+
+def configure_runners():
+    global _RESOLVED_RUNNERS
+    _RESOLVED_RUNNERS = {p: resolve_runner(p) for p in ("claude", "codex")}
+    return {p: "available" if value else "runner_unavailable" for p, value in _RESOLVED_RUNNERS.items()}
+
+
 def default_cli_runner(
     provider: str, prompt: str, schema: dict[str, Any]
 ) -> dict[str, Any]:
@@ -426,6 +459,10 @@ def default_cli_runner(
                 json.dumps(schema, separators=(",", ":")),
                 "-",
             ]
+        executable = (_RESOLVED_RUNNERS or {}).get(provider) if _RESOLVED_RUNNERS is not None else resolve_runner(provider)
+        if executable is None:
+            raise FileNotFoundError("runner_unavailable")
+        command[0] = executable
         completed = subprocess.run(
             command,
             input=prompt,
@@ -494,6 +531,7 @@ def run_assessment(
     symbols, strategies = allowlists
     invoke = runner or default_cli_runner
     attempted: list[Provider] = []
+    failures = {}
     last_code = IntelligenceErrorCode.RUNNER_FAILED
     for provider in (primary, _alternate(primary)):
         attempted.append(provider)
@@ -509,25 +547,30 @@ def run_assessment(
                 raise ValueError("unexpected assessment fields")
             assessment = Assessment(
                 provider=provider,
+                provider_failures=failures,
                 observed_at=now,
                 expires_at=now + MAX_VALIDITY,
                 **data,
             )
             if not set(assessment.candidate_scores).issubset(symbols):
                 last_code = IntelligenceErrorCode.OUT_OF_ALLOWLIST
+                failures[provider] = last_code
                 continue
             if not set(assessment.strategy_scores).issubset(strategies):
                 last_code = IntelligenceErrorCode.OUT_OF_ALLOWLIST
+                failures[provider] = last_code
                 continue
             if not assessment.usable(now):
                 last_code = IntelligenceErrorCode.UNUSABLE_TIMESTAMP
+                failures[provider] = last_code
                 continue
             return assessment
         except (
             Exception
         ) as exc:  # boundary converts all provider faults to bounded codes
             last_code = _error_code(exc)
-    return IntelligenceError(code=last_code, attempted_providers=tuple(attempted))
+            failures[provider] = last_code
+    return IntelligenceError(code=last_code, attempted_providers=tuple(attempted), provider_failures=failures)
 
 
 _NUMERIC_OR_PNL = re.compile(
@@ -551,6 +594,7 @@ def run_review(
         return IntelligenceError(code=IntelligenceErrorCode.INVALID_INPUT)
     invoke = runner or default_cli_runner
     attempted: list[Provider] = []
+    failures = {}
     last_code = IntelligenceErrorCode.RUNNER_FAILED
     for provider in (primary, _alternate(primary)):
         attempted.append(provider)
@@ -565,9 +609,11 @@ def run_review(
             prose = (data["summary"], *data["observations"], *data["risks"])
             if any(_NUMERIC_OR_PNL.search(item) for item in prose):
                 last_code = IntelligenceErrorCode.PROSE_NUMERIC_CLAIM
+                failures[provider] = last_code
                 continue
             review = Review(
                 provider=provider,
+                provider_failures=failures,
                 observed_at=now,
                 expires_at=now + MAX_VALIDITY,
                 model=data["model"],
@@ -578,9 +624,11 @@ def run_review(
             if review.usable(now):
                 return review
             last_code = IntelligenceErrorCode.UNUSABLE_TIMESTAMP
+            failures[provider] = last_code
         except Exception as exc:
             last_code = _error_code(exc)
-    return IntelligenceError(code=last_code, attempted_providers=tuple(attempted))
+            failures[provider] = last_code
+    return IntelligenceError(code=last_code, attempted_providers=tuple(attempted), provider_failures=failures)
 
 
 __all__ = [

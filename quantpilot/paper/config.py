@@ -47,6 +47,11 @@ class Policy(BaseModel):
     slack_enabled: bool = False
     sandbox_image: str = ""
     max_candidates: int = Field(default=20, ge=1, le=30)
+    # Explicit paper profile opt-ins; fixture and general defaults stay disabled.
+    shared_api_budget_enabled: bool = False
+    hybrid_feed_enabled: bool = False
+    supervisor_enabled: bool = False
+    independent_reports_enabled: bool = False
     active_strategies: tuple[str, ...] = STRATEGIES
 
     @model_validator(mode="after")

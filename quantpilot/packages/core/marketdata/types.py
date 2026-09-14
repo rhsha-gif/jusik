@@ -43,6 +43,8 @@ class Quote(HarnessModel):
     bid: float | None = Field(default=None, gt=0)
     ask: float | None = Field(default=None, gt=0)
     as_of: datetime = Field(default_factory=utc_now)
+    occurred_at: datetime | None = None
+    received_at: datetime | None = None
 
 
 class QuoteSnapshot(HarnessModel):

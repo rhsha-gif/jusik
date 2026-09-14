@@ -55,12 +55,14 @@ def check_connection(environment: Mapping[str, str] | None = None) -> dict[str, 
     result = {"data_mode": "paper_trading", "status": "failed", "stage": "configuration"}
     try:
         config = connection_config(os.environ if environment is None else environment)
-        client = KisPaperClient(config, transport=ConnectionTransport())
+        from quantpilot.paper.transport import shared_transport
+        transport = shared_transport(config, ConnectionTransport())
+        client = KisPaperClient(config, transport=transport)
         result["stage"] = "authentication"
         if not config.access_token:
             token = client.request_access_token()
             config = config.with_access_token(token.access_token)
-            client = KisPaperClient(config, transport=ConnectionTransport())
+            client = KisPaperClient(config, transport=transport)
         result["stage"] = "price_query"
         client.get_current_price("005930")
         result["price_query"] = "passed"

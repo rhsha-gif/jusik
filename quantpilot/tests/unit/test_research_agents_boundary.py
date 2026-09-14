@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+import yaml
+
 from pathlib import Path
 
 import pytest
@@ -11,7 +13,10 @@ from quantpilot.services.research_agents.models import (
     MarketSnapshot,
 )
 
-_RESEARCH_DIR = Path(__file__).resolve().parents[2] / "services" / "research_agents"
+_SERVICES_DIR = Path(__file__).resolve().parents[2] / "services"
+_RESEARCH_DIR = _SERVICES_DIR / "research_agents"
+# Every research-only package that must stay isolated from trading code.
+_RESEARCH_PACKAGE_DIRS = (_RESEARCH_DIR, _SERVICES_DIR / "strategy_design")
 
 # Mirrors tach.toml `cannot_depend_on` plus the sole POST authority module name,
 # so the boundary holds even where tach is not installed (design: the research
@@ -40,14 +45,15 @@ def _snapshot() -> MarketSnapshot:
     )
 
 
-def test_research_boundary_never_imports_trading_code() -> None:
-    sources = list(_RESEARCH_DIR.rglob("*.py"))
-    assert sources, "research_agents package must contain python sources"
+@pytest.mark.parametrize("package_dir", _RESEARCH_PACKAGE_DIRS, ids=lambda p: p.name)
+def test_research_boundary_never_imports_trading_code(package_dir: Path) -> None:
+    sources = list(package_dir.rglob("*.py"))
+    assert sources, f"{package_dir.name} package must contain python sources"
     for source_file in sources:
         text = source_file.read_text(encoding="utf-8")
         for forbidden in _FORBIDDEN_IMPORTS:
             assert forbidden not in text, (
-                f"{source_file.relative_to(_RESEARCH_DIR)} references '{forbidden}' — "
+                f"{source_file.relative_to(package_dir)} references '{forbidden}' — "
                 "the research boundary must stay isolated from trading code"
             )
 
@@ -77,7 +83,21 @@ def test_tach_contract_lists_every_forbidden_module_for_both_research_packages()
         "quantpilot.services.api",
     ):
         # once per research package block, plus once as an unchecked declaration
-        assert contract.count(f'"{module}"') >= 2, module
+        assert contract.count(f'"{module}"') >= 3, module
         assert f'path = "{module}"' in contract, module
     assert 'path = "quantpilot.services.research_agents"' in contract
     assert 'path = "quantpilot.services.briefing"' in contract
+    assert 'path = "quantpilot.services.strategy_design"' in contract
+
+
+def test_designer_authored_recipes_stay_draft_without_execution_levels() -> None:
+    """A hand edit of a draft recipe must not quietly earn execution levels (security gate finding SG-02)."""
+
+    specs = Path(__file__).resolve().parents[3] / "quantpilot" / "docs" / "strategy_specs"
+    for path in sorted(specs.glob("*.yaml")):
+        data = yaml.safe_load(path.read_text(encoding="utf-8")) or {}
+        if (data.get("audit_metadata") or {}).get("authored_by") != "qp-design-strategy-designer":
+            continue
+        assert data.get("promotion_status") == "draft", path.name
+        assert not data.get("allowed_execution_levels"), path.name
+        assert (data.get("execution_permissions") or {}).get("market_orders") == "disabled", path.name

@@ -51,6 +51,28 @@ cannot_depend_on = [
 ]
 
 [[modules]]
+path = "quantpilot.services.strategy_design"
+depends_on = [
+    "quantpilot.packages.core.schemas",
+    "quantpilot.packages.core.backtest",
+    "quantpilot.packages.core.data",
+    "quantpilot.packages.core.strategies",
+    "quantpilot.packages.core.technical",
+    "quantpilot.services.research_agents",
+]
+cannot_depend_on = [
+    "quantpilot.paper",
+    "quantpilot.packages.core.execution",
+    "quantpilot.packages.core.operator",
+    "quantpilot.packages.core.signals",
+    "quantpilot.packages.core.portfolio",
+    "quantpilot.packages.core.risk",
+    "quantpilot.packages.brokers",
+    "quantpilot.packages.core.harness_service",
+    "quantpilot.services.api",
+]
+
+[[modules]]
 path = "quantpilot.packages.core.schemas"
 unchecked = true
 

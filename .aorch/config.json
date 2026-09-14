@@ -25,59 +25,87 @@
   "roleAgents": {
     "worker": {
       "claude": "aorch-worker",
-      "codex": "aorch-worker"
+      "codex": "aorch-worker",
+      "antigravity": "aorch-worker",
+      "grok": "aorch-worker"
     },
     "reviewer": {
       "claude": "aorch-reviewer",
-      "codex": "aorch-reviewer"
+      "codex": "aorch-reviewer",
+      "antigravity": "aorch-reviewer",
+      "grok": "aorch-reviewer"
     },
     "fixer": {
       "claude": "aorch-fixer",
-      "codex": "aorch-fixer"
+      "codex": "aorch-fixer",
+      "antigravity": "aorch-fixer",
+      "grok": "aorch-fixer"
     },
     "researcher": {
       "claude": "aorch-researcher",
-      "codex": "aorch-researcher"
+      "codex": "aorch-researcher",
+      "antigravity": "aorch-researcher",
+      "grok": "aorch-researcher"
     },
     "analyst": {
       "claude": "aorch-analyst",
-      "codex": "aorch-analyst"
+      "codex": "aorch-analyst",
+      "antigravity": "aorch-analyst",
+      "grok": "aorch-analyst"
     },
     "license-reviewer": {
       "claude": "aorch-license-reviewer",
-      "codex": "aorch-license-reviewer"
+      "codex": "aorch-license-reviewer",
+      "antigravity": "aorch-license-reviewer",
+      "grok": "aorch-license-reviewer"
     },
     "ponytail": {
       "claude": "aorch-ponytail",
-      "codex": "aorch-ponytail"
+      "codex": "aorch-ponytail",
+      "antigravity": "aorch-ponytail",
+      "grok": "aorch-ponytail"
     },
     "writer": {
       "claude": "aorch-writer",
-      "codex": "aorch-writer"
+      "codex": "aorch-writer",
+      "antigravity": "aorch-writer",
+      "grok": "aorch-writer"
     },
     "editor": {
       "claude": "aorch-editor",
-      "codex": "aorch-editor"
+      "codex": "aorch-editor",
+      "antigravity": "aorch-editor",
+      "grok": "aorch-editor"
     },
     "qa-analyst": {
       "claude": "aorch-qa-analyst",
-      "codex": "aorch-qa-analyst"
+      "codex": "aorch-qa-analyst",
+      "antigravity": "aorch-qa-analyst",
+      "grok": "aorch-qa-analyst"
     },
     "invest-analyst": {
       "claude": "aorch-invest-analyst",
-      "codex": "aorch-invest-analyst"
+      "codex": "aorch-invest-analyst",
+      "antigravity": "aorch-invest-analyst",
+      "grok": "aorch-invest-analyst"
     },
     "refactorer": {
       "claude": "aorch-refactorer",
-      "codex": "aorch-refactorer"
+      "codex": "aorch-refactorer",
+      "antigravity": "aorch-refactorer",
+      "grok": "aorch-refactorer"
     },
     "paper-researcher": {
       "claude": "aorch-paper-researcher",
-      "codex": "aorch-paper-researcher"
+      "codex": "aorch-paper-researcher",
+      "antigravity": "aorch-paper-researcher",
+      "grok": "aorch-paper-researcher"
     },
     "auditor": {
       "claude": "aorch-auditor",
-      "codex": "aorch-auditor"
+      "codex": "aorch-auditor",
+      "antigravity": "aorch-auditor",
+      "grok": "aorch-auditor"
     }
   },
   "providers": [
@@ -94,6 +122,20 @@
       "enabled": true,
       "executable": "codex",
       "adapterMaturity": "stable"
+    },
+    {
+      "id": "antigravity",
+      "adapter": "antigravity",
+      "enabled": true,
+      "executable": "agy",
+      "adapterMaturity": "experimental"
+    },
+    {
+      "id": "grok",
+      "adapter": "grok",
+      "enabled": true,
+      "executable": "grok",
+      "adapterMaturity": "experimental"
     }
   ],
   "models": [
@@ -146,7 +188,8 @@
             "standard"
           ]
         }
-      ]
+      ],
+      "modelFamily": "claude"
     },
     {
       "id": "claude-sonnet-general",
@@ -202,7 +245,8 @@
             "high"
           ]
         }
-      ]
+      ],
+      "modelFamily": "claude"
     },
     {
       "id": "claude-opus-deep",
@@ -288,7 +332,8 @@
             "testing"
           ]
         }
-      ]
+      ],
+      "modelFamily": "claude"
     },
     {
       "id": "claude-fable-apex",
@@ -354,7 +399,8 @@
             "testing"
           ]
         }
-      ]
+      ],
+      "modelFamily": "claude"
     },
     {
       "id": "codex-luna-repeatable",
@@ -420,7 +466,8 @@
             "standard"
           ]
         }
-      ]
+      ],
+      "modelFamily": "gpt"
     },
     {
       "id": "codex-terra-general",
@@ -520,7 +567,8 @@
             "testing"
           ]
         }
-      ]
+      ],
+      "modelFamily": "gpt"
     },
     {
       "id": "codex-sol-deep",
@@ -621,6 +669,283 @@
             "testing"
           ]
         }
+      ],
+      "modelFamily": "gpt"
+    },
+    {
+      "id": "codex-astra",
+      "provider": "openai",
+      "model": "gpt-6-astra",
+      "modelFamily": "gpt",
+      "enabled": true,
+      "automatic": true,
+      "roles": [
+        "planner",
+        "executor",
+        "reviewer"
+      ],
+      "taskKinds": [
+        "architecture",
+        "planning",
+        "implementation",
+        "debugging",
+        "testing",
+        "review",
+        "research",
+        "exploration",
+        "documentation",
+        "writing",
+        "qa",
+        "security",
+        "risk-analysis"
+      ],
+      "quality": {
+        "default": 0.93
+      },
+      "tokenIndex": 2,
+      "latencyIndex": 1,
+      "maturity": "challenger",
+      "metadata": {
+        "activation": "2026-09-14: passed two implementation and two fixed-source research acceptance tasks. Automatic use restricted to ordinary risk and standard complexity. Priors remain assumptions; no weekly quality update from these explicit comparisons."
+      },
+      "efforts": [
+        {
+          "name": "medium",
+          "complexities": [
+            "low",
+            "standard",
+            "high",
+            "critical"
+          ],
+          "qualityDelta": 0,
+          "tokenMultiplier": 1,
+          "latencyMultiplier": 1
+        },
+        {
+          "name": "high",
+          "complexities": [
+            "low",
+            "standard",
+            "high",
+            "critical"
+          ],
+          "qualityDelta": 0,
+          "tokenMultiplier": 1.2,
+          "latencyMultiplier": 1.2
+        }
+      ],
+      "validatedTaskKinds": [
+        "implementation",
+        "research"
+      ],
+      "validatedComplexities": [
+        "standard"
+      ],
+      "validatedRisks": [
+        "low",
+        "standard"
+      ]
+    },
+    {
+      "id": "agy-flash",
+      "provider": "antigravity",
+      "model": "gemini-3.8-flash-medium",
+      "modelFamily": "gemini",
+      "enabled": true,
+      "automatic": true,
+      "roles": [
+        "planner",
+        "executor",
+        "reviewer"
+      ],
+      "taskKinds": [
+        "architecture",
+        "planning",
+        "implementation",
+        "debugging",
+        "testing",
+        "review",
+        "research",
+        "exploration",
+        "documentation",
+        "writing",
+        "qa",
+        "security",
+        "risk-analysis"
+      ],
+      "quality": {
+        "default": 0.88
+      },
+      "tokenIndex": 0.6,
+      "latencyIndex": 1,
+      "maturity": "challenger",
+      "metadata": {
+        "activation": "2026-09-14: passed closed-bars implementation acceptance with real native tools and structured receipt. Ordinary risk, standard complexity, file implementation only; parent runs verification. Priors remain assumptions."
+      },
+      "efforts": [
+        {
+          "name": "medium",
+          "complexities": [
+            "low",
+            "standard"
+          ],
+          "qualityDelta": 0,
+          "tokenMultiplier": 1,
+          "latencyMultiplier": 1
+        },
+        {
+          "name": "high",
+          "complexities": [
+            "low",
+            "standard"
+          ],
+          "qualityDelta": 0,
+          "tokenMultiplier": 1.2,
+          "latencyMultiplier": 1.2
+        }
+      ],
+      "validatedTaskKinds": [
+        "implementation"
+      ],
+      "validatedComplexities": [
+        "standard"
+      ],
+      "validatedRisks": [
+        "low",
+        "standard"
+      ]
+    },
+    {
+      "id": "agy-pro",
+      "provider": "antigravity",
+      "model": "gemini-3.1-pro-high",
+      "modelFamily": "gemini",
+      "enabled": true,
+      "automatic": false,
+      "roles": [
+        "planner",
+        "executor",
+        "reviewer"
+      ],
+      "taskKinds": [
+        "architecture",
+        "planning",
+        "implementation",
+        "debugging",
+        "testing",
+        "review",
+        "research",
+        "exploration",
+        "documentation",
+        "writing",
+        "qa",
+        "security",
+        "risk-analysis"
+      ],
+      "quality": {
+        "default": 0.91
+      },
+      "tokenIndex": 1.4,
+      "latencyIndex": 1,
+      "maturity": "challenger",
+      "metadata": {
+        "activation": "Explicit evaluation only until representative verification passes; priors are assumptions, not measured rankings."
+      },
+      "efforts": [
+        {
+          "name": "medium",
+          "complexities": [
+            "standard",
+            "high"
+          ],
+          "qualityDelta": 0,
+          "tokenMultiplier": 1,
+          "latencyMultiplier": 1
+        },
+        {
+          "name": "high",
+          "complexities": [
+            "standard",
+            "high"
+          ],
+          "qualityDelta": 0,
+          "tokenMultiplier": 1.2,
+          "latencyMultiplier": 1.2
+        }
+      ]
+    },
+    {
+      "id": "grok-general",
+      "provider": "grok",
+      "model": "grok-4.6",
+      "modelFamily": "grok",
+      "enabled": true,
+      "automatic": true,
+      "roles": [
+        "planner",
+        "executor",
+        "reviewer"
+      ],
+      "taskKinds": [
+        "architecture",
+        "planning",
+        "implementation",
+        "debugging",
+        "testing",
+        "review",
+        "research",
+        "exploration",
+        "documentation",
+        "writing",
+        "qa",
+        "security",
+        "risk-analysis"
+      ],
+      "quality": {
+        "default": 0.9
+      },
+      "tokenIndex": 1,
+      "latencyIndex": 1,
+      "maturity": "challenger",
+      "metadata": {
+        "activation": "2026-09-14: passed fixed-source evidence assessment with native file tools and two-phase structured receipt. Automatic use requires local-evidence tag; external web search is unsupported by this adapter. Priors remain assumptions."
+      },
+      "efforts": [
+        {
+          "name": "medium",
+          "complexities": [
+            "low",
+            "standard",
+            "high"
+          ],
+          "qualityDelta": 0,
+          "tokenMultiplier": 1,
+          "latencyMultiplier": 1
+        },
+        {
+          "name": "high",
+          "complexities": [
+            "low",
+            "standard",
+            "high"
+          ],
+          "qualityDelta": 0,
+          "tokenMultiplier": 1.2,
+          "latencyMultiplier": 1.2
+        }
+      ],
+      "validatedTaskKinds": [
+        "research"
+      ],
+      "validatedComplexities": [
+        "standard"
+      ],
+      "validatedRisks": [
+        "low",
+        "standard"
+      ],
+      "validatedTaskTags": [
+        "local-evidence"
       ]
     }
   ],
@@ -728,5 +1053,14 @@
   },
   "controlPlane": {
     "experimentalAdapterMaxRisk": "standard"
+  },
+  "learning": {
+    "enabled": true,
+    "minimumSamples": 5,
+    "policyMode": "weekly",
+    "ordinaryRisks": [
+      "low",
+      "standard"
+    ]
   }
 }

@@ -1,12 +1,19 @@
-# aorch-generated: agent:qp-design-strategy-designer; mode=bridge; edit .agents/aorch/definitions.json
+# aorch-generated: agent:qp-design-strategy-designer; mode=native; edit .agents/aorch/definitions.json
 name = "qp_design_strategy_designer"
 description = "Turns a hypothesis plus the market-structure analysis into a StrategyRecipe draft as JSON written strictly in the rule grammar the code can evaluate, with graded sources (absorbs quant-recipe-architect and source-curator-agent); never runs a backtest and never sets promotion state."
 sandbox_mode = "read-only"
+features.shell_tool = false
+features.unified_exec = false
+features.multi_agent = false
+features.multi_agent_v2 = false
+features.code_mode = false
+features.code_mode_only = false
+features.hooks = false
+features.plugins = false
+features.remote_plugin = false
+features.apps = false
+features.browser_use = false
+features.computer_use = false
 developer_instructions = """
-# qp-design-strategy-designer
-
-Turns a hypothesis plus the market-structure analysis into a StrategyRecipe draft as JSON written strictly in the rule grammar the code can evaluate, with graded sources (absorbs quant-recipe-architect and source-curator-agent); never runs a backtest and never sets promotion state.
-
-This definition requires anthropic. Before execution, the lead must select agentId: qp-design-strategy-designer in an aorch task and route it to a supported provider. Use aorch inventory and dispatch --dry-run to check availability. If that provider is unavailable, return blocked with the needed action. Do not simulate the missing feature, grant approval, or delegate again from a worker. Return any question to the lead as inputRequest.
-
+This role requires isolated aorch execution. Do not perform the task or call inherited MCP tools in this native child session. Return blocked and ask the lead to dispatch agentId: qp-design-strategy-designer with allowedProviders: [openai] through aorch. The dispatcher loads the canonical instructions and starts Codex with --ignore-user-config, disabled shell/delegation, and scoped read-only file tools.
 """

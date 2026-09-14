@@ -22,9 +22,17 @@
         "anthropic": {
           "disallowedTools": "Write, Edit, NotebookEdit, Agent, Bash, PowerShell",
           "maxTurns": 40
+        },
+        "openai": {
+          "sandbox_mode": "read-only",
+          "features": {
+            "shell_tool": false,
+            "unified_exec": false,
+            "multi_agent": false
+          }
         }
       },
-      "compatibility": "Claude tool deny list prohibits shell use; this installation has no verified equivalent Codex binding. Route to Claude."
+      "compatibility": "Codex requires aorch isolated dispatch (--ignore-user-config) with scoped read-only evidence tools. The native Codex preset is a routing guard, not a runnable analytical agent; inherited native-child MCP access cannot enforce this role boundary."
     },
     {
       "id": "qp-design-market-structure",
@@ -34,9 +42,17 @@
         "anthropic": {
           "disallowedTools": "Write, Edit, NotebookEdit, Agent, Bash, PowerShell",
           "maxTurns": 30
+        },
+        "openai": {
+          "sandbox_mode": "read-only",
+          "features": {
+            "shell_tool": false,
+            "unified_exec": false,
+            "multi_agent": false
+          }
         }
       },
-      "compatibility": "Claude tool deny list prohibits shell use; this installation has no verified equivalent Codex binding. Route to Claude."
+      "compatibility": "Codex requires aorch isolated dispatch (--ignore-user-config) with scoped read-only evidence tools. The native Codex preset is a routing guard, not a runnable analytical agent; inherited native-child MCP access cannot enforce this role boundary."
     },
     {
       "id": "qp-design-risk-gate",
@@ -46,9 +62,17 @@
         "anthropic": {
           "disallowedTools": "Write, Edit, NotebookEdit, Agent, Bash, PowerShell",
           "maxTurns": 30
+        },
+        "openai": {
+          "sandbox_mode": "read-only",
+          "features": {
+            "shell_tool": false,
+            "unified_exec": false,
+            "multi_agent": false
+          }
         }
       },
-      "compatibility": "Claude tool deny list prohibits shell use; this installation has no verified equivalent Codex binding. Route to Claude."
+      "compatibility": "Codex requires aorch isolated dispatch (--ignore-user-config) with scoped read-only evidence tools. The native Codex preset is a routing guard, not a runnable analytical agent; inherited native-child MCP access cannot enforce this role boundary."
     },
     {
       "id": "qp-design-strategy-designer",
@@ -58,9 +82,17 @@
         "anthropic": {
           "disallowedTools": "Write, Edit, NotebookEdit, Agent, Bash, PowerShell",
           "maxTurns": 60
+        },
+        "openai": {
+          "sandbox_mode": "read-only",
+          "features": {
+            "shell_tool": false,
+            "unified_exec": false,
+            "multi_agent": false
+          }
         }
       },
-      "compatibility": "Claude tool deny list prohibits shell use; this installation has no verified equivalent Codex binding. Route to Claude."
+      "compatibility": "Codex requires aorch isolated dispatch (--ignore-user-config) with scoped read-only evidence tools. The native Codex preset is a routing guard, not a runnable analytical agent; inherited native-child MCP access cannot enforce this role boundary."
     },
     {
       "id": "qp-invest-portfolio-direction",
@@ -70,9 +102,17 @@
         "anthropic": {
           "disallowedTools": "Write, Edit, NotebookEdit, Agent, Bash, PowerShell",
           "maxTurns": 40
+        },
+        "openai": {
+          "sandbox_mode": "read-only",
+          "features": {
+            "shell_tool": false,
+            "unified_exec": false,
+            "multi_agent": false
+          }
         }
       },
-      "compatibility": "Claude tool deny list prohibits shell use; this installation has no verified equivalent Codex binding. Route to Claude."
+      "compatibility": "Codex requires aorch isolated dispatch (--ignore-user-config) with scoped read-only evidence tools. The native Codex preset is a routing guard, not a runnable analytical agent; inherited native-child MCP access cannot enforce this role boundary."
     },
     {
       "id": "qp-invest-refuter",
@@ -82,9 +122,17 @@
         "anthropic": {
           "disallowedTools": "Write, Edit, NotebookEdit, Agent, Bash, PowerShell",
           "maxTurns": 50
+        },
+        "openai": {
+          "sandbox_mode": "read-only",
+          "features": {
+            "shell_tool": false,
+            "unified_exec": false,
+            "multi_agent": false
+          }
         }
       },
-      "compatibility": "Claude tool deny list prohibits shell use; this installation has no verified equivalent Codex binding. Route to Claude."
+      "compatibility": "Codex requires aorch isolated dispatch (--ignore-user-config) with scoped read-only evidence tools. The native Codex preset is a routing guard, not a runnable analytical agent; inherited native-child MCP access cannot enforce this role boundary."
     },
     {
       "id": "qp-invest-stock-researcher",
@@ -94,9 +142,17 @@
         "anthropic": {
           "disallowedTools": "Write, Edit, NotebookEdit, Agent, Bash, PowerShell",
           "maxTurns": 50
+        },
+        "openai": {
+          "sandbox_mode": "read-only",
+          "features": {
+            "shell_tool": false,
+            "unified_exec": false,
+            "multi_agent": false
+          }
         }
       },
-      "compatibility": "Claude tool deny list prohibits shell use; this installation has no verified equivalent Codex binding. Route to Claude."
+      "compatibility": "Codex requires aorch isolated dispatch (--ignore-user-config) with scoped read-only evidence tools. The native Codex preset is a routing guard, not a runnable analytical agent; inherited native-child MCP access cannot enforce this role boundary."
     },
     {
       "id": "qp-invest-theme-scout",
@@ -106,9 +162,17 @@
         "anthropic": {
           "disallowedTools": "Write, Edit, NotebookEdit, Agent, Bash, PowerShell",
           "maxTurns": 40
+        },
+        "openai": {
+          "sandbox_mode": "read-only",
+          "features": {
+            "shell_tool": false,
+            "unified_exec": false,
+            "multi_agent": false
+          }
         }
       },
-      "compatibility": "Claude tool deny list prohibits shell use; this installation has no verified equivalent Codex binding. Route to Claude."
+      "compatibility": "Codex requires aorch isolated dispatch (--ignore-user-config) with scoped read-only evidence tools. The native Codex preset is a routing guard, not a runnable analytical agent; inherited native-child MCP access cannot enforce this role boundary."
     },
     {
       "id": "qp-market-editor",
@@ -118,9 +182,17 @@
         "anthropic": {
           "disallowedTools": "Write, Edit, NotebookEdit, Agent, Bash, PowerShell",
           "maxTurns": 20
+        },
+        "openai": {
+          "sandbox_mode": "read-only",
+          "features": {
+            "shell_tool": false,
+            "unified_exec": false,
+            "multi_agent": false
+          }
         }
       },
-      "compatibility": "Claude tool deny list prohibits shell use; this installation has no verified equivalent Codex binding. Route to Claude."
+      "compatibility": "Codex requires aorch isolated dispatch (--ignore-user-config) with scoped read-only evidence tools. The native Codex preset is a routing guard, not a runnable analytical agent; inherited native-child MCP access cannot enforce this role boundary."
     },
     {
       "id": "qp-market-macro-news-analyst",
@@ -130,9 +202,17 @@
         "anthropic": {
           "disallowedTools": "Write, Edit, NotebookEdit, Agent, Bash, PowerShell",
           "maxTurns": 30
+        },
+        "openai": {
+          "sandbox_mode": "read-only",
+          "features": {
+            "shell_tool": false,
+            "unified_exec": false,
+            "multi_agent": false
+          }
         }
       },
-      "compatibility": "Claude tool deny list prohibits shell use; this installation has no verified equivalent Codex binding. Route to Claude."
+      "compatibility": "Codex requires aorch isolated dispatch (--ignore-user-config) with scoped read-only evidence tools. The native Codex preset is a routing guard, not a runnable analytical agent; inherited native-child MCP access cannot enforce this role boundary."
     },
     {
       "id": "qp-market-price-flow-analyst",
@@ -142,9 +222,17 @@
         "anthropic": {
           "disallowedTools": "Write, Edit, NotebookEdit, Agent, Bash, PowerShell",
           "maxTurns": 30
+        },
+        "openai": {
+          "sandbox_mode": "read-only",
+          "features": {
+            "shell_tool": false,
+            "unified_exec": false,
+            "multi_agent": false
+          }
         }
       },
-      "compatibility": "Claude tool deny list prohibits shell use; this installation has no verified equivalent Codex binding. Route to Claude."
+      "compatibility": "Codex requires aorch isolated dispatch (--ignore-user-config) with scoped read-only evidence tools. The native Codex preset is a routing guard, not a runnable analytical agent; inherited native-child MCP access cannot enforce this role boundary."
     },
     {
       "id": "qp-security-gate",
@@ -170,9 +258,31 @@
             "quantpilot/services/strategy_design/**",
             "quantpilot/docs/strategy_specs/**"
           ]
+        },
+        "openai": {
+          "sandbox_mode": "read-only",
+          "ship_triggers": [
+            "quantpilot/packages/core/execution/**",
+            "quantpilot/packages/brokers/**",
+            "quantpilot/packages/core/risk/**",
+            "quantpilot/packages/core/operator/**",
+            "quantpilot/services/api/**",
+            "quantpilot/services/research_agents/**",
+            "quantpilot/jobs/**",
+            ".env*",
+            ".mcp.json",
+            ".claude/**",
+            "tach.toml",
+            "pyproject.toml",
+            "quantpilot/services/strategy_design/**",
+            "quantpilot/docs/strategy_specs/**"
+          ],
+          "features": {
+            "unified_exec": false,
+            "multi_agent": false
+          }
         }
-      },
-      "compatibility": "Claude ship_triggers security gate must retain its native metadata and invocation. Route to Claude."
+      }
     },
     {
       "id": "qp-strat-editor",
@@ -182,9 +292,17 @@
         "anthropic": {
           "disallowedTools": "Write, Edit, NotebookEdit, Agent, Bash, PowerShell",
           "maxTurns": 20
+        },
+        "openai": {
+          "sandbox_mode": "read-only",
+          "features": {
+            "shell_tool": false,
+            "unified_exec": false,
+            "multi_agent": false
+          }
         }
       },
-      "compatibility": "Claude tool deny list prohibits shell use; this installation has no verified equivalent Codex binding. Route to Claude."
+      "compatibility": "Codex requires aorch isolated dispatch (--ignore-user-config) with scoped read-only evidence tools. The native Codex preset is a routing guard, not a runnable analytical agent; inherited native-child MCP access cannot enforce this role boundary."
     },
     {
       "id": "qp-strat-geopolitics",
@@ -194,9 +312,17 @@
         "anthropic": {
           "disallowedTools": "Write, Edit, NotebookEdit, Agent, Bash, PowerShell",
           "maxTurns": 30
+        },
+        "openai": {
+          "sandbox_mode": "read-only",
+          "features": {
+            "shell_tool": false,
+            "unified_exec": false,
+            "multi_agent": false
+          }
         }
       },
-      "compatibility": "Claude tool deny list prohibits shell use; this installation has no verified equivalent Codex binding. Route to Claude."
+      "compatibility": "Codex requires aorch isolated dispatch (--ignore-user-config) with scoped read-only evidence tools. The native Codex preset is a routing guard, not a runnable analytical agent; inherited native-child MCP access cannot enforce this role boundary."
     },
     {
       "id": "qp-strat-macro-regime",
@@ -206,9 +332,17 @@
         "anthropic": {
           "disallowedTools": "Write, Edit, NotebookEdit, Agent, Bash, PowerShell",
           "maxTurns": 30
+        },
+        "openai": {
+          "sandbox_mode": "read-only",
+          "features": {
+            "shell_tool": false,
+            "unified_exec": false,
+            "multi_agent": false
+          }
         }
       },
-      "compatibility": "Claude tool deny list prohibits shell use; this installation has no verified equivalent Codex binding. Route to Claude."
+      "compatibility": "Codex requires aorch isolated dispatch (--ignore-user-config) with scoped read-only evidence tools. The native Codex preset is a routing guard, not a runnable analytical agent; inherited native-child MCP access cannot enforce this role boundary."
     },
     {
       "id": "qp-strat-refuter",
@@ -218,9 +352,17 @@
         "anthropic": {
           "disallowedTools": "Write, Edit, NotebookEdit, Agent, Bash, PowerShell",
           "maxTurns": 50
+        },
+        "openai": {
+          "sandbox_mode": "read-only",
+          "features": {
+            "shell_tool": false,
+            "unified_exec": false,
+            "multi_agent": false
+          }
         }
       },
-      "compatibility": "Claude tool deny list prohibits shell use; this installation has no verified equivalent Codex binding. Route to Claude."
+      "compatibility": "Codex requires aorch isolated dispatch (--ignore-user-config) with scoped read-only evidence tools. The native Codex preset is a routing guard, not a runnable analytical agent; inherited native-child MCP access cannot enforce this role boundary."
     },
     {
       "id": "qp-strat-scenario-writer",
@@ -230,9 +372,17 @@
         "anthropic": {
           "disallowedTools": "Write, Edit, NotebookEdit, Agent, Bash, PowerShell",
           "maxTurns": 40
+        },
+        "openai": {
+          "sandbox_mode": "read-only",
+          "features": {
+            "shell_tool": false,
+            "unified_exec": false,
+            "multi_agent": false
+          }
         }
       },
-      "compatibility": "Claude tool deny list prohibits shell use; this installation has no verified equivalent Codex binding. Route to Claude."
+      "compatibility": "Codex requires aorch isolated dispatch (--ignore-user-config) with scoped read-only evidence tools. The native Codex preset is a routing guard, not a runnable analytical agent; inherited native-child MCP access cannot enforce this role boundary."
     },
     {
       "id": "risk-gate-auditor",
@@ -340,18 +490,18 @@
       "description": "설계자팀(시장구조 분석가·전략 설계자·백테스트 포렌식·리스크 게이트) 실행 런북. 사용자가 \"전략 설계해줘\", \"이 가설 백테스트\", \"설계자팀 돌려\", \"레시피 만들어\", \"시장을 시스템으로 보면\", \"퀀트 전략 검증\"이라고 하면 사용한다. 기존 레시피의 백테스트만 다시 돌릴 때는 local-backtest, 기존 결과의 편향 감사만 할 때는 backtest-forensics 스킬을 쓴다. 산출물은 draft 레시피와 연구 노트이며 승격·거래 입력이 아니다.",
       "source": "skills/qp-designer",
       "providers": [
-        "anthropic"
-      ],
-      "compatibility": "Runbook drives Claude-only qp-* agents and the aorch dispatch path; no Codex binding is verified. Route to Claude."
+        "anthropic",
+        "openai"
+      ]
     },
     {
       "id": "qp-strategist",
       "description": "전략가팀(매크로 레짐·지정학·시나리오 작성자·독립 반증자·편집자) 실행 런북. 사용자가 \"매크로 전망\", \"시나리오 짜줘\", \"전략가팀 돌려\", \"레짐 판정\", \"지정학 리스크 정리\", \"무효화 조건 뽑아줘\"라고 하면 사용한다. 일간 시황 브리핑(qp-market)이나 종목 후보(qp-invest)에는 쓰지 않는다. 산출물은 원장 research/ 노트이며 거래 입력이 아니다.",
       "source": "skills/qp-strategist",
       "providers": [
-        "anthropic"
-      ],
-      "compatibility": "Runbook drives Claude-only qp-* agents and the aorch dispatch path; no Codex binding is verified. Route to Claude."
+        "anthropic",
+        "openai"
+      ]
     },
     {
       "id": "quant-source-synthesis",
@@ -409,9 +559,9 @@
       "description": "Consult the quantpilot-foundation knowledge vault (20 books, 60+ papers, 550+ notes on market microstructure, risk, asset pricing, factor investing, financial machine learning, technical analysis, time series, statistical learning, optimization, forecasting, data systems, SRE, security) through the `vault` MCP server, and ground the answer in cited notes. Use this skill whenever a question or coding task touches quant strategy, signals, alpha, risk limits, position sizing, drawdown, VaR/tail risk, execution, slippage, transaction cost, liquidity, spreads, market microstructure, backtesting methodology, factor models, valuation, time-series models, forecasting and calibration, portfolio optimization — and equally when it touches data pipeline design, SLO/reliability, or security design for QuantPilot. Applies to questions (\"왜 손절을 이렇게 잡지\", \"이 신호가 유효한가\", \"무엇을 근거로\") AND to implementation work in those areas, where the vault's principles must be checked against the design before writing code. Also use when the user says \"볼트\", \"도서관\", \"서재\", \"지식 vault\", \"책에서 찾아\", \"근거 찾아\", \"무슨 책에 나와\". Do NOT use for routine work outside these domains (UI styling, build config, unrelated refactors).",
       "source": "skills/vault-consult",
       "providers": [
-        "anthropic"
-      ],
-      "compatibility": "Required vault MCP is not configured or exposed in the inspected Codex installation. Use the Claude project integration."
+        "anthropic",
+        "openai"
+      ]
     },
     {
       "id": "workboard-flow",

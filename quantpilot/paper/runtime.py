@@ -133,8 +133,12 @@ class Runtime:
                 if positions:
                     self.alert("unclosed_positions_quarantined", now, block=False)
                 from quantpilot.paper.reporting import snapshot
+                # Judge the close valuation at the current clock, not the cycle's start
+                # time: reconcile() above stamped last_reconciled_at a few seconds after
+                # `now`, and snapshot() treats a negative age as not fresh, which marked
+                # every close invalid and blocked the next day's entries.
                 record_close(self.store, now,
-                             valid=not snapshot(self.store, now=now)["valuation_incomplete"],
+                             valid=not snapshot(self.store, now=self.clock())["valuation_incomplete"],
                              equity=self.equity())
                 self.store.put(
                     "ai_due", {"kind": "postclose", "key": day + ":postclose"}

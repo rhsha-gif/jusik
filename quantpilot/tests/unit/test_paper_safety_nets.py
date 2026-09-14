@@ -107,6 +107,42 @@ def test_auto_pause_can_be_disabled_explicitly(tmp_path, monkeypatch):
     s.close()
 
 
+def test_close_valuation_is_valid_when_reconcile_stamps_after_the_cycle_started(tmp_path, monkeypatch):
+    """reconcile() finishes seconds after the cycle's `now`; the close record must judge
+    freshness at the current clock or every close is invalid and the next day's
+    day_base_valid stays false (observed on the 2026-09-14 trial ledger)."""
+    _stub_strategy(monkeypatch)
+    s = Store(tmp_path / "s")
+    s.configure({"data_mode": "paper_trading"}, 1)
+    s.control("start")
+
+    ticks = [NOW]
+
+    def clock():
+        ticks.append(ticks[-1] + timedelta(seconds=2))
+        return ticks[-1]
+
+    class StampingGateway(FixtureGateway):
+        def reconcile(self, now):
+            self.store.put("reconciliation_complete", True)
+            self.store.put("last_reconciled_at", clock().isoformat())
+            return True
+
+    r = Runtime(
+        s,
+        SimpleNamespace(quotes=lambda symbols: {}),
+        StampingGateway(s),
+        _closed_session(),
+        clock,
+        {"KIS_PAPER_ORDER_SUBMISSION_ENABLED": "true"},
+    )
+    assert r.cycle()["status"] == "postclose"
+    assert s.get("last_close_equity_valid") is True
+    assert s.get("last_close_equity") == pytest.approx(s.get("cash"))
+    assert s.get("last_close_day") == NOW.astimezone(timezone(timedelta(hours=9))).date().isoformat()
+    s.close()
+
+
 def test_persistent_unknown_order_calls_the_operator_without_blocking(tmp_path, monkeypatch):
     _stub_strategy(monkeypatch)
     s = Store(tmp_path / "s")

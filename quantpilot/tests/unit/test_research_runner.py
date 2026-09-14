@@ -86,3 +86,12 @@ def test_runner_returns_structured_output_when_schema_given() -> None:
     assert "--json-schema" in fake.captured["command"]
     with pytest.raises(AgentEmptyOutput, match="structured"):
         run_agent("qp-x", "p", cwd=".", model="opus", claude_path="c", json_schema=schema, run=FakeRun(stdout=_payload("plain text")))
+
+
+def test_pool_workers_env_knob_serialises_stages() -> None:
+    from quantpilot.services.research_agents.runner import pool_workers
+
+    assert pool_workers(environ={}) == 2
+    assert pool_workers(environ={"QUANTPILOT_RESEARCH_PARALLEL": "1"}) == 1
+    assert pool_workers(environ={"QUANTPILOT_RESEARCH_PARALLEL": "0"}) == 1
+    assert pool_workers(environ={"QUANTPILOT_RESEARCH_PARALLEL": "abc"}) == 2

@@ -1,4 +1,4 @@
-"""Ledger notes: `<root>/market/YYYY-MM-DD.md` and `<root>/candidates/YYYY-MM-DD-<symbol>.md`.
+"""Ledger notes: `<root>/market/YYYY-MM-DD.md`, `<root>/candidates/YYYY-MM-DD-<symbol>.md` and `<root>/research/YYYY-MM-DD-<slug>.md`.
 
 The root is the private investment ledger (`~/investment-decisions`), never
 the public repository. A note for a day that already exists is an error
@@ -88,6 +88,36 @@ def write_candidate_note(
         "evidence": str(Path(evidence_path).resolve()),
         "signal_input": "false",
     }
+    return _write(path, fields, markdown, force)
+
+
+def write_research_note(
+    session_date: str,
+    slug: str,
+    markdown: str,
+    *,
+    note_type: str,
+    evidence_path: Path,
+    generated_by: str,
+    extra_fields: dict[str, str] | None = None,
+    root: str | Path | None = None,
+    force: bool = False,
+) -> Path:
+    """`<root>/research/YYYY-MM-DD-<slug>.md` — the strategist and designer teams' notes (never a trading input)."""
+
+    if not slug or any(ch in slug for ch in ("/", "\\", " ", "..")):
+        raise ValueError(f"slug must be a single path segment without spaces: {slug!r}")
+    path = ledger_root(root) / "research" / f"{session_date}-{slug}.md"
+    fields = {
+        "type": note_type,
+        "date": session_date,
+        "generated_at": _now_iso(),
+        "generated_by": generated_by,
+        "evidence": str(Path(evidence_path).resolve()),
+        "signal_input": "false",
+    }
+    for key, value in (extra_fields or {}).items():
+        fields.setdefault(key, value)
     return _write(path, fields, markdown, force)
 
 

@@ -21,7 +21,7 @@ from quantpilot.services.research_agents.models import AgentResult
 DEFAULT_CLAUDE_PATH = Path.home() / ".local" / "bin" / "claude.exe"
 # The job's own credentials (news search, Slack) are for the collectors and publishers;
 # the agent process never needs them and must not be able to leak them (gate finding RA-101).
-CREDENTIAL_PREFIXES = ("NCP_APIGW_", "NAVER_CLIENT_", "SLACK_", "QUANTPILOT_SLACK_")
+CREDENTIAL_PREFIXES = ("NCP_APIGW_", "NAVER_CLIENT_", "SLACK_", "QUANTPILOT_SLACK_", "ECOS_", "FRED_")
 
 
 def agent_environment(base: dict[str, str] | None = None) -> dict[str, str]:
@@ -31,6 +31,25 @@ def agent_environment(base: dict[str, str] | None = None) -> dict[str, str]:
             del env[name]
     env["PYTHONIOENCODING"] = "utf-8"
     return env
+
+
+PARALLEL_ENV = "QUANTPILOT_RESEARCH_PARALLEL"
+
+
+def pool_workers(default: int = 2, environ: dict[str, str] | None = None) -> int:
+    """How many headless agents a pipeline stage may run at once.
+
+    Every headless session boots its own MCP servers, so on a memory-starved
+    machine `QUANTPILOT_RESEARCH_PARALLEL=1` serialises the stages (measured
+    2026-09-14: the second concurrent spawn died with STATUS_DLL_INIT_FAILED).
+    """
+
+    raw = (os.environ if environ is None else environ).get(PARALLEL_ENV, "")
+    try:
+        value = int(raw) if raw.strip() else default
+    except ValueError:
+        value = default
+    return max(1, min(value, 8))
 
 
 class AgentRunError(RuntimeError):

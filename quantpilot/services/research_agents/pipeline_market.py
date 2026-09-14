@@ -19,7 +19,7 @@ from quantpilot.services.research_agents.prompts.market import (
     macro_news_prompt,
     price_flow_prompt,
 )
-from quantpilot.services.research_agents.runner import AgentEmptyOutput, run_agent
+from quantpilot.services.research_agents.runner import AgentEmptyOutput, pool_workers, run_agent
 
 PRICE_FLOW_AGENT = "qp-market-price-flow-analyst"
 MACRO_NEWS_AGENT = "qp-market-macro-news-analyst"
@@ -46,7 +46,7 @@ def run_market_pipeline(
     model: str,
     runner: Runner = run_agent,
 ) -> MarketBriefOutput:
-    with ThreadPoolExecutor(max_workers=2) as pool:
+    with ThreadPoolExecutor(max_workers=pool_workers()) as pool:
         price_future = pool.submit(runner, PRICE_FLOW_AGENT, price_flow_prompt(bundle), cwd=cwd, model=model)
         news_future = pool.submit(runner, MACRO_NEWS_AGENT, macro_news_prompt(bundle), cwd=cwd, model=model)
         price = price_future.result()

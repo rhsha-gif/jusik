@@ -139,9 +139,12 @@ class KisPaperMarketDataProvider:
                 observed_at=observed_at,
                 as_of=min((item.as_of for item in quotes.values()), default=None),
                 stale_after_seconds=self._max_age_seconds,
+                # A book stamped inside the future tolerance (server second boundary
+                # ahead of the local clock) has a negative age; report it as 0 instead
+                # of failing the whole snapshot on ProviderStatus' ge=0 bound.
                 observed_age_seconds=max(
                     (
-                        (observed_at - item.as_of).total_seconds()
+                        max(0.0, (observed_at - item.as_of).total_seconds())
                         for item in quotes.values()
                     ),
                     default=None,

@@ -124,6 +124,23 @@ def test_provider_uses_only_fresh_authorized_l2_midpoint() -> None:
     assert quote.as_of == datetime(2026, 7, 10, 10, 0, 5, tzinfo=quote.as_of.tzinfo)
 
 
+def test_book_stamped_inside_future_tolerance_is_usable_with_zero_age() -> None:
+    # The paper server stamps books at second resolution; a stamp one second ahead of
+    # the local clock is inside the tolerance and must not fail the whole snapshot on
+    # ProviderStatus' non-negative age bound (observed live on 2026-09-14).
+    client = FakeKisMarketClient()
+    client.books["005930"] = _book(accepted_at="100011")
+    provider = _provider(client)
+
+    snapshot = provider.get_quotes(["005930"])
+
+    assert snapshot.data_quality.usable is True
+    assert snapshot.provider_status.observed_age_seconds == 0
+    assert snapshot.quotes["005930"].as_of == datetime(
+        2026, 7, 10, 10, 0, 11, tzinfo=snapshot.quotes["005930"].as_of.tzinfo
+    )
+
+
 @pytest.mark.parametrize(
     ("now", "accepted_at", "reason"),
     [

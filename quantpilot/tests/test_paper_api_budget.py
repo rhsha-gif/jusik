@@ -333,3 +333,46 @@ def test_post_rate_rejection_shares_cooldown_without_retry(tmp_path):
     wrapped.request_json("GET", "fixture")
     assert raw.starts[1]-raw.starts[0] == pytest.approx(1.05, abs=1e-6)
     assert budget.snapshot()["days"]["2023-11-15"]["rate_violations"] == 1
+
+
+@pytest.mark.parametrize("contents", [b"", b"\0", b"legacy"])
+def test_send_lock_preserves_contents_and_releases_after_error(tmp_path, contents):
+    budget = object.__new__(SharedBudget)
+    budget.path = tmp_path / "budget.sqlite3"
+    lock = Path(str(budget.path) + ".send.lock")
+    lock.write_bytes(contents)
+    with pytest.raises(RuntimeError, match="fixture"):
+        with budget._sending() as acquired:
+            assert acquired
+            with budget._sending() as contender:
+                assert not contender
+            raise RuntimeError("fixture")
+    with budget._sending() as acquired:
+        assert acquired
+    assert lock.read_bytes() == contents
+
+
+def test_empty_send_lock_contention_never_writes_locked_byte(tmp_path):
+    budget = object.__new__(SharedBudget)
+    budget.path = tmp_path / "budget.sqlite3"
+    lock = Path(str(budget.path) + ".send.lock")
+    with lock.open("a+b") as owner:
+        try:
+            import msvcrt
+        except ImportError:
+            import fcntl
+
+            fcntl.flock(owner.fileno(), fcntl.LOCK_EX | fcntl.LOCK_NB)
+            unlock = lambda: fcntl.flock(owner.fileno(), fcntl.LOCK_UN)
+        else:
+            msvcrt.locking(owner.fileno(), msvcrt.LK_NBLCK, 1)
+            unlock = lambda: msvcrt.locking(owner.fileno(), msvcrt.LK_UNLCK, 1)
+        try:
+            with budget._sending() as acquired:
+                assert not acquired
+        finally:
+            owner.seek(0)
+            unlock()
+    with budget._sending() as acquired:
+        assert acquired
+    assert lock.read_bytes() == b""

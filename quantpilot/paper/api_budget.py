@@ -346,10 +346,7 @@ class SharedBudget:
 
         lock_path = self.path.with_name(self.path.name + ".send.lock")
         with lock_path.open("a+b") as lock_file:
-            lock_file.seek(0, 2)
-            if lock_file.tell() == 0:
-                lock_file.write(b"\0")
-                lock_file.flush()
+            # Byte-range locks may extend past EOF; seeding races with another owner.
             lock_file.seek(0)
             try:
                 import msvcrt

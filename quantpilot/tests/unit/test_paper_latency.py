@@ -167,3 +167,43 @@ def test_cli_latency_command_is_read_only(tmp_path, capsys):
     out = json.loads(capsys.readouterr().out)
     assert out["orders"] == 1 and out["entry"]["bar_close_to_send"]["p50"] == 28.0
     assert out["targets_seconds"] == {"exit_condition_to_send": 5, "entry_bar_close_to_send": 30}
+
+
+def test_reentry_after_a_filled_stop_gets_a_fresh_first_observation(tmp_path):
+    """Review finding: the protection loop never revisits a closed symbol, so the exit
+    record must be retired when the sell is linked, not inherited by the next episode."""
+    s = Store(tmp_path / "s")
+    quote = Quote(symbol="005930", last=9800, bid=9800, ask=9810, as_of=NOW)
+    latency.observe_exit_condition(s, "005930", "stop", NOW)
+    latency.link_exit(s, "sell-1", "005930", "trend_pullback", "stop", quote, NOW + timedelta(seconds=1))
+    assert s.get("exit_condition:005930") is None
+    later = NOW + timedelta(hours=3)
+    assert latency.observe_exit_condition(s, "005930", "stop", later) == later.isoformat()
+    latency.link_exit(s, "sell-2", "005930", "trend_pullback", "stop", quote, later + timedelta(seconds=1))
+    assert s.get("timeline:sell-2")["condition_first_observed_at"] == later.isoformat()
+    s.close()
+
+
+def test_recording_faults_never_cost_the_order(tmp_path, monkeypatch):
+    from quantpilot.paper.broker import FixtureGateway
+    from quantpilot.paper.calendar import Session
+    from quantpilot.paper.runtime import Runtime
+
+    s = Store(tmp_path / "s")
+    s.control("start")
+    s.put("weights", {"trend_pullback": 0.6})
+    sig = SimpleNamespace(**{**signal().__dict__, "entry_atr14": None})
+    calendar = SimpleNamespace(session=lambda at: Session(NOW - timedelta(hours=1), NOW + timedelta(hours=5)))
+    runtime = Runtime(s, SimpleNamespace(), FixtureGateway(s), calendar, lambda: NOW)
+
+    def broken(*args, **kwargs):
+        raise RuntimeError("sqlite busy")
+
+    monkeypatch.setattr(latency, "measure_entry", broken)
+    quote = Quote(symbol="005930", last=10000, bid=9990, ask=10000, as_of=NOW)
+    runtime.place(sig, 1, quote, "buy", "fixture", NOW)
+    [order] = s.orders()
+    assert order["state"] == "filled"
+    [payload] = [json.loads(r[1]) for r in s.db.execute("SELECT kind, payload FROM audit") if r[0] == "latency_record_failed"]
+    assert payload["order_id"] == order["id"] and payload["error"] == "RuntimeError"
+    s.close()

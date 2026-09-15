@@ -127,7 +127,13 @@ def observe_exit_condition(store, symbol, reason, at):
 
 
 def link_exit(store, order_id, symbol, strategy, reason, quote, decision_at):
+    """Stamp the exit order with the first observation, then start the next episode fresh.
+
+    The protection loop only visits held symbols, so after the sell fills nobody would
+    clear the record; a later re-entry must not inherit this episode's observation.
+    """
     first = (store.get("exit_condition:" + symbol) or {}).get("at")
+    store.put("exit_condition:" + symbol, None)
     return mark(
         store,
         order_id,

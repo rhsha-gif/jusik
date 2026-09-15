@@ -463,6 +463,7 @@ class Runtime:
             intraday_histories = {}
             evaluated_any = False
             already_judged = False
+            intraday_waiting = False
             selected_at = self.store.get("universe_at")
             if not self.background_data and (
                 selected_at is None
@@ -534,6 +535,7 @@ class Runtime:
 
                         intraday_histories[symbol] = today
                         if bar_end != fetched_at.replace(second=0, microsecond=0):
+                            intraday_waiting = True
                             continue  # the next completed bar has not been observed yet
                         found = signals_for(self.store, today, fetched_at, session.opens)
                     else:
@@ -562,7 +564,8 @@ class Runtime:
                         {"symbol": symbol, "error": type(exc).__name__},
                         self.clock(),
                     )
-            if not self.background_data and fetch_due:
+            if not self.background_data and fetch_due and not intraday_waiting:
+                # Foreground reads stay once per minute unless the bar is still pending.
                 self.store.put("fetch_bucket", bucket)
             if already_judged and not evaluated_any:
                 return {"status": "waiting"}
@@ -759,13 +762,18 @@ class Runtime:
                 authorize_order(
                     self.store, order, quote, now, self.calendar.session(now)
                 )
-                if side == "buy":
-                    latency.link_signal(self.store, order_id, signal, now)
-                    latency.measure_entry(self.store, signal, price, qty, now)
-                else:
-                    latency.link_exit(self.store, order_id, signal.symbol,
-                                      signal.strategy_id, reason, quote, now)
-                    latency.measure_exit(self.store, order_id, signal.symbol, reason, now)
+                try:
+                    # Measurement only: a recording fault must never cost the order.
+                    if side == "buy":
+                        latency.link_signal(self.store, order_id, signal, now)
+                        latency.measure_entry(self.store, signal, price, qty, now)
+                    else:
+                        latency.link_exit(self.store, order_id, signal.symbol,
+                                          signal.strategy_id, reason, quote, now)
+                        latency.measure_exit(self.store, order_id, signal.symbol, reason, now)
+                except Exception as exc:
+                    self.store.audit("latency_record_failed",
+                                     {"order_id": order_id, **safe_failure(exc, "latency")}, now)
         if reserved:
             with self.io(0 if side == "sell" else 2):
                 self.gateway.submit(

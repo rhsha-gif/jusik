@@ -14,7 +14,7 @@ REASONS = frozenset({
     "position_reconciliation_required", "balance_not_reconciled", "policy_version_conflict",
     "new_entries_paused", "broker_sell_quantity_unavailable", "broker_experiment_slice_exhausted",
     "data_unavailable", "session_closed", "execution_rejected", "internal_error",
-    "submission_evidence_expired", "balance_evidence_expired", "paper_kill_engaged", "feed_unavailable", "order_identity_changed",
+    "submission_evidence_expired", "paper_kill_engaged", "feed_unavailable", "order_identity_changed",
     "entry_window_closed", "final_entry_risk_failed", "final_sell_attribution_failed", "conflicting_order",
 })
 

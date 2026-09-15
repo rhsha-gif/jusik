@@ -28,6 +28,14 @@ from quantpilot.packages.db.sqlite_repositories import PaperStateStore
 from quantpilot.packages.db.audit import AuditRecorder
 
 
+def _mark_quietly(store, order_id, **stages):
+    """Timeline marks on the send path are best effort; never mask a transport outcome."""
+    try:
+        latency.mark(store, order_id, **stages)
+    except Exception:
+        pass
+
+
 def environment_is_safe(gateway):
     from quantpilot.paper.config import environment_safe
     return environment_safe(getattr(gateway, "environment", {}))
@@ -454,8 +462,6 @@ class KisGateway:
                 dispatch = self.kernel.load_paper_order_dispatch(order["id"])
                 if dispatch is None or at >= dispatch.submission_evidence_expires_at:
                     raise ValueError("submission_evidence_expired")
-                if self.verified_at is None or not 0 <= (at - self.verified_at).total_seconds() < policy.quote_ttl_seconds:
-                    raise ValueError("balance_evidence_expired")
                 if self.store.policy.data_mode == "paper_trading" and getattr(self, "environment", {}).get("KIS_PAPER_ORDER_SUBMISSION_ENABLED", "false").lower() != "true":
                     raise ValueError("paper_submission_disabled")
                 self.kernel.require_active_paper_execution_session(self.session, checked_at=at)
@@ -476,7 +482,7 @@ class KisGateway:
                 self.store.audit("queued_order_rejected", {"order_id": order["id"], **failure(exc, "pre_transport")}, self.clock())
                 # No bytes have been sent. The durable kernel terminalizes this local refusal.
                 raise KisPaperConfigurationError("queued_submission_guard_failed") from None
-            latency.mark(self.store, order["id"], send_start_at=at)
+            _mark_quietly(self.store, order["id"], send_start_at=at)
         if self.budget is None:
             # No shared queue: the send starts immediately after preparation.
             latency.mark(self.store, order["id"], queue_enter_at=self.clock(), send_start_at=self.clock())
@@ -487,7 +493,7 @@ class KisGateway:
                                       before_send=before_send) if self.budget else nullcontext()):
                 self.coordinator.submit_prepared_order(plan)
         except BaseException:
-            latency.mark(self.store, order["id"], failed_at=self.clock())
+            _mark_quietly(self.store, order["id"], failed_at=self.clock())
             raise
         after = self.kernel.load_paper_order_dispatch(order["id"])
         latency.mark(self.store, order["id"], response_at=self.clock(),

@@ -52,8 +52,8 @@ python -m quantpilot.paper --json config --expected-version 1 --set '{"data_mode
 
 설정 버전이 달라지면 갱신을 거절한다. 초기 자본은 고정이다. 기존 포지션의 손절·목표가·전략 버전은 진입 당시 값을 유지한다. 코드 규칙 변경은 새 버전으로 평가하며 기존 평가 결과를 승계하지 않는다.
 
-진입 평가는 종목별 확정 봉 단위다. 같은 확정 봉은 한 번만 평가하고, 분 안에 늦게 확정된 봉은 그 분에 바로
-평가한다(`evaluated_bar:<종목>`). 봉 마감 후 90초를 넘긴 신호는 `signal_stale` 감사만 남기고 주문하지 않는다.
+진입 평가는 종목별 확정 봉 단위다. 같은 확정 봉은 한 번만 평가하고, 분 안에 늦게 확정된 봉은 수집 스레드가
+저장하는 즉시 그 분에 평가한다(`evaluated_bar:<종목>`; 운영 실행기는 항상 수집 스레드를 쓴다). 봉 마감 후 90초를 넘긴 신호는 `signal_stale` 감사만 남기고 주문하지 않는다.
 15초 확정 유예는 그대로다. 주문 POST 직전에는 저장된 전체 근거 만료(호가·잔고 스냅샷·위험 검사)와 잔고 관측
 나이를 다시 검사하며, 만료면 전송하지 않고 `queued_order_rejected`로 종결한다. 진입마다 `entry_net_target`
 (비용 반영 순목표수익, 계측 전용)과 당일 손절 후 재진입 여부 `reentry_after_stop`를 감사에 남기며 주문을 거절하지는 않는다.
@@ -62,7 +62,8 @@ python -m quantpilot.paper --json config --expected-version 1 --set '{"data_mode
 
 보호 매도(손절·목표·마감·격리)는 매수호가 지정가이며, 미체결이면 `exit_reissue_seconds`(기본 60, 10~60초) 뒤에
 취소하고 다음 주기에 다시 낸다. 매수 미체결은 60초 고정이다. 시험 프로필에서만 `config --set`으로 짧은 값을
-명시하고, 재발주 횟수는 `protective_sell_reissued` 감사로 센다.
+명시하고, 재발주 횟수는 `protective_sell_reissued` 감사로 센다. 값이 `cycle_seconds`(10초)에 가까우면 취소 POST와
+강제 대사가 매 주기 반복되어 `cancel_unknown` 노출과 API 예산 소모가 늘어나므로 계측을 보고 정한다.
 
 장 마감 처리가 끝나면 살아 있는 trader는 스스로 `paused`로 바꾼다(`auto_pause_after_close`, 기본 true, 감사 `auto_paused_after_close`). 다음 거래일 진입은 반드시 `resume`으로 명시해야 한다. 마감 시각에 trader가 죽어 있었다면 자동 pause가 기록되지 않으므로, 재시작 전에 `status`로 `control`을 확인하고 필요하면 `pause`한다.
 

@@ -13,9 +13,10 @@ A 단계 구현: 주문 POST 직전 전체 근거(잔고 스냅샷 포함) 만�
 `latency` CLI·status·대시보드 보고, 계측 전용 감사(`entry_net_target`·`reentry_after_stop`·
 `protective_sell_reissued`), 보호 매도 재발주 간격 정책 `exit_reissue_seconds`(기본 60·매도만).
 정책 한도·live 플래그·시장가·브로커 모드는 변경하지 않았다.
-검증 pytest **1,905개 중 1,899 passed·3 skipped·3 failed** (junit; 실패 3건은 codex CLI 부재 환경의
+검증 pytest **1,907개 중 1,901 passed·3 skipped·3 failed** (junit; 실패 3건은 codex CLI 부재 환경의
 `test_paper_intelligence.py`로 변경 전 기준과 동일), smoke OK (broker mock, live 비활성, operator blocked),
-`tach check` 통과. 컨테이너 Linux 전용 venv에서 실행했고 Windows `verify-paper.py`는 사용자 PC 확인이 남아 있다.
+`tach check` 통과, 독립 검토(`risk-gate-auditor`) PASS·should-fix 2건 반영(계측 실패 격리, 청산 관측 기록 정리).
+컨테이너 Linux 전용 venv에서 실행했고 Windows `verify-paper.py`는 사용자 PC 확인이 남아 있다.
 비차단 한계(라이브 준비 주장 아님): 지연 목표(손절 5초·진입 30초)는 잠정이며 A5 계측이 모인 뒤 판정한다.
 B 단계(체결통보 복호·HTS ID 장애 원인 분석 → 스트림 틱 보호 lane → 잔고만 대사로 15초 창 유지 → legacy 순목표수익
 게이트)는 설계만 문서화했고 A 인수 후 구현한다. 손실을 지연 탓으로 확정하지 않는다.

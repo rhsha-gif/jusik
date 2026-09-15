@@ -64,7 +64,7 @@ LLM은 주문 경로에 없다. `ai_enabled`는 별도 worker 프로세스의 �
 
 | 항목 | 변경 | 검증 |
 |---|---|---|
-| A1 주문 직전 전체 근거 만료 재검사 | `broker.py before_send`가 durable dispatch의 `submission_evidence_expires_at`(잔고 스냅샷 만료 포함)과 잔고 관측 나이를 다시 검사. 만료 시 POST 0회, `submission_evidence_expired`/`balance_evidence_expired` 감사 | `test_paper_stabilization_integration.py` `balance_stale`·`quote_stale` 게이트 |
+| A1 주문 직전 전체 근거 만료 재검사 | `broker.py before_send`가 durable dispatch의 `submission_evidence_expires_at`(계획·호가·잔고 스냅샷 만료의 최솟값)을 다시 검사. 만료 시 POST 0회, `submission_evidence_expired` 감사 | `test_paper_stabilization_integration.py` `balance_stale`·`quote_stale` 게이트 |
 | A2 확정 봉 도착 기준 평가 | 시계 분 `signal_bucket` 제거. 종목별 `evaluated_bar:<symbol>`로 같은 봉은 한 번만, 늦게 온 봉은 그 분 안에 평가. `Signal`에 `bar_end`·`observed_at`·`computed_at`. 봉 마감 후 90초(=기존 150초 봉 시작 기준) 넘긴 신호는 `signal_stale` 감사 후 폐기. 15초 확정 유예는 유지 | `test_paper_collector.py` 늦은 봉 1회 평가·중복 없음·다른 후보 비차단, stale 폐기 |
 | A3 체결 인식·보호·마감 통합 시나리오 | 진입 접수 → 취소 POST 미상 → 지연 체결 인식 1회 → 보호 매도 POST 1회 → 마감 격리 → 재시작 후 재전송 0. 코드 결함은 발견되지 않았다 | `test_paper_protocol_scenarios.py` |
 | A4 긴급취소 원주문 식별 통일 | `paper_kill.py`가 `kis_paper.is_original_order`를 사용(열 자리 0 인식) | `test_kis_paper_kill_job.py` |
@@ -104,3 +104,11 @@ A5의 `latency` 보고 p50/p95로 손절 5초·진입 30초 달성 여부를 판
 컨테이너(Linux, 전용 venv)에서 `python -m pytest quantpilot/tests`를 실행했다. 결과는 STATUS에 기록한다.
 `test_paper_intelligence.py`의 codex CLI 3건은 실행기 부재로 이 환경에서 원래 실패하며 변경과 무관하다.
 Windows runtime-venv의 `scripts/verify-paper.py`·`tach check`는 사용자 PC에서 한 번 더 확인한다.
+
+독립 검토(`risk-gate-auditor`, 구현자와 다른 에이전트)는 **PASS**(차단 없음)였고, 변경 전 코드 `85f07e3`에서
+잔고 만료·늦은 봉·kill 식별·재발주 테스트가 실제로 실패함을 별도 확인했다. should-fix 2건은 반영했다:
+계측 기록 실패가 보호 매도를 막지 않도록 `place()`의 계측 호출을 격리(`latency_record_failed` 감사)했고,
+청산 후 남던 `exit_condition:<symbol>` 기록을 매도 연결 시점에 정리해 재진입 에피소드가 이전 관측을
+물려받지 않게 했다. nit 반영: 도달 불가였던 `balance_evidence_expired` 제거, 송신 경로의 계측 쓰기를
+best-effort로 격리, 포그라운드 v2 모드의 분봉 재조회 복원, 문서 한정. 남긴 nit: `exit_reissue_seconds`
+하한 10초는 운영 비용(취소 POST·강제 대사 반복)을 문서에 적고 유지한다.

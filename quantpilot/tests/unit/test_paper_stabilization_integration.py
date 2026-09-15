@@ -13,7 +13,7 @@ from quantpilot.packages.core.kis_paper import KisPaperClient, KisPaperConfig, K
 from quantpilot.packages.core.marketdata.types import Quote
 
 
-@pytest.mark.parametrize("gate", ["expiry", "pause", "baseline", "submission_disabled", "kill", "admission", "unknown"])
+@pytest.mark.parametrize("gate", ["expiry", "balance_stale", "quote_stale", "pause", "baseline", "submission_disabled", "kill", "admission", "unknown"])
 def test_queued_real_post_rechecks_authority_and_unknown_never_replays(tmp_path, gate):
     from quantpilot.paper.api_budget import SharedBudget, BudgetTransport
     from quantpilot.paper.auth import RefreshingClient
@@ -64,9 +64,15 @@ def test_queued_real_post_rechecks_authority_and_unknown_never_replays(tmp_path,
     try:
         gateway.begin()
         assert gateway.reconcile(at())
+        if gate == "balance_stale":
+            # The balance snapshot is 10 s old when the order is prepared; the quote and
+            # the risk check are fresh, so only the reconciled-balance evidence expires
+            # (at +15 s) while the plan waits in the queue for 6 s more.
+            clock.sleep(10)
         signal = SimpleNamespace(symbol="005930", strategy_id="trend_pullback", version="1", stop=69000., target=72000., entry_atr14=1000.)
         store.reserve(order_id="queued", signal=signal, quantity=1, price=70000, side="buy", now=at(), policy_version=store.policy.version, reason="fixture")
-        budget.share_cooldown(20 if gate == "expiry" else 1)
+        budget.share_cooldown({"expiry": 20, "balance_stale": 6, "quote_stale": 6}.get(gate, 1))
+        quote_at = at() - timedelta(seconds=10) if gate == "quote_stale" else at()
         if gate == "admission":
             from contextlib import contextmanager
             @contextmanager
@@ -75,7 +81,7 @@ def test_queued_real_post_rechecks_authority_and_unknown_never_replays(tmp_path,
                 yield
             budget.send_admission = unavailable
         with pytest.raises(PaperSubmissionOutcomeUnknown if gate == "unknown" else PaperSubmissionRejected):
-            gateway.submit(store.orders()[0], Quote(symbol="005930", last=70000, bid=69900, ask=70000, as_of=at()), at())
+            gateway.submit(store.orders()[0], Quote(symbol="005930", last=70000, bid=69900, ask=70000, as_of=quote_at), at())
         dispatch = gateway.kernel.load_paper_order_dispatch("queued")
         if gate == "unknown":
             assert len(posts) == 1 and dispatch.status == "outcome_unknown"
@@ -88,6 +94,10 @@ def test_queued_real_post_rechecks_authority_and_unknown_never_replays(tmp_path,
             if gate != "admission":
                 with sqlite3.connect(budget.path) as db:
                     assert json.loads(db.execute("SELECT body FROM api_requests ORDER BY at DESC LIMIT 1").fetchone()[0])["stage"] == "before_send"
+            if gate in {"balance_stale", "quote_stale"}:
+                rejected = [json.loads(r[0]) for r in store.db.execute(
+                    "SELECT payload FROM audit WHERE kind='queued_order_rejected'")]
+                assert [r["reason_code"] for r in rejected] == ["submission_evidence_expired"]
     finally:
         gateway.end()
         gateway.close()

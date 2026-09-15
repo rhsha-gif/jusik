@@ -7,6 +7,7 @@ from contextlib import nullcontext
 
 from quantpilot.paper.store import OPEN, TERMINAL
 from quantpilot.paper.risk import fresh_quote, authorize_order
+from quantpilot.paper import latency
 from quantpilot.paper.order_evidence import daily_identity_matches, daily_quantities_valid
 from quantpilot.packages.core.schemas import (
     OrderIntent,
@@ -162,6 +163,9 @@ class KisGateway:
                 state = "outcome_unknown"
             if self.store.get("cancel_claim:" + order["id"]) and state not in TERMINAL:
                 state = "cancel_unknown"
+            if qty > order["filled"]:
+                # First local recognition of any broker fill for this order.
+                latency.mark(self.store, order["id"], fill_recognized_at=now)
             self.store.update_order(
                 order["id"], state, qty, amount, now, dispatch.broker_order_reference
             )
@@ -437,12 +441,21 @@ class KisGateway:
             buying_power=power,
         )
         self.store.update_order(order["id"], "submitted", 0, 0, now)
+        latency.mark(self.store, order["id"], prepared_at=now)
         def before_send():
             from quantpilot.packages.core.kis_paper import KisPaperConfigurationError
             try:
                 at = self.clock()
                 if not environment_is_safe(self) or at >= plan.risk_check_expires_at or at >= plan.expires_at:
                     raise ValueError("submission_evidence_expired")
+                # The durable dispatch carries the earliest expiry across the plan, the
+                # quote and the reconciled balance snapshot. A queue wait can outlive the
+                # balance evidence while the quote is still fresh, so re-read it here.
+                dispatch = self.kernel.load_paper_order_dispatch(order["id"])
+                if dispatch is None or at >= dispatch.submission_evidence_expires_at:
+                    raise ValueError("submission_evidence_expired")
+                if self.verified_at is None or not 0 <= (at - self.verified_at).total_seconds() < policy.quote_ttl_seconds:
+                    raise ValueError("balance_evidence_expired")
                 if self.store.policy.data_mode == "paper_trading" and getattr(self, "environment", {}).get("KIS_PAPER_ORDER_SUBMISSION_ENABLED", "false").lower() != "true":
                     raise ValueError("paper_submission_disabled")
                 self.kernel.require_active_paper_execution_session(self.session, checked_at=at)
@@ -463,9 +476,23 @@ class KisGateway:
                 self.store.audit("queued_order_rejected", {"order_id": order["id"], **failure(exc, "pre_transport")}, self.clock())
                 # No bytes have been sent. The durable kernel terminalizes this local refusal.
                 raise KisPaperConfigurationError("queued_submission_guard_failed") from None
-        with (self.budget.context(priority="sell" if order["side"] == "sell" else "entry",
-                                  before_send=before_send) if self.budget else nullcontext()):
-            self.coordinator.submit_prepared_order(plan)
+            latency.mark(self.store, order["id"], send_start_at=at)
+        if self.budget is None:
+            # No shared queue: the send starts immediately after preparation.
+            latency.mark(self.store, order["id"], queue_enter_at=self.clock(), send_start_at=self.clock())
+        else:
+            latency.mark(self.store, order["id"], queue_enter_at=self.clock())
+        try:
+            with (self.budget.context(priority="sell" if order["side"] == "sell" else "entry",
+                                      before_send=before_send) if self.budget else nullcontext()):
+                self.coordinator.submit_prepared_order(plan)
+        except BaseException:
+            latency.mark(self.store, order["id"], failed_at=self.clock())
+            raise
+        after = self.kernel.load_paper_order_dispatch(order["id"])
+        latency.mark(self.store, order["id"], response_at=self.clock(),
+                     broker_order_time=getattr(after, "broker_order_time", None),
+                     broker_order_reference=getattr(after, "broker_order_reference", None))
         self.store.put("reconcile_wakeup", self.clock().isoformat())
 
     def cancel(self, order, now):

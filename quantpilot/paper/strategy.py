@@ -84,9 +84,19 @@ class Signal:
     reason: str
     version: str = "1"
     entry_atr14: float | None = None
+    # Provenance stamped by the runtime: the close time of the completed bar the
+    # signal was judged on and the instant that bar was observed locally. Both are
+    # optional so offline research callers and fixtures stay unchanged.
+    bar_end: datetime | None = None
+    observed_at: datetime | None = None
+    computed_at: datetime | None = None
 
     def __post_init__(self) -> None:
         text_fields = (self.strategy_id, self.symbol, self.reason, self.version)
+        for label, value in (("bar_end", self.bar_end), ("observed_at", self.observed_at),
+                             ("computed_at", self.computed_at)):
+            if value is not None and not _aware(value):
+                raise ValueError(f"signal {label} must be timezone-aware")
         if self.entry_atr14 is not None and (
             not _finite_number(self.entry_atr14) or self.entry_atr14 <= 0
         ):

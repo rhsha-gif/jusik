@@ -154,6 +154,8 @@ def parser():
     month.add_argument("--apply", action="store_true")
     month.add_argument("--expected-version", type=int)
     month.add_argument("--reason")
+    lat = sub.add_parser("latency")
+    lat.add_argument("--day", help="KST day YYYY-MM-DD; default today")
     return p
 
 
@@ -180,7 +182,7 @@ def main(argv=None):
             )
         )
         return 2
-    if args.command in {"status", "report", "acceptance", "stabilize", "month-baseline"}:
+    if args.command in {"status", "report", "acceptance", "stabilize", "month-baseline", "latency"}:
         # Inspection of old ledgers never triggers an additive migration.
         from quantpilot.paper.dashboard import ledger
         from quantpilot.paper.reporting import render
@@ -206,6 +208,9 @@ def main(argv=None):
                         from quantpilot.paper.stabilization import acceptance
                         from quantpilot.paper.calendar import Calendar
                         result = acceptance(view, Calendar(), args.start_day, datetime.now(timezone.utc))
+                    elif args.command == "latency":
+                        from quantpilot.paper.latency import report as latency_report
+                        result = latency_report(view, day=args.day, now=datetime.now(timezone.utc))
                     else:
                         result = snapshot(view)
             print(json.dumps(result, ensure_ascii=False, allow_nan=False) if args.json or args.command not in {"status", "report"} else render(result))

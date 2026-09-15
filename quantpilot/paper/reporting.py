@@ -12,6 +12,7 @@ from quantpilot.paper.store import encode
 
 def snapshot(store, now=None):
     from quantpilot.paper.recommendations import propose_concentration
+    from quantpilot.paper.latency import headline as latency_headline
 
     now = now or datetime.now(timezone.utc)
     def fresh(value, seconds=180):
@@ -121,6 +122,7 @@ def snapshot(store, now=None):
             for s in store.get("universe", [])
         },
         "valuation_incomplete": incomplete,
+        "latency": latency_headline(store, now),
         "cost_basis": "modeled_fee_tax; slippage_separate",
         "live_trading_enabled": False,
         **operational_diagnostics(store, now),

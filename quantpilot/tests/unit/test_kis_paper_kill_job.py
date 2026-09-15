@@ -16,6 +16,7 @@ from quantpilot.jobs.run_kis_paper_kill import (
 from quantpilot.packages.core.kis_paper import (
     KisBalanceResult,
     KisBalanceSummary,
+    KisCancelableOrder,
     KisCancelableOrdersResult,
     paper_account_scope_fingerprint,
 )
@@ -129,3 +130,52 @@ def test_engage_and_release_run_without_normal_autonomy_flags(tmp_path) -> None:
         account_scope_fingerprint=_Client.account_scope_fingerprint,
     ) as store:
         assert store.paper_kill_blocks_submission() is False
+
+
+def _identity_row(original_order_number: str) -> KisCancelableOrder:
+    return KisCancelableOrder(
+        order_branch_number="91252",
+        order_number="0000012345",
+        original_order_number=original_order_number,
+        order_division_name="지정가",
+        symbol="005930",
+        product_name="삼성전자",
+        revision_cancel_division_name="",
+        order_quantity=3,
+        order_price=Decimal("70000"),
+        order_time="103012",
+        total_filled_quantity=0,
+        total_filled_amount=Decimal("0"),
+        cancelable_quantity=3,
+        side="buy",
+        order_division_code="00",
+        exchange_division_code="KRX",
+        exchange_id="KRX",
+    )
+
+
+@pytest.mark.parametrize("sentinel", ["", "0", "0000000000"])
+def test_emergency_cancel_recognises_every_kis_original_order_sentinel(sentinel) -> None:
+    """The paper server reports ten zeroes; the kill path must use the reconciler's rule."""
+    from types import SimpleNamespace
+    from quantpilot.packages.core.execution.paper_kill import _cancel_identity_matches
+
+    dispatch = SimpleNamespace(
+        broker_order_reference="0000012345",
+        broker_forwarding_order_org_number="91252",
+        broker_order_branch_number="91252",
+        broker_business_date=NOW.date(),
+        broker_order_time="103012",
+        symbol="005930",
+        side="buy",
+        quantity=3.0,
+        cumulative_filled_quantity=0.0,
+        fill_evidence=(),
+        limit_price=70000.0,
+    )
+    assert _cancel_identity_matches(dispatch, _identity_row(sentinel), business_date=NOW.date())
+    # A nonzero original number denotes a correction/cancel child, never our original order.
+    assert not _cancel_identity_matches(dispatch, _identity_row("0000012300"), business_date=NOW.date())
+    # An otherwise matching external order still fails on identity, not on the sentinel.
+    other = SimpleNamespace(**{**dispatch.__dict__, "broker_order_reference": "0000099999"})
+    assert not _cancel_identity_matches(other, _identity_row(sentinel), business_date=NOW.date())

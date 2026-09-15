@@ -33,6 +33,10 @@ class Policy(BaseModel):
     slippage_bps: float = Field(default=5, ge=0, le=100)
     quote_ttl_seconds: int = Field(default=15, ge=1, le=30)
     cycle_seconds: int = Field(default=10, ge=1, le=60)
+    # An unfilled protective sell (stop/target/close) is cancelled and re-issued after
+    # this many seconds; entry buys keep the fixed 60 s. The default preserves the
+    # historical behaviour, a paper profile opts into a shorter interval explicitly.
+    exit_reissue_seconds: int = Field(default=60, ge=10, le=60)
     entry_cutoff_minutes: int = Field(default=30, ge=20, le=120)
     liquidation_minutes: int = Field(default=20, ge=10, le=60)
     # After the session closes the trader pauses itself; the next session needs an

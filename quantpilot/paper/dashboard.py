@@ -426,6 +426,8 @@ class Sampler:
 
 
 def summary(ledger_path: Path, series_path: Path, timeline_limit: int = 200) -> dict:
+    from quantpilot.paper.latency import report as latency_report
+
     ledger_path, series_path = Path(ledger_path), Path(series_path)
     with ledger(ledger_path) as view:
         report = snapshot(view)
@@ -454,6 +456,7 @@ def summary(ledger_path: Path, series_path: Path, timeline_limit: int = 200) -> 
             "timeline": timeline(view, timeline_limit),
             "open_orders": view.orders(True),
             "audit": audit_tail(view),
+            "latency": latency_report(view, now=datetime.now(timezone.utc)),
         }
     payload["series"] = SeriesStore(series_path).recent() if series_path.is_file() else []
     invalid_before = report.get("valuation_invalidated_before")
@@ -641,6 +644,7 @@ details>.body{padding:0 12px 10px}
 <details id="d-timeline"><summary>주문 타임라인 <span class="n" id="n-timeline"></span></summary><div class="body tbl" id="timeline"></div></details>
 <details id="d-state"><summary>운영 상태 상세</summary><div class="body" id="state"></div></details>
 <details id="d-candidates"><summary>후보 종목 상태 <span class="n" id="n-candidates"></span></summary><div class="body tbl" id="candidates"></div></details>
+<details id="d-latency"><summary>지연 계측 (당일) <span class="n" id="n-latency"></span></summary><div class="body tbl" id="latency"></div></details>
 <details id="d-audit"><summary>감사 기록 <span class="n" id="n-audit"></span></summary><div class="body tbl" id="audit"></div></details>
 <script>
 const $=id=>document.getElementById(id);
@@ -745,6 +749,9 @@ function render(d){
   const cs=r.candidate_status||{};const keys=Object.keys(cs).sort();count('n-candidates',keys.length);
   const groups={};keys.forEach(k=>{(groups[cs[k]]=groups[cs[k]]||[]).push(k);});
   $('candidates').innerHTML=table([{t:'상태',l:1},{t:'종목 수'},{t:'종목',l:1}],Object.keys(groups).sort().map(g=>'<tr><td class="l">'+esc(g)+'</td><td>'+groups[g].length+'</td><td class="l wrap">'+groups[g].map(esc).join(', ')+'</td></tr>'),'후보 없음');
+  const lat=d.latency||{entry:{},exit:{}};count('n-latency',lat.orders||0);
+  const latRows=[];[['진입','entry'],['청산','exit']].forEach(([label,side])=>{Object.keys(lat[side]||{}).forEach(k=>{const v=lat[side][k];if(typeof v!=='object'||v===null)return;latRows.push('<tr><td class="l">'+label+'</td><td class="l">'+esc(k)+'</td><td>'+v.count+'</td><td>'+v.missing+'</td><td>'+(v.p50==null?'-':num(v.p50,1))+'</td><td>'+(v.p95==null?'-':num(v.p95,1))+'</td><td>'+(v.p99==null?'-':num(v.p99,1))+'</td><td>'+(v.max==null?'-':num(v.max,1))+'</td></tr>');});});
+  $('latency').innerHTML='<div class="muted small">로컬 관측 시각 기준 초 단위. 목표(잠정): 청산 조건→송신 5초, 진입 봉 마감→송신 30초. 브로커 체결 시각은 측정하지 않습니다.</div>'+table([{t:'구간',l:1},{t:'단계',l:1},{t:'표본'},{t:'누락'},{t:'p50'},{t:'p95'},{t:'p99'},{t:'최대'}],latRows,'당일 계측 없음');
   count('n-audit',d.audit.reduce((a,x)=>a+x.count,0));
   $('audit').innerHTML=table([{t:'시각',l:1},{t:'반복'},{t:'종류',l:1},{t:'내용',l:1}],d.audit.map(x=>'<tr><td class="l">'+kst(x.at)+(x.count>1?'<br><span class="muted">← '+kst(x.first_at)+'</span>':'')+'</td><td>'+(x.count>1?x.count+'회':'')+'</td><td class="l">'+esc(x.kind)+'</td><td class="l wrap small">'+esc(JSON.stringify(x.payload))+'</td></tr>'));
 }

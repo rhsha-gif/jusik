@@ -19,6 +19,7 @@ from quantpilot.packages.core.kis_paper import (
     KisPaperBusinessError,
     KisPaperCancelOutcomeUnknown,
     KisPaperClient,
+    is_original_order,
 )
 from quantpilot.packages.core.operator.position_ledger import (
     PaperCancelRequest,
@@ -564,7 +565,9 @@ def _cancel_identity_matches(
             dispatch.broker_order_time is None
             or row.order_time == dispatch.broker_order_time
         )
-        and row.original_order_number in {"", "0"}
+        # KIS marks an original order with blank or a zero-filled ID (ten zeroes on
+        # the paper server); the same rule as the reconciler, never a one-digit sentinel.
+        and is_original_order(row.original_order_number)
         and row.symbol == dispatch.symbol
         and row.side == dispatch.side
         and row.order_quantity == int(dispatch.quantity)

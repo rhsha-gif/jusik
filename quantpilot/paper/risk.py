@@ -140,9 +140,7 @@ def entry_size(store, signal, quote, weight, now, *, trial=False, ignore_order_i
             equity * cap - strategy_used,
         ),
     )
-    roundtrip = (
-        2 * policy.fee_bps + policy.sell_tax_bps + 2 * policy.slippage_bps
-    ) / 10000
+    roundtrip = roundtrip_cost_ratio(policy)
     risk_budget = equity * policy.trade_risk
     if policy.strategy_generation != "intraday_v2":
         # The daily-loss and peak-drawdown budget gates every generation; the
@@ -175,11 +173,7 @@ def entry_size(store, signal, quote, weight, now, *, trial=False, ignore_order_i
             if not 0 <= (now - mark_at).total_seconds() < policy.quote_ttl_seconds:
                 return 0
         # Use an executable target tick and charge both legs before ranking or sizing.
-        target = math.floor(signal.target / tick(signal.target)) * tick(signal.target)
-        net_target = target * (
-            1 - (policy.fee_bps + policy.sell_tax_bps + policy.slippage_bps) / 10000
-        ) - price * (1 + (policy.fee_bps + policy.slippage_bps) / 10000)
-        if net_target <= 0:
+        if net_target_per_share(policy, price, signal.target) <= 0:
             return 0
         budget = loss_budget(store, now, ignore_order_id)
         risk_budget = min(
@@ -203,6 +197,20 @@ def entry_size(store, signal, quote, weight, now, *, trial=False, ignore_order_i
             )
         ),
     )
+
+
+def roundtrip_cost_ratio(policy):
+    """Both legs of fee and slippage plus the sell tax, as a ratio of price."""
+    return (2 * policy.fee_bps + policy.sell_tax_bps + 2 * policy.slippage_bps) / 10000
+
+
+def net_target_per_share(policy, price, target):
+    """Profit per share at the first executable tick at or below ``target`` after
+    charging the buy leg (fee, slippage) and the sell leg (fee, tax, slippage)."""
+    executable = math.floor(target / tick(target)) * tick(target)
+    return executable * (
+        1 - (policy.fee_bps + policy.sell_tax_bps + policy.slippage_bps) / 10000
+    ) - price * (1 + (policy.fee_bps + policy.slippage_bps) / 10000)
 
 
 def sell_quantity(store, symbol, quote, now):

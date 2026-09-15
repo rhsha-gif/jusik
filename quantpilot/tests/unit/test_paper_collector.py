@@ -361,3 +361,111 @@ def test_real_collector_thread_runs_beside_order_cycle(tmp_path):
         release.set()
         collector.close()
         store.close()
+
+
+def test_late_finalized_bar_is_evaluated_in_the_same_minute_exactly_once(tmp_path, monkeypatch):
+    """Loss diagnosis 2026-09-15 §2: a bar that lands at 10:50:25 must be judged at
+    10:50:25, not at 10:51:05, and the same bar must never be judged twice. One
+    candidate's already-judged bar must not block another candidate's new bar."""
+    from datetime import datetime, timezone
+    from quantpilot.paper.strategy import Signal
+    from quantpilot.packages.core.marketdata.types import Quote
+
+    minute = datetime(2026, 9, 15, 1, 50, tzinfo=timezone.utc)  # 10:50:00 KST
+    store = Store(tmp_path / "s")
+    store.control("start")
+    store.put("weights", {"trend_pullback": 0.6})
+    session = SimpleNamespace(
+        session=lambda at: Session(minute - timedelta(hours=1), minute + timedelta(hours=5))
+    )
+    now = [minute + timedelta(seconds=5)]
+    bars = {"005930": [], "000660": []}
+    market = SimpleNamespace(
+        candidates=lambda *args: (["005930", "000660"], "fixture"),
+        minutes=lambda symbol, at, grace: list(bars[symbol]),
+        quotes=lambda symbols: {s: Quote(symbol=s, last=10000, bid=10000, ask=10000, as_of=now[0])
+                                for s in symbols},
+    )
+    evaluated = []
+
+    def evaluate(history, at, session_open):
+        evaluated.append((history[-1].symbol, history[-1].start, at))
+        return [Signal(strategy_id="trend_pullback", symbol=history[-1].symbol, price=10000.0,
+                       stop=9900.0, target=10300.0, score=0.8, reason="fixture")]
+
+    monkeypatch.setattr("quantpilot.paper.strategy.evaluate_strategies", evaluate)
+    collector = Collector(store.path, market, session, lambda: now[0])
+    runtime = Runtime(store, market, FixtureGateway(store), session, lambda: now[0],
+                      background_data=True)
+    collector.collect_once(store)  # populates the universe; no bar exists yet
+    assert runtime.cycle()["status"] == "running" and evaluated == []
+    # 10:50:25 — the 10:49 bar is finalized and the collector stores it.
+    now[0] = minute + timedelta(seconds=25)
+    bars["005930"] = [Bar("005930", minute - timedelta(minutes=1), 100.0, 101.0, 99.0, 100.0, 10.0)]
+    collector.fetched.clear()
+    assert collector.collect_once(store)["fetched"] == ["005930", "000660"]
+    result = runtime.cycle()
+    assert result["status"] == "running" and result["signals"] == 1
+    assert [(s, b) for s, b, _ in evaluated] == [("005930", minute - timedelta(minutes=1))]
+    orders = store.orders()
+    assert len(orders) == 1 and orders[0]["symbol"] == "005930"
+    # Same minute, same bar: nothing new to judge and no second order.
+    now[0] = minute + timedelta(seconds=35)
+    assert runtime.cycle()["status"] == "waiting"
+    assert len(evaluated) == 1 and len(store.orders()) == 1
+    # Another candidate's bar lands later in the same minute: judged once, immediately.
+    now[0] = minute + timedelta(seconds=40)
+    late = Bar("000660", minute - timedelta(minutes=1), 50.0, 51.0, 49.0, 50.0, 10.0)
+    store.save_bars([late])
+    store.put("data:000660", {"provider": "kis_paper", "observed_at": now[0].isoformat(),
+                              "quality": "completed_bars_validated", "last_bar": late.start.isoformat()})
+    result = runtime.cycle()
+    assert result["status"] == "running"
+    assert [s for s, _, _ in evaluated] == ["005930", "000660"]
+    assert sorted(o["symbol"] for o in store.orders()) == ["000660", "005930"]
+    # Provenance: the entry timeline links bar close, observation and decision.
+    timeline = store.get("timeline:" + orders[0]["id"])
+    assert timeline["bar_end"] == minute.isoformat()
+    assert timeline["bar_observed_at"] == (minute + timedelta(seconds=25)).isoformat()
+    assert timeline["signal_computed_at"] == timeline["decision_at"] == (minute + timedelta(seconds=25)).isoformat()
+    kinds = [r[0] for r in store.db.execute("SELECT kind FROM audit")]
+    assert kinds.count("entry_net_target") == 2 and "reentry_after_stop" not in kinds
+    store.close()
+
+
+def test_stale_signal_is_discarded_with_an_audit_instead_of_an_order(tmp_path, monkeypatch):
+    from datetime import datetime, timezone
+    from quantpilot.paper.strategy import Signal
+    from quantpilot.packages.core.marketdata.types import Quote
+
+    minute = datetime(2026, 9, 15, 1, 50, tzinfo=timezone.utc)
+    store = Store(tmp_path / "s")
+    store.control("start")
+    store.put("weights", {"trend_pullback": 0.6})
+    store.put("universe", ["005930"])
+    session = SimpleNamespace(
+        session=lambda at: Session(minute - timedelta(hours=1), minute + timedelta(hours=5)))
+    bar = Bar("005930", minute - timedelta(minutes=1), 100.0, 101.0, 99.0, 100.0, 10.0)
+    store.save_bars([bar])
+    store.put("data:005930", {"observed_at": (minute + timedelta(seconds=20)).isoformat(),
+                              "quality": "completed_bars_validated", "last_bar": bar.start.isoformat()})
+    # The bar is read at +80 s (bar start age 140 s: still inside the 150 s gate) but a
+    # slow evaluation reaches the order step at +100 s, past the 90 s from-close limit.
+    now = [minute + timedelta(seconds=80)]
+    market = SimpleNamespace(
+        quotes=lambda symbols: {s: Quote(symbol=s, last=10000, bid=10000, ask=10000, as_of=now[0])
+                                for s in symbols})
+
+    def slow_evaluate(history, at, session_open):
+        now[0] = minute + timedelta(seconds=100)
+        return [Signal(strategy_id="trend_pullback", symbol="005930", price=10000.0,
+                       stop=9900.0, target=10300.0, score=0.8, reason="fixture")]
+
+    monkeypatch.setattr("quantpilot.paper.strategy.evaluate_strategies", slow_evaluate)
+    runtime = Runtime(store, market, FixtureGateway(store), session, lambda: now[0],
+                      background_data=True)
+    assert runtime.cycle()["status"] == "running"
+    assert store.orders() == []
+    rows = [r for r in store.db.execute("SELECT kind, payload FROM audit") if r[0] == "signal_stale"]
+    assert len(rows) == 1 and '"symbol": "005930"' in rows[0][1]
+    store.close()

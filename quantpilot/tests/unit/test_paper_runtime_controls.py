@@ -190,3 +190,48 @@ def test_gateway_refusal_backoff_doubles_and_caps_at_sixty_seconds(tmp_path):
     assert delays == [2, 4, 8, 16, 32, 60, 60]
     assert s.get("broker_read_failures") == 6
     s.close()
+
+
+def test_exit_reissue_interval_applies_to_protective_sells_only(tmp_path, monkeypatch):
+    """A shorter re-issue window cancels an aged sell; entry buys keep the 60 s rule."""
+    from quantpilot.paper.config import Policy
+
+    with pytest.raises(ValueError):
+        Policy(exit_reissue_seconds=5)
+    with pytest.raises(ValueError):
+        Policy(exit_reissue_seconds=61)
+    assert Policy().exit_reissue_seconds == 60
+
+    stub = types.ModuleType("quantpilot.paper.strategy")
+    stub.evaluate_strategies = lambda *a: []
+    stub.allocate_weights = lambda *a, **k: {}
+    stub.select_signals = lambda *a: []
+    monkeypatch.setitem(sys.modules, "quantpilot.paper.strategy", stub)
+    s = Store(tmp_path / "s")
+    s.configure({"exit_reissue_seconds": 15}, 1)
+    s.control("start")
+    placed = NOW - timedelta(seconds=20)
+    s.reserve(order_id="buy", signal=signal(), quantity=10, price=10000, side="buy",
+              now=placed - timedelta(minutes=5), policy_version=2, reason="entry")
+    s.update_order("buy", "filled", 10, 100000, placed - timedelta(minutes=5))
+    s.reserve(order_id="sell", signal=signal(), quantity=10, price=9900, side="sell",
+              now=placed, policy_version=2, reason="stop")
+    s.update_order("sell", "accepted", 0, 0, placed, "fixture")
+    other = SimpleNamespace(**{**signal().__dict__, "symbol": "000660"})
+    s.reserve(order_id="buy2", signal=other, quantity=1, price=10000, side="buy",
+              now=placed, policy_version=2, reason="entry")
+    s.update_order("buy2", "accepted", 0, 0, placed, "fixture")
+    cancelled = []
+
+    class Gateway(FixtureGateway):
+        def cancel(self, order, now):
+            cancelled.append(order["id"])
+            super().cancel(order, now)
+
+    market = SimpleNamespace(quotes=lambda symbols: {
+        sym: Quote(symbol=sym, last=10000, bid=9990, ask=10000, as_of=NOW) for sym in symbols})
+    calendar = SimpleNamespace(
+        session=lambda now: Session(NOW - timedelta(hours=1), NOW + timedelta(hours=5)))
+    Runtime(s, market, Gateway(s), calendar, lambda: NOW).cycle()
+    assert cancelled == ["sell"]
+    s.close()

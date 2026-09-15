@@ -3,7 +3,7 @@
 from __future__ import annotations
 from datetime import datetime, timedelta, timezone
 from hashlib import sha256
-from dataclasses import asdict
+from dataclasses import asdict, replace
 from contextlib import nullcontext
 from quantpilot.paper.diagnostics import failure, subsystem, open_incident, recover_incident, publish_gates
 from types import SimpleNamespace
@@ -12,6 +12,8 @@ import math
 from quantpilot.paper.calendar import KST
 from quantpilot.paper.config import environment_safe
 from quantpilot.paper.risk import entry_size, fresh_quote, limit_price, sell_quantity
+from quantpilot.paper import latency
+from quantpilot.paper.latency import stale_signal
 from quantpilot.paper.store import OPEN
 from quantpilot.packages.core.kis_paper import safe_failure
 from quantpilot.paper.valuation import roll_baselines, record_close
@@ -268,7 +270,8 @@ class Runtime:
             # Cancel stale entry/exit limits once, then let reconciliation prove final status.
             for order in self.store.orders(True):
                 age = (now - datetime.fromisoformat(order["at"])).total_seconds()
-                if (order["side"] == "buy" and no_entries) or age >= 60:
+                stale_after = policy.exit_reissue_seconds if order["side"] == "sell" else 60
+                if (order["side"] == "buy" and no_entries) or age >= stale_after:
                     try:
                         before_cancel = [(o["id"], o["state"]) for o in self.store.orders(True)]
                         prior_claim = self.store.get("cancel_claim:" + order["id"])
@@ -387,6 +390,7 @@ class Runtime:
                             )
                         )
                     )
+                    latency.observe_exit_condition(self.store, p["symbol"], reason, at)
                     if reason:
                         qty = sell_quantity(self.store, p["symbol"], quote, at)
                         if qty:
@@ -450,13 +454,15 @@ class Runtime:
                 no_entries = no_entries or not feed_fresh(self.store, self.clock())
             if no_entries or self.store.get("incident"):
                 return {"status": "protecting", "new_entries": False}
-            # Evaluate each completed minute once. Position protection remains on every cycle.
+            # Evaluate each completed bar once per symbol, as soon as it is observed.
+            # The former clock-minute gate skipped a bar that finalized late in the
+            # minute until the next minute. Position protection remains on every cycle.
             bucket = now.replace(second=0, microsecond=0).isoformat()
-            if self.store.get("signal_bucket") == bucket:
-                return {"status": "waiting"}
+            fetch_due = self.background_data or self.store.get("fetch_bucket") != bucket
             signals = []
             intraday_histories = {}
-            intraday_waiting = False
+            evaluated_any = False
+            already_judged = False
             selected_at = self.store.get("universe_at")
             if not self.background_data and (
                 selected_at is None
@@ -475,7 +481,8 @@ class Runtime:
                                        "completed_bar_revised_quarantined")
                         continue
                     fetched_at = self.clock()
-                    if not self.background_data:
+                    if not self.background_data and fetch_due:
+                        # Foreground reads keep one REST fetch per clock minute per symbol.
                         observations = getattr(self.market, "minute_observations", None)
                         if observations:
                             bars = self.store.observe_bars(observations(symbol, fetched_at), fetched_at)
@@ -515,22 +522,30 @@ class Runtime:
                     ):
                         self.store.put("candidate_status:" + symbol, "no_fresh_bars")
                         continue
+                    bar_key = today[-1].start.isoformat()
+                    if self.store.get("evaluated_bar:" + symbol) == bar_key:
+                        already_judged = True
+                        continue  # this completed bar was already judged once
+                    bar_end = today[-1].start + timedelta(minutes=1)
+                    observed_raw = (self.store.get("data:" + symbol) or {}).get("observed_at")
+                    observed_at = datetime.fromisoformat(observed_raw) if observed_raw else fetched_at
                     if policy.strategy_generation == "intraday_v2":
                         from quantpilot.paper.intraday.runtime import signals_for
 
                         intraday_histories[symbol] = today
-                        if today[-1].start + timedelta(minutes=1) != fetched_at.replace(
-                            second=0, microsecond=0
-                        ):
-                            intraday_waiting = True
-                            continue
-                        signals.extend(
-                            signals_for(self.store, today, fetched_at, session.opens)
-                        )
+                        if bar_end != fetched_at.replace(second=0, microsecond=0):
+                            continue  # the next completed bar has not been observed yet
+                        found = signals_for(self.store, today, fetched_at, session.opens)
                     else:
-                        signals.extend(
-                            evaluate_strategies(today, fetched_at, session.opens)
-                        )
+                        found = evaluate_strategies(today, fetched_at, session.opens)
+                    computed_at = self.clock()
+                    signals.extend(
+                        replace(s, bar_end=bar_end, observed_at=observed_at,
+                                computed_at=computed_at)
+                        for s in found
+                    )
+                    self.store.put("evaluated_bar:" + symbol, bar_key)
+                    evaluated_any = True
                     self.store.put(
                         "candidate_status:" + symbol,
                         "ready" if len(today) >= 110 else "warming",
@@ -547,6 +562,10 @@ class Runtime:
                         {"symbol": symbol, "error": type(exc).__name__},
                         self.clock(),
                     )
+            if not self.background_data and fetch_due:
+                self.store.put("fetch_bucket", bucket)
+            if already_judged and not evaluated_any:
+                return {"status": "waiting"}
             scores = {s: 0.0 for s in policy.active_strategies}
             for signal in signals:
                 if signal.strategy_id in scores:
@@ -556,8 +575,6 @@ class Runtime:
             ai = self.assessment(self.clock())
             ai_scores = ai.strategy_scores if ai else None
             if ai and policy.strategy_generation == "legacy":
-                from dataclasses import replace
-
                 signals = [
                     replace(
                         s,
@@ -613,6 +630,17 @@ class Runtime:
                     break
                 if signal.strategy_id not in weights:
                     continue
+                if stale_signal(signal, at):
+                    # The bar this signal was judged on is now older than the freshness
+                    # gate allows; a slow cycle must not act on it and no order is made.
+                    self.store.audit(
+                        "signal_stale",
+                        {"symbol": signal.symbol, "strategy": signal.strategy_id,
+                         "bar_end": signal.bar_end.isoformat(),
+                         "age_seconds": (at - signal.bar_end).total_seconds()},
+                        at,
+                    )
+                    continue
                 if policy.shared_api_budget_enabled and not self.reconcile(force=True):
                     self.alert("entry_reconciliation_required", self.clock())
                     break
@@ -624,8 +652,6 @@ class Runtime:
                 )
                 if qty:
                     self.place(signal, qty, quote, "buy", signal.reason, at)
-            if not intraday_waiting:
-                self.store.put("signal_bucket", bucket)
             hourly = max(0, int((now - session.opens).total_seconds() // 3600))
             if policy.strategy_generation == "legacy" and hourly >= 1:
                 self.store.put(
@@ -733,6 +759,13 @@ class Runtime:
                 authorize_order(
                     self.store, order, quote, now, self.calendar.session(now)
                 )
+                if side == "buy":
+                    latency.link_signal(self.store, order_id, signal, now)
+                    latency.measure_entry(self.store, signal, price, qty, now)
+                else:
+                    latency.link_exit(self.store, order_id, signal.symbol,
+                                      signal.strategy_id, reason, quote, now)
+                    latency.measure_exit(self.store, order_id, signal.symbol, reason, now)
         if reserved:
             with self.io(0 if side == "sell" else 2):
                 self.gateway.submit(

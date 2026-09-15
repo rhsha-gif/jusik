@@ -365,7 +365,7 @@ def main(argv=None):
                             from quantpilot.paper.feed_service import FeedService
                             feed_service = FeedService(store.path, runtime.feed, runtime.clock)
                             feed_service.start()
-                        if store.policy.supervisor_enabled:
+                        if store.policy.supervisor_enabled and not store.get("recovery_required"):
                             store.put("recovery_required", True)
                         # Starting an already-paused service never silently resumes new entries.
                         if store.get("control") == "stopped" and not store.policy.supervisor_enabled:

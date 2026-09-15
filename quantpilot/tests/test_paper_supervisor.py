@@ -148,6 +148,87 @@ def test_launches_only_explicit_roles_and_preserves_manual_safety_state(tmp_path
     )
 
 
+@pytest.mark.parametrize("marker", ["missing", "completed", "legacy", "supervised"])
+@pytest.mark.parametrize("control", ["paused", "running"])
+def test_actual_cli_start_preserves_recovery_and_operator_state(
+    tmp_path, monkeypatch, marker, control
+):
+    from contextlib import nullcontext
+    from types import SimpleNamespace
+
+    from quantpilot.paper import cli, collector
+
+    store = Store(tmp_path / "experiment.sqlite3")
+    store.put("control", control)
+    store.put("resume_authorized_day", "2026-09-11")
+    loss = {"daily_halted": True, "drawdown_halted": True}
+    store.put("intraday_loss_state", loss)
+    if marker in {"completed", "legacy"}:
+        store.put("recovery_required", marker == "legacy")
+    expected = (
+        {
+            "required": True,
+            "detected_at": NOW.isoformat(),
+            "previous_control": control,
+            "previous_running": control == "running",
+            "resume_authorized_day": "2026-09-11",
+        }
+        if marker == "supervised"
+        else True
+    )
+    events = []
+
+    class FakeCollector:
+        def __init__(self, *args):
+            pass
+
+        def start(self):
+            events.append("collector_started")
+
+        def close(self):
+            events.append("collector_closed")
+
+    def build_runtime(child_store, env):
+        def cycle():
+            # Observe the persisted state after the real child startup path.
+            assert child_store.get("recovery_required") == expected
+            assert child_store.get("control") == control
+            assert child_store.get("resume_authorized_day") == "2026-09-11"
+            assert child_store.get("intraday_loss_state") == loss
+            events.append("cycle")
+            return {"status": "protecting", "new_entries": False}
+
+        return SimpleNamespace(
+            market=None,
+            calendar=SimpleNamespace(session=lambda _: None),
+            clock=lambda: NOW,
+            feed=None,
+            budget=None,
+            gateway=SimpleNamespace(close=lambda: events.append("gateway_closed")),
+            cycle=cycle,
+        )
+
+    monkeypatch.setattr(cli, "build_runtime", build_runtime)
+    monkeypatch.setattr(cli, "account_owner", lambda _: nullcontext())
+    monkeypatch.setattr(collector, "Collector", FakeCollector)
+
+    def launch_child(command):
+        assert cli.main(["--runtime-dir", str(tmp_path), "start", "--once"]) == 0
+        return FakeProcess()
+
+    try:
+        if marker == "supervised":
+            supervisor._launch(store, tmp_path, "python", launch_child, "trader", NOW)
+        else:
+            launch_child(None)
+        assert events == ["collector_started", "cycle", "collector_closed", "gateway_closed"]
+        assert store.get("recovery_required") == expected
+        assert store.get("control") == control
+        assert store.get("resume_authorized_day") == "2026-09-11"
+    finally:
+        store.close()
+
+
 def test_crash_restarts_after_30_seconds_not_immediately(tmp_path):
     clock = FakeClock()
 

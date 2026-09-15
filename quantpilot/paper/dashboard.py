@@ -727,7 +727,7 @@ function render(d){
     +'<div>진입 제한</div><div>'+esc(((r.entry_gates||{}).reasons||[]).join(', ')||'없음')+'</div>'
     +'<div>시세 수신</div><div>'+esc((r.feed||{}).state||'disabled')+' · 구독 '+num((r.feed||{}).acked_subscriptions||0,0)+'/40</div>'
     +'<div>API 예산</div><div>'+esc((r.api_budget||{}).state||'disabled')+' · 대기 '+num((r.api_budget||{}).queue_depth||0,0)+'</div>'
-    +'<div>자동 복구</div><div>'+esc((r.supervisor||{}).state||'disabled')+(r.recovery_required?' · 재시작 검증 중':'')+'</div>'
+    +'<div>자동 복구</div><div>'+esc((r.supervisor||{}).status||(r.supervisor||{}).state||'disabled')+(r.recovery_required?' · 재시작 검증 중':'')+'</div>'
     +'<div>종가 근거</div><div>'+esc((r.close_evidence||{}).valid?'확인':'미확인')+'</div>'
     +'<div>AI 실행기</div><div>'+esc(JSON.stringify(r.ai_runners||{}))+'</div>'
     +'<div>평가 모드</div><div>'+esc(r.assessment_mode)+'</div>'

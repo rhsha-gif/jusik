@@ -31,8 +31,14 @@ python -m quantpilot.paper --json report
 python -m quantpilot.paper --json review-drawdown --reason "<10자 이상>"
 python -m quantpilot.paper --json recancel --order <주문 id>
 python -m quantpilot.paper --json resolve-unknown --order <주문 id> --reason "<10자 이상>"
+python -m quantpilot.paper --json latency --day YYYY-MM-DD
 python -m quantpilot.paper --runtime-dir <원장 디렉터리> dashboard --port 8770
 ```
+
+`latency`는 읽기 전용이다. 주문 ID별로 봉 마감·로컬 관측·신호 계산·결정·대기 진입·송신 시작·응답·체결 인식
+(청산은 조건 최초 관측 포함) 시각을 잇는 `timeline:<주문 id>` 기록에서 구간별 p50/p95/p99와 누락 건수를 낸다.
+브로커 체결 시각은 측정하지 않는다. 잠정 목표는 청산 조건 관측→송신 5초, 진입 봉 마감→송신 30초이며
+실측 후 확정한다([프로토콜 재검토](plans/2026-09-15-trading-protocol-review.md)).
 
 `start`·`worker`·`reporter`는 `--once`로 한 주기만 실행할 수 있다. status·report·stabilize 미리보기·acceptance는 읽기 전용이며 없는 원장을 만들지 않는다. 제어·실행 명령에는 정확한 경로를 지정한다.
 
@@ -46,7 +52,17 @@ python -m quantpilot.paper --json config --expected-version 1 --set '{"data_mode
 
 설정 버전이 달라지면 갱신을 거절한다. 초기 자본은 고정이다. 기존 포지션의 손절·목표가·전략 버전은 진입 당시 값을 유지한다. 코드 규칙 변경은 새 버전으로 평가하며 기존 평가 결과를 승계하지 않는다.
 
+진입 평가는 종목별 확정 봉 단위다. 같은 확정 봉은 한 번만 평가하고, 분 안에 늦게 확정된 봉은 그 분에 바로
+평가한다(`evaluated_bar:<종목>`). 봉 마감 후 90초를 넘긴 신호는 `signal_stale` 감사만 남기고 주문하지 않는다.
+15초 확정 유예는 그대로다. 주문 POST 직전에는 저장된 전체 근거 만료(호가·잔고 스냅샷·위험 검사)와 잔고 관측
+나이를 다시 검사하며, 만료면 전송하지 않고 `queued_order_rejected`로 종결한다. 진입마다 `entry_net_target`
+(비용 반영 순목표수익, 계측 전용)과 당일 손절 후 재진입 여부 `reentry_after_stop`를 감사에 남기며 주문을 거절하지는 않는다.
+
 `pause`는 신규 진입을 막고 다음 실행 주기에서 진입 미체결을 취소한다. 손절·마감 처리는 계속한다. `flatten`은 전량 청산 요청이며 원장과 주문이 모두 비면 `paused`로 바뀐다. 시장 폐장·미체결·응답 불명 상태에서는 완료를 보고하지 않는다. 재시작해도 pause 상태를 유지한다.
+
+보호 매도(손절·목표·마감·격리)는 매수호가 지정가이며, 미체결이면 `exit_reissue_seconds`(기본 60, 10~60초) 뒤에
+취소하고 다음 주기에 다시 낸다. 매수 미체결은 60초 고정이다. 시험 프로필에서만 `config --set`으로 짧은 값을
+명시하고, 재발주 횟수는 `protective_sell_reissued` 감사로 센다.
 
 장 마감 처리가 끝나면 살아 있는 trader는 스스로 `paused`로 바꾼다(`auto_pause_after_close`, 기본 true, 감사 `auto_paused_after_close`). 다음 거래일 진입은 반드시 `resume`으로 명시해야 한다. 마감 시각에 trader가 죽어 있었다면 자동 pause가 기록되지 않으므로, 재시작 전에 `status`로 `control`을 확인하고 필요하면 `pause`한다.
 

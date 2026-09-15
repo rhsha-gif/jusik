@@ -1,5 +1,25 @@
 # QuantPilot 현재 상태 (living document)
 
+## 최근 완료 (2026-09-15, 매매 프로토콜 재검토 A 단계)
+
+전략 손실 진단(6건 -23,853원, 55%는 LG전자 체결 인식 실패·주말 이월)과 4-에이전트 독립 검토를 근거로
+매매 프로토콜을 세 lane(보호·대사·진입)으로 다시 정의하고, 사용자 인터뷰로 "운영 결함·안전 경계 먼저,
+속도 lane은 그 위에" 순서를 확정했다([프로토콜 재검토](plans/2026-09-15-trading-protocol-review.md)).
+"매크로"는 코드 안의 결정론적 보호 lane으로 정의했고 HTS 화면 자동화·시장가·브로커 스탑은 제외했다.
+LLM은 주문 경로에 없으므로 느린 원인은 단일 직렬 사이클과 REST 대사 결합이다.
+A 단계 구현: 주문 POST 직전 전체 근거(잔고 스냅샷 포함) 만료 재검사, 시계 분 대신 확정 봉 도착 기준
+종목별 1회 평가(봉 마감 후 90초 초과 신호는 `signal_stale` 폐기), 체결 인식→취소 미상→지연 체결→보호 매도
+→마감 격리→재시작 통합 시나리오 검증, 긴급취소 원주문 식별의 열 자리 0 인식, 주문 ID별 지연 타임라인과
+`latency` CLI·status·대시보드 보고, 계측 전용 감사(`entry_net_target`·`reentry_after_stop`·
+`protective_sell_reissued`), 보호 매도 재발주 간격 정책 `exit_reissue_seconds`(기본 60·매도만).
+정책 한도·live 플래그·시장가·브로커 모드는 변경하지 않았다.
+검증 pytest **1,905개 중 1,899 passed·3 skipped·3 failed** (junit; 실패 3건은 codex CLI 부재 환경의
+`test_paper_intelligence.py`로 변경 전 기준과 동일), smoke OK (broker mock, live 비활성, operator blocked),
+`tach check` 통과. 컨테이너 Linux 전용 venv에서 실행했고 Windows `verify-paper.py`는 사용자 PC 확인이 남아 있다.
+비차단 한계(라이브 준비 주장 아님): 지연 목표(손절 5초·진입 30초)는 잠정이며 A5 계측이 모인 뒤 판정한다.
+B 단계(체결통보 복호·HTS ID 장애 원인 분석 → 스트림 틱 보호 lane → 잔고만 대사로 15초 창 유지 → legacy 순목표수익
+게이트)는 설계만 문서화했고 A 인수 후 구현한다. 손실을 지연 탓으로 확정하지 않는다.
+
 ## 최근 완료 (2026-09-12, 모의투자 단타 점검·무인 안전망)
 
 fable 독립 에이전트 4개(내부 감사 2, KIS 오픈소스 대조 2)로 CLI 모의운용 하네스를 점검하고
@@ -68,7 +88,7 @@ Slack 수정 후 최종 검증 **1,489 passed·2 skipped**, smoke·tach 통과.
 
 > 이 문서는 시점별 보고서가 아니라 **갱신형 현황판**입니다.
 > 스테이지가 끝날 때마다 이 파일을 덮어쓰고, 상세 근거는 기존 `docs/*_report.md`에 남깁니다.
-> 마지막 갱신: **2026-09-14**
+> 마지막 갱신: **2026-09-15**
 
 ## 목적 (한 줄)
 
@@ -78,7 +98,7 @@ Slack 수정 후 최종 검증 **1,489 passed·2 skipped**, smoke·tach 통과.
 
 | 영역 | 상태 | 비고 |
 |---|---|---|
-| CLI 모의운용 하네스 | 🟡 점검·안전망 반영, 실제 청산 대기 | `quantpilot.paper`; 2026-09-12 감사 high 5건 수정·운영자 해소 명령·세대 무관 손실 한도·자동 pause·로그/liveness 반영, 9/14 새 코드로 재시작(`paused`). 다음 세션 청산·Docker 인수는 미완료 |
+| CLI 모의운용 하네스 | 🟡 프로토콜 A 단계 반영, 계측 수집 대기 | `quantpilot.paper`; 2026-09-12 감사 high 5건 수정·운영자 해소 명령·세대 무관 손실 한도·자동 pause·로그/liveness 반영, 9/14 새 코드로 재시작. 2026-09-15 손실 진단 우선순위 1(근거 만료 재검사·확정 봉 도착 평가·체결 인식 통합 검증)과 지연 계측 반영, 운영 적용·4거래일 인수·Docker 인수는 미완료 |
 | 모의운용 읽기 전용 대시보드 | ✅ 완료 (2026-09-11) | `quantpilot.paper dashboard`, loopback 전용, 원장 `mode=ro`, 제어 없음 |
 | 구형 웹 클라이언트 | 제거 완료 | 2026-09-10 승인 목록 59개 삭제; 아래 Level·UI 관련 항목은 구형 구현의 역사적 상태 |
 | Level 1-2 신호→제안/모의체결 | ✅ 완료 | `/run` 제안 전용, `/mock-execute` MockBroker 체결 + 타이밍 판단 요약 |
@@ -361,6 +381,9 @@ Slack 수정 후 최종 검증 **1,489 passed·2 skipped**, smoke·tach 통과.
    취소 자식 행 표현·동시호가 호가 갱신(9/14 이후 시험운영에서 관측)
 6. 시험운영 감사 집계: `cycle_failed`의 `broker_code=EGW*`, `manual_resolution_required`,
    `recancel`/`resolve-unknown` 사용 빈도가 주 1회를 넘기면 조건부 자동 재시도 설계 재검토
+6-1. 매매 프로토콜 B 단계([설계](plans/2026-09-15-trading-protocol-review.md) §5): 체결통보 복호·HTS ID
+   장애 원인 분석 → 스트림 틱 보호 lane → 잔고만 대사로 15초 허가 창 유지 → legacy 순목표수익 게이트.
+   A 단계 `latency` 계측 며칠분과 `entry_net_target` 거절률 예측이 먼저 필요하다
 7. 감사 후순위 발견(F9 forwarding ID 지연 인시던트, F10 대사 예외 격리, F11 휴장일 대안,
    F13 CLI 오류 메시지·빈 원장 생성, F14 취소 루프 상한)과 게이트 권고 SG-02(`KisBuyingPower` 시각)
 8. 제품 backlog: 승인 기준 확정, `conflict_rule`/상관 예산, capital_epoch 원장,

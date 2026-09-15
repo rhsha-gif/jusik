@@ -435,6 +435,11 @@ class Runtime:
                                        and 0 <= (self.clock() - datetime.fromisoformat(self.store.get("data:" + symbol)["last_bar"])).total_seconds() <= 150
                                        for symbol in self.store.get("universe", [])) and bool(self.store.get("universe")))
                 if reconciled and self.store.get("day_base_valid") and budget["available"] and data_ready:
+                    # A supervised restart into explicit REST mode can retire the
+                    # obsolete stream outage only after its normal recovery proof.
+                    if (not policy.hybrid_feed_enabled and self.feed is None
+                            and self.store.get("incidents", {}).get("feed", {}).get("reason_code") == "feed_unavailable"):
+                        recover_incident(self.store, "feed", self.clock())
                     self.store.put("recovery_required", False)
                     self.store.audit("restart_reconciled", {"day": day}, self.clock())
                 else:

@@ -114,7 +114,9 @@ class PaperMarket:
                 "FID_COND_MRKT_DIV_CODE": "J",
                 "FID_INPUT_ISCD": symbol_code(symbol),
                 "FID_INPUT_HOUR_1": now.astimezone(KST).strftime("%H%M%S"),
-                "FID_PW_DATA_INCU_YN": "Y",
+                # At the open, Y pads the response with prior-day rows. Request
+                # today's rows only; the parser still rejects off-day data.
+                "FID_PW_DATA_INCU_YN": "N",
                 "FID_ETC_CLS_CODE": "",
             },
         )
